@@ -1,6 +1,6 @@
 # 配置[**SourceTree**](https://www.sourcetreeapp.com/)自定义脚本
 
-![Jobs倾情奉献](https://picsum.photos/1500/400 "Jobs出品，必属精品")
+![Jobs出品，必属精品](https://picsum.photos/1500/400)
 
 [toc]
 

@@ -1,6 +1,6 @@
 # `【MacOS@SourceTree】🐦Flutter重新拉取第三方依赖.command`
 
-![Jobs倾情奉献](https://picsum.photos/1500/400 "Jobs出品，必属精品")
+![Jobs出品，必属精品](https://picsum.photos/1500/400)
 
 [toc]
 
