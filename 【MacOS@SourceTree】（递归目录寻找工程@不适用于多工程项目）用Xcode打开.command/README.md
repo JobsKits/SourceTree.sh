@@ -1,6 +1,6 @@
 # `【MacOS@SourceTree】（递归目录寻找工程@不适用于多工程项目）用Xcode打开.command`
 
-![Jobs倾情奉献](https://picsum.photos/1500/400 "Jobs出品，必属精品")
+![Jobs出品，必属精品](https://picsum.photos/1500/400)
 
 [toc]
 
