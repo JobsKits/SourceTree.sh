@@ -14,7 +14,9 @@
 
 ```shell
 npx wrangler login
-npx wrangler deploy
+npx wrangler kv namespace list
+npx wrangler kv namespace create JobsGo   # 仅在 JobsGo 不存在时执行
+npx wrangler deploy --config .wrangler.jobs.local.toml
 ```
 
 但 SourceTree 自定义操作窗口不是稳定的 OAuth 登录环境，也不适合执行 `brew update`、`brew upgrade`、`npm install -g` 这类工具链变更。因此当前脚本拆成两种模式：
@@ -25,6 +27,8 @@ npx wrangler deploy
 | SourceTree 自定义操作 | 校验仓库、检查工具链、部署 | 否 | 否 |
 
 核心原则：**终端负责初始化，SourceTree 只负责部署。**
+
+本版已经把 edgetunnel 的 KV 绑定自动化：部署前会检查 `KV` 绑定，默认查找或创建名为 `JobsGo` 的 KV 命名空间，并生成 `.wrangler.jobs.local.toml` 作为本地部署配置。原始 `wrangler.toml` 不会被改脏，避免后续同步上游代码时产生不必要冲突。
 
 ---
 
@@ -80,7 +84,8 @@ npx wrangler deploy
 | 工具链准备 | 安装缺失的 `Homebrew`、`Node.js`、`npm`、`npx`、`wrangler`；已有工具的升级/更新操作需手动确认 |
 | Gatekeeper 修复 | 清理 `wrangler` / `esbuild` 相关 `com.apple.quarantine` 标记 |
 | Cloudflare 登录 | 未登录时执行 `wrangler login` |
-| 部署 | 执行 `wrangler deploy` |
+| KV 自动绑定 | 检查 `KV` 绑定；默认查找/创建 `JobsGo`；生成 `.wrangler.jobs.local.toml` |
+| 部署 | 执行 `wrangler deploy --config .wrangler.jobs.local.toml` |
 
 升级/更新类操作默认不执行。看到下面这类提示时：
 
@@ -116,6 +121,7 @@ npx wrangler deploy
 - `参数` 必须是 `$REPO`，这样 SourceTree 才会把当前仓库路径传给脚本。
 - SourceTree 模式不会执行 `brew update`、`brew upgrade node`、`npm install -g npm@latest`、`npm install -g wrangler@latest`。
 - SourceTree 模式不会执行 `wrangler login`，只会用 `wrangler whoami --json` 检查是否已经登录。
+- SourceTree 模式会自动检查/生成 KV 绑定配置，不再需要手动修改 Cloudflare Dashboard 或 `wrangler.toml`。
 
 ---
 
@@ -155,8 +161,10 @@ xattr -dr com.apple.quarantine "/Users/jobs/SourceTree.sh/【MacOS@SourceTree】
 终端模式会按需执行：
 
 ```shell
-npx wrangler login
-npx wrangler deploy
+wrangler login
+wrangler kv namespace list
+wrangler kv namespace create JobsGo       # 仅在 JobsGo 不存在时执行
+wrangler deploy --config .wrangler.jobs.local.toml
 ```
 
 如果本机或项目里已经能解析到 `wrangler`，脚本也会优先使用已有 `wrangler` 命令，避免重复触发 `npx` 的临时安装逻辑。
@@ -178,7 +186,9 @@ SourceTree 模式只执行检查和部署：
 
 ```shell
 wrangler whoami --json
-wrangler deploy
+wrangler kv namespace list
+wrangler kv namespace create JobsGo       # 仅在 JobsGo 不存在时执行
+wrangler deploy --config .wrangler.jobs.local.toml
 ```
 
 这里的 `wrangler` 会优先取：
@@ -220,11 +230,13 @@ flowchart TD
     H --> I{是否为可交互终端}
     I -- 是 --> J[安装缺失项，升级/更新需确认]
     J --> K[必要时执行 wrangler login]
-    K --> L[wrangler deploy]
+    K --> K2[自动确认 KV 命名空间与 binding=KV]
+    K2 --> K3[生成 .wrangler.jobs.local.toml]
+    K3 --> L[wrangler deploy --config .wrangler.jobs.local.toml]
     I -- 否 --> M[SourceTree 模式：只检查工具链]
     M --> N{wrangler whoami 是否通过}
     N -- 否 --> X2[提示先到终端完成登录]
-    N -- 是 --> L
+    N -- 是 --> K2
     L --> P[完成]
 ```
 
@@ -334,6 +346,38 @@ chmod +x "/Users/jobs/SourceTree.sh/【MacOS@SourceTree】同步edgetunnel代码
 
 完成 `wrangler login` 后，再回到 SourceTree 点自定义菜单。
 
+
+### 7.7、为什么不直接改 `wrangler.toml`？
+
+`wrangler.toml` 是上游仓库里的跟踪文件。直接把 KV id 写进去虽然能解决部署问题，但后续同步 `cmliu/edgetunnel` 时，如果上游也改了这个文件，容易出现本地改动阻塞拉取或产生冲突。
+
+新版脚本改成：
+
+```text
+读取原始 wrangler.toml
+自动追加 binding = "KV" 和 KV namespace id
+写入本地生成文件 .wrangler.jobs.local.toml
+使用 wrangler deploy --config .wrangler.jobs.local.toml 部署
+```
+
+`.wrangler.jobs.local.toml` 会自动加入 `.git/info/exclude`，不参与提交，也不污染上游同步。
+
+自定义 KV 名称可以使用下面任一方式，优先级从高到低：
+
+```shell
+EDGETUNNEL_KV_NAMESPACE_TITLE=JobsGo
+EDGETUNNEL_KV_NAMESPACE=JobsGo
+JOBS_EDGETUNNEL_KV_NAMESPACE=JobsGo
+```
+
+也可以在仓库根目录放一个本地文件：
+
+```text
+.edgetunnel-kv-namespace
+```
+
+文件第一行写 KV 命名空间名称即可。默认值仍然是 `JobsGo`。
+
 ---
 
 ## 八、风险说明 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
@@ -346,7 +390,10 @@ chmod +x "/Users/jobs/SourceTree.sh/【MacOS@SourceTree】同步edgetunnel代码
 - `brew update`、`brew upgrade node`、`npm install -g npm@latest`、`npm install -g wrangler@latest` 等升级/更新类操作需要手动确认，不会默认执行。
 - 可能清理 `wrangler` / `esbuild` 相关目录的 `com.apple.quarantine` 标记。
 - 会执行 Cloudflare 登录流程。
-- 会执行 `wrangler deploy`，部署线上 Worker。
+- 会读取 Cloudflare KV 命名空间列表。
+- 找不到默认 KV 命名空间 `JobsGo` 时，会自动创建 KV 命名空间。
+- 会在仓库根目录生成 `.wrangler.jobs.local.toml`，并加入 `.git/info/exclude`。
+- 会执行 `wrangler deploy --config .wrangler.jobs.local.toml`，部署线上 Worker。
 - 如果仓库内 `package.json` 已声明 `wrangler`，可能修改本仓库依赖版本。
 
 SourceTree 模式会执行以下动作：
@@ -354,7 +401,8 @@ SourceTree 模式会执行以下动作：
 - 校验仓库。
 - 检查已有工具链。
 - 检查 Cloudflare 登录状态。
-- 执行 `wrangler deploy`。
+- 检查/生成 KV 绑定配置。
+- 执行 `wrangler deploy --config .wrangler.jobs.local.toml`。
 
 不确认 Cloudflare 账号、目标项目和当前仓库时，不要执行。
 
@@ -372,7 +420,9 @@ brew upgrade node
 npm install -g npm@latest
 npm install -g wrangler@latest
 wrangler login
-wrangler deploy
+wrangler kv namespace list
+wrangler kv namespace create JobsGo
+wrangler deploy --config .wrangler.jobs.local.toml
 ```
 
 建议在本机执行前先做静态检查：

@@ -56,6 +56,7 @@ REPO_INPUT_SOURCE=""
 MATCHED_REMOTE=""
 WRANGLER_BIN=""
 WRANGLER_LABEL=""
+WRANGLER_CONFIG_FOR_DEPLOY=""
 PLAIN_OUTPUT=0
 
 # ============================== 输出模式 / 彩色日志 ==============================
@@ -150,7 +151,7 @@ show_readme_and_wait() {
   note_echo "脚本名称：${SCRIPT_BASENAME}.command"
   note_echo "脚本路径：${SCRIPT_PATH}"
   note_echo "运行入口：兼容系统终端双击运行和 Sourcetree 自定义动作运行。"
-  note_echo "核心行为：按脚本名称执行对应的 SourceTree 效率动作，运行前会先展示这段内置自述，避免误触。"
+  note_echo "核心行为：同步 edgetunnel 后自动确认 Cloudflare KV 绑定，并执行 Worker 部署。"
   note_echo "环境策略：系统终端保留清屏、彩色输出和回车确认；Sourcetree 瘦身环境自动跳过清屏和等待，并输出纯文本日志。"
   note_echo "文档关系：同目录 README.md 只作为外部说明文档保留，运行时自述不读取、不拼接、不依赖 README.md。"
   warn_echo "继续前请确认 SourceTree 传入路径、当前仓库或拖入路径正确；按 Ctrl+C 可以取消。"
@@ -707,13 +708,339 @@ ensure_wrangler_auth() {
   die "SourceTree 非交互环境未检测到有效登录状态，请先在终端/双击模式完成 wrangler login。"
 }
 
+capture_wrangler_cmd_to_file() {
+  local title="$1"
+  local output_file="$2"
+  shift 2
+
+  info_echo "$title"
+  if [[ -n "$WRANGLER_BIN" ]]; then
+    gray_echo "命令：$WRANGLER_BIN $*"
+    "$WRANGLER_BIN" "$@" > "$output_file" 2>&1
+  else
+    gray_echo "命令：npx wrangler $*"
+    npx wrangler "$@" > "$output_file" 2>&1
+  fi
+
+  local code=$?
+  if [[ -s "$output_file" ]]; then
+    cat "$output_file" | strip_ansi_stream >> "$LOG_FILE"
+  fi
+
+  if [[ $code -ne 0 ]]; then
+    error_echo "命令执行失败：$title"
+    return $code
+  fi
+
+  return 0
+}
+
+resolve_edgetunnel_kv_namespace_title() {
+  local title=""
+  local config_file="${REPO_ROOT}/.edgetunnel-kv-namespace"
+
+  if [[ -n "${EDGETUNNEL_KV_NAMESPACE_TITLE:-}" ]]; then
+    title="$EDGETUNNEL_KV_NAMESPACE_TITLE"
+  elif [[ -n "${EDGETUNNEL_KV_NAMESPACE:-}" ]]; then
+    title="$EDGETUNNEL_KV_NAMESPACE"
+  elif [[ -n "${JOBS_EDGETUNNEL_KV_NAMESPACE:-}" ]]; then
+    title="$JOBS_EDGETUNNEL_KV_NAMESPACE"
+  elif [[ -f "$config_file" ]]; then
+    title="$(grep -vE '^\s*(#|$)' "$config_file" 2>/dev/null | head -n 1 || true)"
+  fi
+
+  title="$(strip_outer_quotes "${title:-}")"
+  [[ -n "$title" ]] || title="JobsGo"
+  print -r -- "$title"
+}
+
+kv_namespace_lookup_from_json() {
+  local json_file="$1"
+  local lookup_mode="$2"
+  local lookup_value="$3"
+  local output_field="$4"
+
+  [[ -f "$json_file" ]] || return 1
+
+  KV_JSON_FILE="$json_file" \
+  KV_LOOKUP_MODE="$lookup_mode" \
+  KV_LOOKUP_VALUE="$lookup_value" \
+  KV_OUTPUT_FIELD="$output_field" \
+  node <<'NODE'
+const fs = require('fs');
+const file = process.env.KV_JSON_FILE;
+const mode = process.env.KV_LOOKUP_MODE || 'any';
+const value = process.env.KV_LOOKUP_VALUE || '';
+const output = process.env.KV_OUTPUT_FIELD || 'id';
+const raw = fs.readFileSync(file, 'utf8').trim();
+
+function collect(input) {
+  if (!input) return [];
+  if (Array.isArray(input)) return input.flatMap(collect);
+  if (typeof input !== 'object') return [];
+
+  const picked = [];
+  if (input.id || input.title || input.name) picked.push(input);
+
+  for (const key of ['result', 'results', 'namespaces', 'namespace', 'kv_namespaces', 'kv_namespace']) {
+    if (input[key]) picked.push(...collect(input[key]));
+  }
+
+  return picked;
+}
+
+function field(item, name) {
+  if (!item) return '';
+  if (name === 'title') return String(item.title || item.name || '');
+  if (name === 'id') return String(item.id || '');
+  return String(item[name] || '');
+}
+
+function selectFromItems(items) {
+  let item;
+  if (mode === 'title') {
+    item = items.find(x => field(x, 'title') === value) ||
+           items.find(x => field(x, 'title').toLowerCase() === value.toLowerCase());
+  } else if (mode === 'id') {
+    item = items.find(x => field(x, 'id') === value);
+  } else {
+    item = items.find(x => field(x, 'id'));
+  }
+  return field(item, output);
+}
+
+function tryJsonParse(text) {
+  const candidates = [text];
+  const firstArray = text.indexOf('[');
+  const lastArray = text.lastIndexOf(']');
+  if (firstArray >= 0 && lastArray > firstArray) candidates.push(text.slice(firstArray, lastArray + 1));
+  const firstObj = text.indexOf('{');
+  const lastObj = text.lastIndexOf('}');
+  if (firstObj >= 0 && lastObj > firstObj) candidates.push(text.slice(firstObj, lastObj + 1));
+
+  for (const candidate of candidates) {
+    try {
+      const result = selectFromItems(collect(JSON.parse(candidate)));
+      if (result) return result;
+    } catch (_) {}
+  }
+  return '';
+}
+
+function tryTextParse(text) {
+  const idRe = /\b[a-f0-9]{32}\b/i;
+  const lines = text.split(/\r?\n/);
+
+  if (mode === 'id') {
+    const line = lines.find(x => x.includes(value));
+    if (!line) return '';
+    if (output === 'id') return value;
+    if (output === 'title') return '已存在';
+    return value;
+  }
+
+  if (mode === 'title') {
+    const matched = lines.find(x => x.toLowerCase().includes(value.toLowerCase()) && idRe.test(x));
+    const id = matched && matched.match(idRe)?.[0];
+    if (id && output === 'id') return id;
+    if (id && output === 'title') return value;
+  }
+
+  const id = text.match(idRe)?.[0] || '';
+  if (!id) return '';
+  if (output === 'id') return id;
+  if (output === 'title') return value || '已创建';
+  return id;
+}
+
+if (!raw) process.exit(1);
+const result = tryJsonParse(raw) || tryTextParse(raw);
+if (!result) process.exit(1);
+process.stdout.write(result);
+NODE
+}
+
+extract_active_kv_binding_id_from_toml() {
+  local toml_file="$1"
+  [[ -f "$toml_file" ]] || return 1
+
+  WRANGLER_TOML_FILE="$toml_file" node <<'NODE'
+const fs = require('fs');
+const file = process.env.WRANGLER_TOML_FILE;
+const text = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
+const lines = text.split('\n');
+const tableHeader = line => /^\s*\[.*\]\s*(?:#.*)?$/.test(line) && !/^\s*#/.test(line);
+const kvHeader = line => /^\s*\[\[kv_namespaces\]\]\s*(?:#.*)?$/.test(line) && !/^\s*#/.test(line);
+const unquote = value => value.replace(/^\s*['"]?/, '').replace(/['"]?\s*$/, '').trim();
+
+for (let i = 0; i < lines.length; i++) {
+  if (!kvHeader(lines[i])) continue;
+
+  let j = i + 1;
+  while (j < lines.length && !tableHeader(lines[j])) j++;
+  const block = lines.slice(i, j);
+  const hasKVBinding = block.some(line => /^\s*binding\s*=\s*['"]KV['"]\s*(?:#.*)?$/.test(line));
+  if (!hasKVBinding) continue;
+
+  const idLine = block.find(line => /^\s*id\s*=/.test(line));
+  if (!idLine) process.exit(1);
+  const id = unquote(idLine.split('=').slice(1).join('='));
+  if (!id) process.exit(1);
+  process.stdout.write(id);
+  process.exit(0);
+}
+
+process.exit(1);
+NODE
+}
+
+add_local_git_exclude() {
+  local pattern="$1"
+  local exclude_file=""
+
+  exclude_file="$(git -C "$REPO_ROOT" rev-parse --git-path info/exclude 2>/dev/null || true)"
+  [[ -n "$exclude_file" ]] || return 0
+
+  mkdir -p "$(dirname "$exclude_file")" 2>/dev/null || true
+  touch "$exclude_file" 2>/dev/null || true
+
+  if [[ -f "$exclude_file" ]] && ! grep -qxF "$pattern" "$exclude_file" 2>/dev/null; then
+    printf '\n%s\n' "$pattern" >> "$exclude_file" 2>/dev/null || true
+  fi
+}
+
+generate_wrangler_config_with_kv_binding() {
+  local namespace_id="$1"
+  local source_toml="${REPO_ROOT}/wrangler.toml"
+  local target_toml="${REPO_ROOT}/.wrangler.jobs.local.toml"
+
+  [[ -f "$source_toml" ]] || die "未找到 wrangler.toml：$source_toml"
+  [[ -n "$namespace_id" ]] || die "KV namespace id 为空，无法生成部署配置。"
+
+  WRANGLER_TOML_SOURCE="$source_toml" \
+  WRANGLER_TOML_TARGET="$target_toml" \
+  KV_NAMESPACE_ID="$namespace_id" \
+  node <<'NODE' || return 1
+const fs = require('fs');
+const source = process.env.WRANGLER_TOML_SOURCE;
+const target = process.env.WRANGLER_TOML_TARGET;
+const namespaceId = process.env.KV_NAMESPACE_ID;
+
+const text = fs.readFileSync(source, 'utf8').replace(/\r\n/g, '\n');
+let lines = text.split('\n');
+if (lines.length && lines[lines.length - 1] === '') lines.pop();
+
+const tableHeader = line => /^\s*\[.*\]\s*(?:#.*)?$/.test(line) && !/^\s*#/.test(line);
+const kvHeader = line => /^\s*\[\[kv_namespaces\]\]\s*(?:#.*)?$/.test(line) && !/^\s*#/.test(line);
+const out = [];
+
+for (let i = 0; i < lines.length;) {
+  if (kvHeader(lines[i])) {
+    let j = i + 1;
+    while (j < lines.length && !tableHeader(lines[j])) j++;
+    const block = lines.slice(i, j);
+    const hasKVBinding = block.some(line => /^\s*binding\s*=\s*['"]KV['"]\s*(?:#.*)?$/.test(line));
+    if (hasKVBinding) {
+      i = j;
+      continue;
+    }
+  }
+
+  out.push(lines[i]);
+  i++;
+}
+
+while (out.length && out[out.length - 1].trim() === '') out.pop();
+if (out.length) out.push('');
+out.push('# 自动由脚本生成：edgetunnel 代码读取 env.KV');
+out.push('[[kv_namespaces]]');
+out.push('binding = "KV"');
+out.push(`id = "${namespaceId}"`);
+
+fs.writeFileSync(target, out.join('\n') + '\n', 'utf8');
+NODE
+
+  [[ $? -eq 0 ]] || die "生成本地 Wrangler 部署配置失败。"
+  WRANGLER_CONFIG_FOR_DEPLOY="$target_toml"
+  add_local_git_exclude ".wrangler.jobs.local.toml"
+  success_echo "已生成本地部署配置：$target_toml"
+  gray_echo "说明：原始 wrangler.toml 不会被改脏；部署时使用 --config .wrangler.jobs.local.toml。"
+}
+
+ensure_edgetunnel_kv_binding() {
+  highlight_echo "============================== Cloudflare KV Binding ============================="
+
+  local source_toml="${REPO_ROOT}/wrangler.toml"
+  local generated_toml="${REPO_ROOT}/.wrangler.jobs.local.toml"
+  [[ -f "$source_toml" ]] || die "未找到 wrangler.toml：$source_toml"
+
+  local namespace_title=""
+  local namespace_id=""
+  local existing_id=""
+  local existing_title=""
+  local list_log="/tmp/${SCRIPT_BASENAME}.kv-list.log"
+  local create_log="/tmp/${SCRIPT_BASENAME}.kv-create.log"
+
+  namespace_title="$(resolve_edgetunnel_kv_namespace_title)"
+  gray_echo "目标 KV 命名空间名称：$namespace_title"
+  gray_echo "目标 Worker 绑定变量名：KV"
+
+  capture_wrangler_cmd_to_file "读取 Cloudflare KV 命名空间列表" "$list_log" kv namespace list || die "读取 Cloudflare KV 命名空间列表失败。"
+
+  existing_id="$(extract_active_kv_binding_id_from_toml "$source_toml" 2>/dev/null || true)"
+  if [[ -z "$existing_id" && -f "$generated_toml" ]]; then
+    existing_id="$(extract_active_kv_binding_id_from_toml "$generated_toml" 2>/dev/null || true)"
+    [[ -n "$existing_id" ]] && gray_echo "已从上次自动生成的本地部署配置读取 KV id：$existing_id"
+  fi
+
+  if [[ -n "$existing_id" ]]; then
+    existing_title="$(kv_namespace_lookup_from_json "$list_log" id "$existing_id" title 2>/dev/null || true)"
+    if [[ -n "$existing_title" ]]; then
+      success_echo "已检测到有效 KV 绑定：KV -> ${existing_title} (${existing_id})"
+      generate_wrangler_config_with_kv_binding "$existing_id"
+      return 0
+    fi
+
+    warn_echo "已记录的 KV id 未在当前 Cloudflare 账号下找到：$existing_id"
+    warn_echo "将改用命名空间名称 ${namespace_title} 自动修复本次部署配置。"
+  fi
+
+  namespace_id="$(kv_namespace_lookup_from_json "$list_log" title "$namespace_title" id 2>/dev/null || true)"
+
+  if [[ -z "$namespace_id" ]]; then
+    warn_echo "未找到 KV 命名空间：$namespace_title，将自动创建。"
+    capture_wrangler_cmd_to_file "创建 Cloudflare KV 命名空间" "$create_log" kv namespace create "$namespace_title" || die "创建 Cloudflare KV 命名空间失败：$namespace_title"
+
+    namespace_id="$(kv_namespace_lookup_from_json "$create_log" title "$namespace_title" id 2>/dev/null || true)"
+    [[ -n "$namespace_id" ]] || namespace_id="$(kv_namespace_lookup_from_json "$create_log" any "" id 2>/dev/null || true)"
+
+    if [[ -z "$namespace_id" ]]; then
+      warn_echo "创建命令未直接返回可解析 id，将重新读取命名空间列表确认。"
+      capture_wrangler_cmd_to_file "重新读取 Cloudflare KV 命名空间列表" "$list_log" kv namespace list || die "重新读取 Cloudflare KV 命名空间列表失败。"
+      namespace_id="$(kv_namespace_lookup_from_json "$list_log" title "$namespace_title" id 2>/dev/null || true)"
+    fi
+  else
+    success_echo "已找到 KV 命名空间：$namespace_title (${namespace_id})"
+  fi
+
+  [[ -n "$namespace_id" ]] || die "无法取得 KV 命名空间 id：$namespace_title"
+
+  generate_wrangler_config_with_kv_binding "$namespace_id"
+  success_echo "KV 绑定已就绪：binding = KV，namespace = ${namespace_title}，id = ${namespace_id}"
+}
+
 run_wrangler_deploy() {
   export npm_config_yes="true"
 
   ensure_wrangler_auth
+  ensure_edgetunnel_kv_binding
 
   highlight_echo "============================== Wrangler Deploy ============================="
-  run_wrangler_cmd "执行 Cloudflare 部署" deploy || die "wrangler deploy 执行失败。"
+  if [[ -n "$WRANGLER_CONFIG_FOR_DEPLOY" ]]; then
+    run_wrangler_cmd "执行 Cloudflare 部署" deploy --config "$WRANGLER_CONFIG_FOR_DEPLOY" || die "wrangler deploy 执行失败。"
+  else
+    run_wrangler_cmd "执行 Cloudflare 部署" deploy || die "wrangler deploy 执行失败。"
+  fi
 }
 
 # ============================== 主流程 ==============================
