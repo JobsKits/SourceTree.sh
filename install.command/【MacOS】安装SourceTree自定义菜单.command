@@ -64,42 +64,27 @@ cleanup_runtime_dir() {
 trap cleanup_runtime_dir EXIT
 
 show_readme_and_wait() {
-    bold_echo "=================================================="
-    bold_echo "SourceTree 自定义操作 actions.plist 安装脚本"
-    bold_echo "=================================================="
-    note_echo "脚本路径：${SCRIPT_PATH}"
-    note_echo "源项目目录：${SOURCE_PROJECT_ROOT}"
-    note_echo "固定部署目录：${DEPLOY_PROJECT_ROOT}"
-    note_echo "SourceTree 配置文件：${TARGET_ACTIONS_PLIST}"
-    note_echo "日志文件：${LOG_FILE}"
-    gray_echo ""
-    highlight_echo "【脚本用途】"
-    gray_echo "把当前脚本包部署到当前用户根目录下的固定位置，然后安装 SourceTree 自定义菜单。"
-    gray_echo "在本机用户 jobs 下，固定部署目录就是："
-    gray_echo "  /Users/jobs/SourceTree.sh"
-    gray_echo ""
-    highlight_echo "【已适配的新目录结构】"
-    gray_echo "每个 .command 均按独立同名文件夹管理："
-    gray_echo "  SourceTree.sh/脚本.command/脚本.command"
-    gray_echo "  SourceTree.sh/脚本.command/README.md"
-    gray_echo ""
-    highlight_echo "【安装行为】"
-    gray_echo "1. 校验当前包内 ${INSTALL_DIR_NAME}/actions.plist 模板。"
-    gray_echo "2. 校验当前包内业务 .command/同名.command/README.md 结构。"
-    gray_echo "3. 将脚本包复制/覆盖部署到：${DEPLOY_PROJECT_ROOT}"
-    gray_echo "4. 基于部署后的目录生成运行时 actions.plist。"
-    gray_echo "5. SourceTree 菜单路径统一指向：${DEPLOY_PROJECT_ROOT}/脚本.command/脚本.command"
-    gray_echo "6. 覆盖安装到：${TARGET_ACTIONS_PLIST}"
-    gray_echo "7. 仅当 actions.plist 发生变化时，自动重启 SourceTree。"
-    gray_echo ""
-    highlight_echo "【注意事项】"
-    gray_echo "1. 不要使用 sudo 运行本脚本，否则 HOME 会变成 root，部署位置会错误。"
-    gray_echo "2. 本脚本不会让 SourceTree 菜单指向当前解压目录或代码目录。"
-    gray_echo "3. 若目标 actions.plist 已存在且内容不同，会先自动备份再覆盖。"
-    gray_echo "4. 部署脚本包时会覆盖同名业务脚本文件夹和 ${INSTALL_DIR_NAME}，不会主动删除目标目录里的额外文件。"
-    gray_echo ""
-    warm_echo "请确认以上内容无误。按回车继续，按 Ctrl+C 取消执行。"
-    read -r
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
+    clear
+  fi
+
+  highlight_echo "============================== 脚本内置自述 =============================="
+  note_echo "脚本名称：${SCRIPT_BASENAME}.command"
+  note_echo "脚本路径：${SCRIPT_PATH}"
+  note_echo "运行入口：兼容系统终端双击运行和 Sourcetree 自定义动作运行。"
+  note_echo "核心行为：按脚本名称执行对应的 SourceTree 效率动作，运行前会先展示这段内置自述，避免误触。"
+  note_echo "环境策略：系统终端保留清屏、彩色输出和回车确认；Sourcetree 瘦身环境自动跳过清屏和等待，并输出纯文本日志。"
+  note_echo "文档关系：同目录 README.md 只作为外部说明文档保留，运行时自述不读取、不拼接、不依赖 README.md。"
+  warn_echo "继续前请确认 SourceTree 传入路径、当前仓库或拖入路径正确；按 Ctrl+C 可以取消。"
+  gray_echo "日志文件：${LOG_FILE}"
+  highlight_echo "======================================================================="
+  echo ""
+
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 0 ]]; then
+    read "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..."
+  else
+    gray_echo "当前为 Sourcetree 或非交互输入环境，已跳过回车等待。"
+  fi
 }
 
 wait_for_enter() {

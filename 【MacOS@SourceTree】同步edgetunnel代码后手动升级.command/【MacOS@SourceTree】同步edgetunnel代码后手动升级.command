@@ -6,9 +6,44 @@ set -o pipefail 2>/dev/null || true
 # ============================== 基础路径 ==============================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-${(%):-%x}}")" && pwd)"
 SCRIPT_PATH="${SCRIPT_DIR}/$(basename -- "$0")"
-SCRIPT_BASENAME=$(basename "$0" | sed 's/\.[^.]*$//')
+SCRIPT_BASENAME="$(basename "$SCRIPT_PATH" | sed 's/\.[^.]*$//')"
 LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"
 : > "$LOG_FILE"
+
+# 识别 Sourcetree 自定义动作的瘦身运行环境，系统终端双击运行不降级。
+is_sourcetree_runtime() {
+  env | grep -Eqi '^SOURCETREE|^SOURCE_TREE' && return 0
+  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/SourceTree.sh/"* ]] && return 0
+  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/Documents/Github/JobsGenesis/SourceTree.sh/"* ]] && return 0
+
+  local pid="$PPID"
+  local command_name=""
+  local guard=0
+  while [[ -n "$pid" && "$pid" != "0" && "$guard" -lt 8 ]]; do
+    command_name="$(ps -o comm= -p "$pid" 2>/dev/null || true)"
+    [[ "$command_name" == *SourceTree* || "$command_name" == *Sourcetree* ]] && return 0
+    pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+    guard=$((guard + 1))
+  done
+
+  return 1
+}
+
+IS_SOURCETREE_RUNTIME=0
+is_sourcetree_runtime && IS_SOURCETREE_RUNTIME=1
+
+[[ -n "${TERM:-}" ]] || export TERM="dumb"
+SOURCETREE_PLAIN_OUTPUT=0
+if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" ]]; then
+  SOURCETREE_PLAIN_OUTPUT=1
+  export NO_COLOR="${NO_COLOR:-1}"
+  export CLICOLOR="0"
+  export ANSI_COLORS_DISABLED="1"
+fi
+
+strip_ansi_text() {
+  perl -pe 's/\e\[[0-9;]*[[:alpha:]]//g'
+}
 
 EXPECTED_OWNER="cmliu"
 EXPECTED_REPO="edgetunnel"
@@ -107,21 +142,27 @@ run_interactive_cmd() {
 }
 
 show_readme_and_wait() {
-  [[ "${SKIP_README:-0}" == "1" ]] && return 0
-  [[ -t 0 ]] || return 0
-
-  local readme_path="${SCRIPT_DIR}/README.md"
-  clear
-  if [[ -f "$readme_path" ]]; then
-    highlight_echo "============================== README.md =============================="
-    cat "$readme_path" | tee -a "$LOG_FILE"
-    highlight_echo "======================================================================="
-  else
-    warn_echo "未找到 README.md，继续执行内置流程说明。"
-    note_echo "SourceTree 模式请传入 \$REPO；独立运行会要求手动拖入 ${EXPECTED_REPO} 仓库文件夹。"
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
+    clear
   fi
+
+  highlight_echo "============================== 脚本内置自述 =============================="
+  note_echo "脚本名称：${SCRIPT_BASENAME}.command"
+  note_echo "脚本路径：${SCRIPT_PATH}"
+  note_echo "运行入口：兼容系统终端双击运行和 Sourcetree 自定义动作运行。"
+  note_echo "核心行为：按脚本名称执行对应的 SourceTree 效率动作，运行前会先展示这段内置自述，避免误触。"
+  note_echo "环境策略：系统终端保留清屏、彩色输出和回车确认；Sourcetree 瘦身环境自动跳过清屏和等待，并输出纯文本日志。"
+  note_echo "文档关系：同目录 README.md 只作为外部说明文档保留，运行时自述不读取、不拼接、不依赖 README.md。"
+  warn_echo "继续前请确认 SourceTree 传入路径、当前仓库或拖入路径正确；按 Ctrl+C 可以取消。"
+  gray_echo "日志文件：${LOG_FILE}"
+  highlight_echo "======================================================================="
   echo ""
-  read -r "?👉 已阅读自述文件，按回车继续执行；按 Ctrl+C 取消：" _
+
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 0 ]]; then
+    read "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..."
+  else
+    gray_echo "当前为 Sourcetree 或非交互输入环境，已跳过回车等待。"
+  fi
 }
 
 strip_outer_quotes() {

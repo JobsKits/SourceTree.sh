@@ -11,7 +11,7 @@
 - 本自述文件对应脚本：`【MacOS@SourceTree】⏬双击下载SourceTree效率脚本.command`。
 - 脚本原始位置：`JobsGenesis@JobsCommand.SourceTree`。
 - 脚本定位：用于 SourceTree 自定义操作入口。
-- 本次已按 Jobs 标准升级：`#!/bin/zsh`、README 防误触、彩色日志、结构化入口、`main "$@"` 收口。
+- 脚本运行策略：兼容系统终端双击运行和 Sourcetree 自定义动作运行，按实际环境决定是否启用完整终端交互。
 - 普通安装 / 更新 / 升级交互统一为：**回车跳过，输入任意字符后回车执行**。
 - 危险操作不应该靠回车默认执行；涉及破坏性修改时，应单独输入 `YES` 确认。
 
@@ -38,14 +38,13 @@ chmod +x './【MacOS@SourceTree】⏬双击下载SourceTree效率脚本.command'
 
 脚本启动后会先显示本 README，并等待回车继续，避免误触执行。
 
-## 三、本次升级内容 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## 三、脚本运行策略 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-- 统一脚本解释器为 `#!/bin/zsh`。
-- 增加 README 展示与回车阻塞，防止双击误操作。
-- 增加 Jobs 标准彩色日志函数，日志路径为 `/tmp/脚本名.log`。
-- 增加 `SCRIPT_DIR` / `SCRIPT_PATH` 标准路径变量。
-- 使用 `main "$@"` 作为统一入口。
-- 原业务逻辑保留在 `run_original_logic` 模块内，方便后续继续拆分重构。
+- 脚本使用 `#!/bin/zsh` 和 `main "$@"` 统一收口，先展示自述说明，再进入真实业务逻辑。
+- 系统终端双击运行时，脚本保持完整终端体验：可清屏、可彩色输出、可等待用户回车确认。
+- Sourcetree 自定义动作运行时，脚本会识别瘦身环境，自动跳过 `clear` 和回车等待，并关闭 ANSI 彩色码，避免日志里出现 ANSI 转义码。
+- 脚本会兜底解析真实脚本目录，确保 Sourcetree 只传脚本名时仍能读取同目录 `README.md`。
+- 终端输出和日志同步落盘；排查时优先查看 README 中声明的 `/tmp/脚本名.log`。
 
 ## 四、Homebrew 标准 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 

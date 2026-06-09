@@ -11,7 +11,8 @@
 - 本自述文件对应脚本：`【MacOS@SourceTree】Pod_Install.command`。
 - 脚本原始位置：`JobsGenesis@JobsCommand.SourceTree`。
 - 脚本定位：用于 SourceTree 自定义操作入口。
-- 本次已按 Jobs 标准升级：`#!/bin/zsh`、README 防误触、彩色日志、结构化入口、`main "$@"` 收口。
+- 脚本运行策略：兼容系统终端双击运行和 Sourcetree 自定义动作运行，按实际环境决定是否启用完整终端交互。
+- 已兼容 Sourcetree 自定义动作的瘦身环境：缺失 `TERM`、`$0` 不是绝对路径、非交互输入、ANSI 彩色码无法正确渲染时自动降级为纯文本输出。
 - 普通安装 / 更新 / 升级交互统一为：**回车跳过，输入任意字符后回车执行**。
 - 危险操作不应该靠回车默认执行；涉及破坏性修改时，应单独输入 `YES` 确认。
 
@@ -23,7 +24,7 @@
 | 所属目录 | `JobsGenesis@JobsCommand.SourceTree` |
 | 主要标签 | `SourceTree` |
 | 是否涉及 Homebrew | `否` |
-| 是否可能联网 | `否` |
+| 是否可能联网 | `是，pod install 可能下载依赖` |
 | 是否含高风险命令 | `否` |
 | zsh 静态检查 | `当前生成环境未执行，请在 macOS 上复核` |
 
@@ -38,14 +39,21 @@ chmod +x './【MacOS@SourceTree】Pod_Install.command'
 
 脚本启动后会先显示本 README，并等待回车继续，避免误触执行。
 
-## 三、本次升级内容 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+Sourcetree 自定义动作方式如下：
 
-- 统一脚本解释器为 `#!/bin/zsh`。
-- 增加 README 展示与回车阻塞，防止双击误操作。
-- 增加 Jobs 标准彩色日志函数，日志路径为 `/tmp/脚本名.log`。
-- 增加 `SCRIPT_DIR` / `SCRIPT_PATH` 标准路径变量。
-- 使用 `main "$@"` 作为统一入口。
-- 原业务逻辑保留在 `run_original_logic` 模块内，方便后续继续拆分重构。
+```shell
+【MacOS@SourceTree】Pod_Install.command /path/to/project
+```
+
+在 Sourcetree 环境下，脚本会自动跳过 `clear` 和回车等待，并关闭 ANSI 彩色码，避免日志里出现 ANSI 转义码。
+
+## 三、脚本运行策略 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+
+- 脚本使用 `#!/bin/zsh` 和 `main "$@"` 统一收口，先展示自述说明，再进入真实业务逻辑。
+- 系统终端双击运行时，脚本保持完整终端体验：可清屏、可彩色输出、可等待用户回车确认。
+- Sourcetree 自定义动作运行时，脚本会识别瘦身环境，自动跳过 `clear` 和回车等待，并关闭 ANSI 彩色码，避免日志里出现 ANSI 转义码。
+- 脚本会兜底解析真实脚本目录，确保 Sourcetree 只传脚本名时仍能读取同目录 `README.md`。
+- 终端输出和日志同步落盘；排查时优先查看 README 中声明的 `/tmp/脚本名.log`。
 
 ## 四、Homebrew 标准 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
@@ -64,8 +72,9 @@ chmod +x './【MacOS@SourceTree】Pod_Install.command'
 - 我没有在生成阶段执行脚本里的 macOS 专属命令，例如 `brew`、`pod`、`flutter`、`xcodebuild`、`osascript`、`sudo`、模拟器控制等。
 - 首次运行前建议先阅读本 README，再执行脚本。
 - 如果脚本涉及工程目录，请确认当前目录或拖入路径正确。
-- 如果脚本涉及 Git / CocoaPods / Flutter 依赖更新，建议先提交或备份本地改动。
-- 运行日志默认写入：`/tmp/【MacOS@SourceTree】Pod_Install.log`。
+- 如果脚本涉及 [**Git**](https://github.com) / [**CocoaPods**](https://cocoapods.org/) / [**Flutter**](https://flutter.dev/) 依赖更新，建议先提交或备份本地改动。
+- 运行日志默认写入：`/tmp/Pod_Install.log`。
+- 如果在 Sourcetree 中看到 `Completed with errors`，以脚本最后的失败统计和 `/tmp/Pod_Install.log` 为准继续排查。
 
 ## 六、流程图 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 

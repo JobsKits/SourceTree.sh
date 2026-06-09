@@ -4,13 +4,73 @@
 # 说明：保留原脚本业务逻辑，补齐 README 防误触、彩色日志、zsh 入口、Homebrew 健康自检标准。
 # =====================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-${(%):-%x}}")" && pwd)"
-SCRIPT_PATH="${SCRIPT_DIR}/$(basename -- "$0")"
-SCRIPT_BASENAME="$(basename "$0" | sed 's/\.[^.]*$//')"
+# Sourcetree 自定义动作可能只传脚本名，不传绝对路径；这里兜底找回真实脚本位置。
+resolve_script_path() {
+  local script_source="${BASH_SOURCE[0]:-${(%):-%x}}"
+  local script_name="$(basename -- "$0")"
+  local candidate=""
+
+  for candidate in \
+    "$script_source" \
+    "${PWD}/${script_source}" \
+    "${HOME}/SourceTree.sh/${script_name}/${script_name}" \
+    "${HOME}/Documents/Github/JobsGenesis/SourceTree.sh/${script_name}/${script_name}"; do
+    [[ -n "$candidate" && -f "$candidate" ]] || continue
+    (cd "$(dirname "$candidate")" 2>/dev/null && printf "%s/%s\n" "$(pwd -P)" "$(basename "$candidate")")
+    return 0
+  done
+
+  printf "%s/%s\n" "$PWD" "$script_name"
+}
+
+SCRIPT_PATH="$(resolve_script_path)"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd -P)"
+SCRIPT_BASENAME="$(basename "$SCRIPT_PATH" | sed 's/\.[^.]*$//')"
 LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"
 : > "$LOG_FILE"
 
-log()            { echo -e "$1" | tee -a "$LOG_FILE"; }
+# 识别 Sourcetree 自定义动作的瘦身运行环境，系统终端双击运行不降级。
+is_sourcetree_runtime() {
+  env | grep -Eqi '^SOURCETREE|^SOURCE_TREE' && return 0
+  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/SourceTree.sh/"* ]] && return 0
+  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/Documents/Github/JobsGenesis/SourceTree.sh/"* ]] && return 0
+
+  local pid="$PPID"
+  local command_name=""
+  local guard=0
+  while [[ -n "$pid" && "$pid" != "0" && "$guard" -lt 8 ]]; do
+    command_name="$(ps -o comm= -p "$pid" 2>/dev/null || true)"
+    [[ "$command_name" == *SourceTree* || "$command_name" == *Sourcetree* ]] && return 0
+    pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+    guard=$((guard + 1))
+  done
+
+  return 1
+}
+
+IS_SOURCETREE_RUNTIME=0
+is_sourcetree_runtime && IS_SOURCETREE_RUNTIME=1
+
+[[ -n "${TERM:-}" ]] || export TERM="dumb"
+SOURCETREE_PLAIN_OUTPUT=0
+if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" ]]; then
+  SOURCETREE_PLAIN_OUTPUT=1
+  export NO_COLOR="${NO_COLOR:-1}"
+  export CLICOLOR="0"
+  export ANSI_COLORS_DISABLED="1"
+fi
+
+strip_ansi_text() {
+  perl -pe 's/\e\[[0-9;]*[[:alpha:]]//g'
+}
+
+log() {
+  if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == "1" ]]; then
+    printf "%b\n" "$1" | strip_ansi_text | tee -a "$LOG_FILE"
+  else
+    printf "%b\n" "$1" | tee -a "$LOG_FILE"
+  fi
+}
 color_echo()     { log "\033[1;32m$1\033[0m"; }
 info_echo()      { log "\033[1;34mℹ $1\033[0m"; }
 success_echo()   { log "\033[1;32m✔ $1\033[0m"; }
@@ -164,17 +224,27 @@ brew_install_or_upgrade() {
 }
 
 show_readme_and_wait() {
-  clear
-  local readme_path="${SCRIPT_DIR}/README.md"
-  if [[ -f "$readme_path" ]]; then
-    highlight_echo "正在显示脚本自述文件：$readme_path"
-    echo ""
-    cat "$readme_path" | tee -a "$LOG_FILE"
-  else
-    warn_echo "未找到 README.md：$readme_path"
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
+    clear
   fi
+
+  highlight_echo "============================== 脚本内置自述 =============================="
+  note_echo "脚本名称：${SCRIPT_BASENAME}.command"
+  note_echo "脚本路径：${SCRIPT_PATH}"
+  note_echo "运行入口：兼容系统终端双击运行和 Sourcetree 自定义动作运行。"
+  note_echo "核心行为：按脚本名称执行对应的 SourceTree 效率动作，运行前会先展示这段内置自述，避免误触。"
+  note_echo "环境策略：系统终端保留清屏、彩色输出和回车确认；Sourcetree 瘦身环境自动跳过清屏和等待，并输出纯文本日志。"
+  note_echo "文档关系：同目录 README.md 只作为外部说明文档保留，运行时自述不读取、不拼接、不依赖 README.md。"
+  warn_echo "继续前请确认 SourceTree 传入路径、当前仓库或拖入路径正确；按 Ctrl+C 可以取消。"
+  gray_echo "日志文件：${LOG_FILE}"
+  highlight_echo "======================================================================="
   echo ""
-  read "?👉 请先阅读上面的自述文件，按回车继续执行，或按 Ctrl+C 取消..."
+
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 0 ]]; then
+    read "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..."
+  else
+    gray_echo "当前为 Sourcetree 或非交互输入环境，已跳过回车等待。"
+  fi
 }
 
 run_original_logic() {
@@ -183,7 +253,7 @@ run_original_logic() {
   set -euo pipefail
 
   # ---------------- 基本日志 ----------------
-  SCRIPT_BASENAME=$(basename "$0" | sed 's/\.[^.]*$//')
+  SCRIPT_BASENAME="$(basename "$SCRIPT_PATH" | sed 's/\.[^.]*$//')"
   LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"; : > "$LOG_FILE"
   BUILD_LOG="/tmp/flutter_build_log.txt"; : > "$BUILD_LOG"
 
