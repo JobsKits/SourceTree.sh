@@ -39,18 +39,31 @@ PATCHED_ACTION_TARGET_COUNT=0
 # 彩色日志输出函数
 # =========================
 log()            { printf "%b\n" "$1" | tee -a "$LOG_FILE"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 color_echo()     { log "\033[1;32m$1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 info_echo()      { log "\033[1;34mℹ $1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 success_echo()   { log "\033[1;32m✔ $1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 warn_echo()      { log "\033[1;33m⚠ $1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 warm_echo()      { log "\033[1;33m$1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 note_echo()      { log "\033[1;35m➤ $1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 error_echo()     { log "\033[1;31m✖ $1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 err_echo()       { log "\033[1;31m$1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 debug_echo()     { log "\033[1;35m🐞 $1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 highlight_echo() { log "\033[1;36m🔹 $1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 gray_echo()      { log "\033[0;90m$1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 bold_echo()      { log "\033[1m$1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 underline_echo() { log "\033[4m$1\033[0m"; }
 
 # =========================
@@ -63,6 +76,7 @@ cleanup_runtime_dir() {
 }
 trap cleanup_runtime_dir EXIT
 
+# 展示脚本用途和影响范围，并在执行前等待用户确认。
 show_readme_and_wait() {
   if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
     clear
@@ -87,17 +101,20 @@ show_readme_and_wait() {
   fi
 }
 
+# 封装 wait_for_enter 对应的独立处理逻辑。
 wait_for_enter() {
     local prompt_text="${1:-请按回车继续...}"
     warm_echo "${prompt_text}"
     read -r
 }
 
+# 封装 exit_with_error 对应的独立处理逻辑。
 exit_with_error() {
     error_echo "$1"
     exit 1
 }
 
+# 检查当前运行条件是否满足后续流程要求。
 ensure_not_root_home() {
     if [[ "${HOME}" == "/var/root" || "${EUID}" -eq 0 ]]; then
         exit_with_error "请不要使用 sudo/root 执行本脚本。当前 HOME=${HOME}，会导致脚本部署到错误位置。"
@@ -118,6 +135,7 @@ check_local_actions_plist() {
     gray_echo "模板路径：${SOURCE_ACTIONS_PLIST}"
 }
 
+# 检查当前运行条件是否满足后续流程要求。
 check_command_structure_in_dir() {
     local base_dir="$1"
     local scene_name="$2"
@@ -176,10 +194,12 @@ check_command_structure_in_dir() {
     [[ "${skipped_installer_count}" -gt 0 ]] && gray_echo "已跳过安装器目录数：${skipped_installer_count}"
 }
 
+# 检查当前运行条件是否满足后续流程要求。
 check_source_command_structure() {
     check_command_structure_in_dir "${SOURCE_PROJECT_ROOT}" "源项目目录"
 }
 
+# 解析并返回后续流程需要的目标信息。
 find_python3() {
     local python_bin=""
 
@@ -202,6 +222,7 @@ find_python3() {
     return 1
 }
 
+# 解析并返回后续流程需要的目标信息。
 detect_sourcetree_app_path() {
     local app_path=""
 
@@ -215,10 +236,12 @@ detect_sourcetree_app_path() {
     return 1
 }
 
+# 检查当前运行条件是否满足后续流程要求。
 is_sourcetree_installed() {
     detect_sourcetree_app_path >/dev/null 2>&1 || [[ -d "${TARGET_SOURCETREE_DIR}" ]]
 }
 
+# 检查当前运行条件是否满足后续流程要求。
 ensure_sourcetree_installed() {
     info_echo "检查当前机器是否已安装 SourceTree ..."
 
@@ -279,6 +302,7 @@ copy_directory_content() {
     cp -R "${source_dir}" "${target_dir}" || return 1
 }
 
+# 执行对应的环境配置或同步处理。
 sync_script_package_to_home() {
     info_echo "开始把脚本包部署到固定目录 ..."
     gray_echo "源目录：${SOURCE_PROJECT_ROOT}"
@@ -403,6 +427,7 @@ def patch_value(value):
         return tuple(patch_value(item) for item in value)
 
     if isinstance(value, dict):
+        # 封装 return 对应的独立处理逻辑。
         return {patch_value(key): patch_value(item) for key, item in value.items()}
 
     return value
@@ -506,6 +531,7 @@ is_actions_plist_same() {
     cmp -s "${ACTIVE_ACTIONS_PLIST}" "${TARGET_ACTIONS_PLIST}"
 }
 
+# 执行对应的环境配置或同步处理。
 sync_actions_plist() {
     [[ -z "${ACTIVE_ACTIONS_PLIST}" ]] && exit_with_error "缺少运行时 actions.plist，请先生成后再同步"
 
@@ -554,16 +580,19 @@ is_app_running() {
     pgrep -x "${process_name}" >/dev/null 2>&1
 }
 
+# 封装 quit_app_gracefully 对应的独立处理逻辑。
 quit_app_gracefully() {
     local app_name="$1"
     osascript -e "tell application \"${app_name}\" to quit" >/dev/null 2>&1 || true
 }
 
+# 封装 force_kill_app 对应的独立处理逻辑。
 force_kill_app() {
     local process_name="$1"
     pkill -x "${process_name}" >/dev/null 2>&1 || true
 }
 
+# 封装 wait_for_app_exit 对应的独立处理逻辑。
 wait_for_app_exit() {
     local process_name="$1"
     local timeout_seconds="${2:-15}"
@@ -582,6 +611,7 @@ wait_for_app_exit() {
     return 0
 }
 
+# 封装 launch_app 对应的独立处理逻辑。
 launch_app() {
     local app_name="$1"
     local app_path="$2"
@@ -598,6 +628,7 @@ launch_app() {
     success_echo "${app_name} 已重新启动"
 }
 
+# 封装 restart_app 对应的独立处理逻辑。
 restart_app() {
     local app_name="$1"
     local process_name="$2"
@@ -633,6 +664,7 @@ restart_app() {
     launch_app "${app_name}" "${app_path}"
 }
 
+# 封装 restart_sourcetree 对应的独立处理逻辑。
 restart_sourcetree() {
     local app_path="$(detect_sourcetree_app_path 2>/dev/null || true)"
     restart_app "${SOURCETREE_APP_NAME}" "${SOURCETREE_PROCESS_NAME}" "${app_path}" 15
@@ -665,6 +697,7 @@ print_finish_message() {
     gray_echo "日志文件：${LOG_FILE}"
 }
 
+# 收集并校验用户输入，决定后续执行路径。
 prompt_open_result_dirs() {
     gray_echo ""
     highlight_echo "是否打开固定部署目录？"
@@ -714,7 +747,7 @@ prompt_open_result_dirs() {
 # 10. 仅在发生复制时安全重启 SourceTree
 # 11. 输出执行结果并询问是否打开相关目录
 # =========================
-main() {
+run_main_flow() {
     show_readme_and_wait
     ensure_not_root_home
     check_local_actions_plist
@@ -729,6 +762,12 @@ main() {
 
     print_finish_message
     prompt_open_result_dirs
+}
+
+# 统一收口脚本入口，仅委托已经拆分完成的业务流程。
+main() {
+  # 主入口只负责委托完整业务流程，复杂逻辑统一下沉。
+  run_main_flow "$@"
 }
 
 main "$@"

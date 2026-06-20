@@ -41,6 +41,7 @@ if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO
   export ANSI_COLORS_DISABLED="1"
 fi
 
+# 封装 strip_ansi_text 对应的独立处理逻辑。
 strip_ansi_text() {
   perl -pe 's/\e\[[0-9;]*[[:alpha:]]//g'
 }
@@ -77,6 +78,7 @@ configure_output_mode() {
   fi
 }
 
+# 封装 strip_ansi_stream 对应的独立处理逻辑。
 strip_ansi_stream() {
   if [[ "$PLAIN_OUTPUT" == "1" ]]; then
     if command -v perl >/dev/null 2>&1; then
@@ -91,21 +93,36 @@ strip_ansi_stream() {
 
 configure_output_mode
 
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 log()            { echo -e "$1" | strip_ansi_stream | tee -a "$LOG_FILE"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 color_echo()     { log "\033[1;32m$1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 info_echo()      { log "\033[1;34mℹ $1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 success_echo()   { log "\033[1;32m✔ $1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 warn_echo()      { log "\033[1;33m⚠ $1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 warm_echo()      { log "\033[1;33m$1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 note_echo()      { log "\033[1;35m➤ $1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 error_echo()     { log "\033[1;31m✖ $1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 err_echo()       { log "\033[1;31m$1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 debug_echo()     { log "\033[1;35m🐞 $1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 highlight_echo() { log "\033[1;36m🔹 $1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 gray_echo()      { log "\033[0;90m$1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 bold_echo()      { log "\033[1m$1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 underline_echo() { log "\033[4m$1\033[0m"; }
 
+# 封装 die 对应的独立处理逻辑。
 die() {
   error_echo "$1"
   err_echo "日志文件：$LOG_FILE"
@@ -127,6 +144,7 @@ run_cmd() {
   return 0
 }
 
+# 执行已经拆分完成的独立业务步骤。
 run_interactive_cmd() {
   local title="$1"
   shift
@@ -142,6 +160,7 @@ run_interactive_cmd() {
   return 0
 }
 
+# 展示脚本用途和影响范围，并在执行前等待用户确认。
 show_readme_and_wait() {
   if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
     clear
@@ -166,6 +185,7 @@ show_readme_and_wait() {
   fi
 }
 
+# 封装 strip_outer_quotes 对应的独立处理逻辑。
 strip_outer_quotes() {
   local value="$1"
   value="${value%$'\r'}"
@@ -177,6 +197,7 @@ strip_outer_quotes() {
   print -r -- "$value"
 }
 
+# 收集并校验用户输入，决定后续执行路径。
 ask_any_to_run() {
   local message="$1"
   local answer=""
@@ -191,6 +212,7 @@ ask_any_to_run() {
 }
 
 
+# 封装 normalize_user_input_path 对应的独立处理逻辑。
 normalize_user_input_path() {
   local value="$1"
   value="$(strip_outer_quotes "$value")"
@@ -209,6 +231,7 @@ get_cpu_arch() {
   [[ "$(uname -m)" == "arm64" ]] && echo "arm64" || echo "x86_64"
 }
 
+# 解析并返回后续流程需要的目标信息。
 find_brew() {
   local brew_path=""
   brew_path="$(command -v brew 2>/dev/null || true)"
@@ -227,6 +250,7 @@ find_brew() {
   return 1
 }
 
+# 封装 activate_brew 对应的独立处理逻辑。
 activate_brew() {
   [[ -n "$BREW_BIN" && -x "$BREW_BIN" ]] || return 1
   local shellenv_cmd=""
@@ -238,6 +262,7 @@ activate_brew() {
   hash -r 2>/dev/null || true
 }
 
+# 检查当前运行条件是否满足后续流程要求。
 ensure_brew() {
   BREW_BIN="$(find_brew 2>/dev/null || true)"
 
@@ -274,6 +299,7 @@ ensure_git() {
   command -v git >/dev/null 2>&1 || die "Git 安装后仍不可用。"
 }
 
+# 封装 normalize_github_remote 对应的独立处理逻辑。
 normalize_github_remote() {
   local url="$1"
   local slug=""
@@ -317,6 +343,7 @@ normalize_github_remote() {
   print -r -- "$slug"
 }
 
+# 解析并返回后续流程需要的目标信息。
 resolve_repo_root_from_candidate() {
   local candidate="$1"
   candidate="$(normalize_user_input_path "$candidate")"
@@ -335,6 +362,7 @@ resolve_repo_root_from_candidate() {
   git -C "$candidate_abs" rev-parse --show-toplevel 2>/dev/null || return 5
 }
 
+# 收集并校验用户输入，决定后续执行路径。
 prompt_repo_path() {
   local input=""
   local resolved=""
@@ -364,6 +392,7 @@ prompt_repo_path() {
   done
 }
 
+# 解析并返回后续流程需要的目标信息。
 resolve_target_repo_root() {
   local candidate=""
   local resolved=""
@@ -390,6 +419,7 @@ resolve_target_repo_root() {
   die "未收到仓库路径参数，且当前不是可交互终端。SourceTree 中请把参数设置为 \$REPO；独立运行请双击脚本后拖入仓库文件夹。"
 }
 
+# 检查当前运行条件是否满足后续流程要求。
 validate_target_repo() {
   [[ -n "$REPO_ROOT" && -d "$REPO_ROOT" ]] || die "仓库根目录无效：${REPO_ROOT:-空}"
 
@@ -447,6 +477,7 @@ ensure_node_by_brew() {
   command -v npm >/dev/null 2>&1 || die "npm 安装/升级后仍不可用。"
 }
 
+# 封装 refresh_npm_global_bin 对应的独立处理逻辑。
 refresh_npm_global_bin() {
   command -v npm >/dev/null 2>&1 || return 0
   local npm_prefix=""
@@ -457,6 +488,7 @@ refresh_npm_global_bin() {
   hash -r 2>/dev/null || true
 }
 
+# 检查当前运行条件是否满足后续流程要求。
 ensure_npm_npx_latest() {
   ensure_node_by_brew
 
@@ -476,6 +508,7 @@ ensure_npm_npx_latest() {
   command -v npx >/dev/null 2>&1 || die "npx 仍不可用。请检查 npm 全局 bin 是否在 PATH 内。"
 }
 
+# 封装 project_has_local_wrangler 对应的独立处理逻辑。
 project_has_local_wrangler() {
   [[ -f "package.json" ]] || return 1
 
@@ -492,12 +525,14 @@ project_has_local_wrangler() {
   return 1
 }
 
+# 执行对应的清理操作，并保留必要的安全检查。
 clear_quarantine_path() {
   local target="$1"
   [[ -e "$target" ]] || return 0
   xattr -dr com.apple.quarantine "$target" 2>/dev/null || true
 }
 
+# 执行对应的清理操作，并保留必要的安全检查。
 clear_wrangler_quarantine() {
   local npm_root=""
   npm_root="$(npm root -g 2>/dev/null || true)"
@@ -513,6 +548,7 @@ clear_wrangler_quarantine() {
   clear_quarantine_path "${REPO_ROOT}/node_modules/@esbuild"
 }
 
+# 解析并返回后续流程需要的目标信息。
 resolve_existing_wrangler() {
   WRANGLER_BIN=""
   WRANGLER_LABEL=""
@@ -535,6 +571,7 @@ resolve_existing_wrangler() {
   return 1
 }
 
+# 执行已经拆分完成的独立业务步骤。
 run_wrangler_cmd() {
   local title="$1"
   shift
@@ -546,6 +583,7 @@ run_wrangler_cmd() {
   fi
 }
 
+# 执行已经拆分完成的独立业务步骤。
 run_interactive_wrangler_cmd() {
   local title="$1"
   shift
@@ -557,6 +595,7 @@ run_interactive_wrangler_cmd() {
   fi
 }
 
+# 检查当前运行条件是否满足后续流程要求。
 ensure_wrangler_latest() {
   ensure_npm_npx_latest
   export npm_config_yes="true"
@@ -587,6 +626,7 @@ ensure_wrangler_latest() {
   run_wrangler_cmd "确认 Wrangler 版本" --version || die "Wrangler 版本确认失败。"
 }
 
+# 检查当前运行条件是否满足后续流程要求。
 check_toolchain_ready_for_sourcetree() {
   BREW_BIN="$(find_brew 2>/dev/null || true)"
   if [[ -n "$BREW_BIN" ]]; then
@@ -609,6 +649,7 @@ check_toolchain_ready_for_sourcetree() {
   run_wrangler_cmd "确认 Wrangler 版本（SourceTree 只检查，不安装/升级）" --version || die "Wrangler 版本确认失败。"
 }
 
+# 封装 prepare_toolchain_for_current_context 对应的独立处理逻辑。
 prepare_toolchain_for_current_context() {
   if is_interactive_terminal; then
     ensure_wrangler_latest
@@ -617,6 +658,7 @@ prepare_toolchain_for_current_context() {
   fi
 }
 
+# 封装 print_toolchain_versions 对应的独立处理逻辑。
 print_toolchain_versions() {
   highlight_echo "============================== 工具链版本 =============================="
   if [[ -n "$BREW_BIN" && -x "$BREW_BIN" ]]; then
@@ -640,6 +682,7 @@ is_interactive_terminal() {
   [[ -t 0 && -t 1 ]]
 }
 
+# 封装 print_sourcetree_auth_hint 对应的独立处理逻辑。
 print_sourcetree_auth_hint() {
   warn_echo "SourceTree 自定义操作不是稳定的浏览器 OAuth 交互环境，本脚本不会在 SourceTree 内强行执行 wrangler login。"
   gray_echo "原因：wrangler login 会启动本机 localhost OAuth 回调；SourceTree 的脚本窗口容易造成回调状态不一致、输出延迟或登录失败。"
@@ -652,6 +695,7 @@ print_sourcetree_auth_hint() {
   gray_echo "${SCRIPT_PATH} ${REPO_ROOT}"
 }
 
+# 封装 wrangler_whoami_ok 对应的独立处理逻辑。
 wrangler_whoami_ok() {
   local auth_log="/tmp/${SCRIPT_BASENAME}.wrangler-whoami.log"
   : > "$auth_log"
@@ -677,6 +721,7 @@ wrangler_whoami_ok() {
   return 1
 }
 
+# 检查当前运行条件是否满足后续流程要求。
 ensure_wrangler_auth() {
   export npm_config_yes="true"
 
@@ -708,6 +753,7 @@ ensure_wrangler_auth() {
   die "SourceTree 非交互环境未检测到有效登录状态，请先在终端/双击模式完成 wrangler login。"
 }
 
+# 封装 capture_wrangler_cmd_to_file 对应的独立处理逻辑。
 capture_wrangler_cmd_to_file() {
   local title="$1"
   local output_file="$2"
@@ -735,6 +781,7 @@ capture_wrangler_cmd_to_file() {
   return 0
 }
 
+# 解析并返回后续流程需要的目标信息。
 resolve_edgetunnel_kv_namespace_title() {
   local title=""
   local config_file="${REPO_ROOT}/.edgetunnel-kv-namespace"
@@ -754,6 +801,7 @@ resolve_edgetunnel_kv_namespace_title() {
   print -r -- "$title"
 }
 
+# 封装 kv_namespace_lookup_from_json 对应的独立处理逻辑。
 kv_namespace_lookup_from_json() {
   local json_file="$1"
   local lookup_mode="$2"
@@ -819,6 +867,7 @@ function tryJsonParse(text) {
   if (firstObj >= 0 && lastObj > firstObj) candidates.push(text.slice(firstObj, lastObj + 1));
 
   for (const candidate of candidates) {
+    # 封装 try 对应的独立处理逻辑。
     try {
       const result = selectFromItems(collect(JSON.parse(candidate)));
       if (result) return result;
@@ -860,6 +909,7 @@ process.stdout.write(result);
 NODE
 }
 
+# 封装 extract_active_kv_binding_id_from_toml 对应的独立处理逻辑。
 extract_active_kv_binding_id_from_toml() {
   local toml_file="$1"
   [[ -f "$toml_file" ]] || return 1
@@ -894,6 +944,7 @@ process.exit(1);
 NODE
 }
 
+# 封装 add_local_git_exclude 对应的独立处理逻辑。
 add_local_git_exclude() {
   local pattern="$1"
   local exclude_file=""
@@ -909,6 +960,7 @@ add_local_git_exclude() {
   fi
 }
 
+# 封装 generate_wrangler_config_with_kv_binding 对应的独立处理逻辑。
 generate_wrangler_config_with_kv_binding() {
   local namespace_id="$1"
   local source_toml="${REPO_ROOT}/wrangler.toml"
@@ -967,6 +1019,7 @@ NODE
   gray_echo "说明：原始 wrangler.toml 不会被改脏；部署时使用 --config .wrangler.jobs.local.toml。"
 }
 
+# 检查当前运行条件是否满足后续流程要求。
 ensure_edgetunnel_kv_binding() {
   highlight_echo "============================== Cloudflare KV Binding ============================="
 
@@ -1029,6 +1082,7 @@ ensure_edgetunnel_kv_binding() {
   success_echo "KV 绑定已就绪：binding = KV，namespace = ${namespace_title}，id = ${namespace_id}"
 }
 
+# 执行已经拆分完成的独立业务步骤。
 run_wrangler_deploy() {
   export npm_config_yes="true"
 
@@ -1044,7 +1098,7 @@ run_wrangler_deploy() {
 }
 
 # ============================== 主流程 ==============================
-main() {
+run_main_flow() {
   show_readme_and_wait
 
   [[ "$(uname -s)" == "Darwin" ]] || die "当前脚本按 macOS / zsh / Homebrew 环境编写，请在 macOS 上执行。"
@@ -1058,6 +1112,12 @@ main() {
 
   success_echo "全部完成。"
   success_echo "日志文件：$LOG_FILE"
+}
+
+# 统一收口脚本入口，仅委托已经拆分完成的业务流程。
+main() {
+  # 主入口只负责委托完整业务流程，复杂逻辑统一下沉。
+  run_main_flow "$@"
 }
 
 main "$@"

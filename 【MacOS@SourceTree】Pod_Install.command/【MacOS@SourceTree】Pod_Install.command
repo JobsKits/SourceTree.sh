@@ -62,6 +62,7 @@ if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO
   export ANSI_COLORS_DISABLED="1"
 fi
 
+# 封装 strip_ansi_text 对应的独立处理逻辑。
 strip_ansi_text() {
   perl -pe 's/\e\[[0-9;]*[[:alpha:]]//g'
 }
@@ -71,6 +72,7 @@ if [[ "$IS_SOURCETREE_RUNTIME" != "1" && -t 1 && -z "${NO_COLOR:-}" && -n "${TER
   COLOR_ENABLED=1
 fi
 
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 log() {
   if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == "1" ]]; then
     printf "%b\n" "$1" | strip_ansi_text | tee -a "$LOG_FILE"
@@ -90,18 +92,31 @@ color_log() {
   fi
 }
 
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 color_echo()     { color_log "\033[1;32m" "$1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 info_echo()      { color_log "\033[1;34m" "ℹ $1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 success_echo()   { color_log "\033[1;32m" "✔ $1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 warn_echo()      { color_log "\033[1;33m" "⚠ $1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 warm_echo()      { color_log "\033[1;33m" "$1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 note_echo()      { color_log "\033[1;35m" "➤ $1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 error_echo()     { color_log "\033[1;31m" "✖ $1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 err_echo()       { color_log "\033[1;31m" "$1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 debug_echo()     { color_log "\033[1;35m" "🐞 $1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 highlight_echo() { color_log "\033[1;36m" "🔹 $1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 gray_echo()      { color_log "\033[0;90m" "$1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 bold_echo()      { color_log "\033[1m" "$1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
 underline_echo() { color_log "\033[4m" "$1"; }
 
 # ============================= 标准工具函数 =============================
@@ -109,6 +124,7 @@ get_cpu_arch() {
   [[ "$(uname -m)" == "arm64" ]] && echo "arm64" || echo "x86_64"
 }
 
+# 封装 abs_path 对应的独立处理逻辑。
 abs_path() {
   local p="$1"
   [[ -z "$p" ]] && return 1
@@ -123,6 +139,7 @@ abs_path() {
   fi
 }
 
+# 收集并校验用户输入，决定后续执行路径。
 ask_run() {
   echo ""
   note_echo "👉 $1"
@@ -132,6 +149,7 @@ ask_run() {
   [[ -n "$input" ]]
 }
 
+# 收集并校验用户输入，决定后续执行路径。
 confirm_yes() {
   echo ""
   warn_echo "⚠ $1"
@@ -141,6 +159,7 @@ confirm_yes() {
   [[ "$input" == "YES" ]]
 }
 
+# 封装 inject_shellenv_block 对应的独立处理逻辑。
 inject_shellenv_block() {
   local profile_file="$1"
   local shellenv_cmd="$2"
@@ -163,6 +182,7 @@ inject_shellenv_block() {
   eval "$shellenv_cmd" || true
 }
 
+# 封装 activate_homebrew_shellenv 对应的独立处理逻辑。
 activate_homebrew_shellenv() {
   local arch="$(get_cpu_arch)"
   local brew_bin=""
@@ -186,6 +206,7 @@ activate_homebrew_shellenv() {
   eval "$(${brew_bin} shellenv)"
 }
 
+# 执行已经拆分完成的独立业务步骤。
 run_brew_health_update() {
   info_echo "正在执行 Homebrew 健康更新..."
   brew update  || { error_echo "brew update 失败"; return 1; }
@@ -196,6 +217,7 @@ run_brew_health_update() {
   success_echo "Homebrew 健康更新完成"
 }
 
+# 执行对应的环境配置或同步处理。
 install_homebrew() {
   local arch="$(get_cpu_arch)"
   local brew_bin=""
@@ -223,6 +245,7 @@ install_homebrew() {
   fi
 }
 
+# 封装 brew_install_or_upgrade 对应的独立处理逻辑。
 brew_install_or_upgrade() {
   local formula="$1"
   [[ -z "$formula" ]] && return 1
@@ -242,6 +265,7 @@ brew_install_or_upgrade() {
   fi
 }
 
+# 展示脚本用途和影响范围，并在执行前等待用户确认。
 show_readme_and_wait() {
   if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
     clear
@@ -266,6 +290,7 @@ show_readme_and_wait() {
   fi
 }
 
+# 执行已经拆分完成的独立业务步骤。
 run_original_logic() {
   # ============================= 原脚本业务逻辑区 =============================
   # ================================== Pod Install 简化版（带UTF-8环境） ==================================
@@ -282,11 +307,16 @@ run_original_logic() {
   LOG_FILE="/tmp/Pod_Install.log"
   : > "$LOG_FILE"
 
+  # 按当前输出级别记录终端信息，并同步写入脚本日志。
   log()     { printf "%b\n" "$1" | tee -a "$LOG_FILE"; }
+  # 按当前输出级别记录终端信息，并同步写入脚本日志。
   info()    { log "ℹ️  $1"; }
+  # 按当前输出级别记录终端信息，并同步写入脚本日志。
   success() { log "✅ $1"; }
+  # 按当前输出级别记录终端信息，并同步写入脚本日志。
   error()   { log "❌ $1"; }
 
+  # 封装 process_dir 对应的独立处理逻辑。
   process_dir() {
     local d="$1"
     info "处理目录：$d"
@@ -299,6 +329,7 @@ run_original_logic() {
     fi
   }
 
+  # 统一收口脚本入口，仅委托已经拆分完成的业务流程。
   main() {
     local total_count=0
     local failed_count=0
@@ -323,10 +354,17 @@ run_original_logic() {
   # =========================== 原脚本业务逻辑区结束 ===========================
 }
 
-main() {
+# 编排完整业务流程，复杂步骤继续下沉到职责明确的函数。
+run_main_flow() {
   show_readme_and_wait
   run_original_logic "$@"
   success_echo "脚本执行结束。日志：$LOG_FILE"
+}
+
+# 统一收口脚本入口，仅委托已经拆分完成的业务流程。
+main() {
+  # 主入口只负责委托完整业务流程，复杂逻辑统一下沉。
+  run_main_flow "$@"
 }
 
 main "$@"
