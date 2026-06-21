@@ -1,9 +1,9 @@
 #!/bin/zsh
 # 脚本自述：
 # - 脚本名称：【MacOS@SourceTree】📥安全暂存Git全部改动.command
-# - 核心用途：统一暂存当前 Git 仓库中的新增、修改、删除和重命名。
-# - 关键场景：正确处理“已跟踪文件变为同名目录”等 Sourcetree 分步暂存容易报错的转换。
-# - 影响范围：只修改 Git 索引，不提交、不推送、不删除工作区真实文件。
+# - 核心用途：检查子模块后，统一暂存当前 Git 仓库中的新增、修改、删除和重命名。
+# - 关键场景：处理文件与同名目录转换，并防止缺失或脏子模块被 Sourcetree 误判。
+# - 影响范围：修改 Git 索引；可初始化缺失子模块，但不清理已有子模块的真实修改。
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 export LANG="${LANG:-zh_CN.UTF-8}"
@@ -35,6 +35,8 @@ LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"
 IS_SOURCETREE_RUNTIME=0
 PLAIN_OUTPUT=0
 REPO_ROOT=""
+typeset -ga GITLINK_PATHS
+GITLINK_PATHS=()
 
 # 识别 Sourcetree 自定义动作的非交互运行环境。
 is_sourcetree_runtime() {
@@ -107,9 +109,10 @@ show_script_intro_and_wait() {
 
   highlight_echo "============================== 脚本内置自述 =============================="
   note_echo "脚本名称：${SCRIPT_BASENAME}.command"
-  note_echo "核心行为：对当前仓库执行 git add -A -- .，完整刷新 Git 索引。"
-  note_echo "适用场景：新增、修改、删除、重命名，以及文件与同名目录相互转换。"
-  note_echo "安全边界：只暂存变更；不提交、不推送、不使用 -f 强制添加已忽略文件。"
+  note_echo "核心行为：先检查 Git 子模块，再执行 git add -A -- . 完整刷新索引。"
+  note_echo "适用场景：普通变更、文件与同名目录转换，以及缺失子模块工作树。"
+  note_echo "子模块策略：缺失时尝试初始化；已存在但内部有修改时立即停止，不代替用户清理。"
+  note_echo "安全边界：不提交、不推送、不删除文件、不强制添加已忽略文件。"
   note_echo "文档关系：同目录 README.md 只作为静态说明，脚本运行时不依赖它。"
   gray_echo "日志文件：${LOG_FILE}"
   highlight_echo "============================================================================="
@@ -146,6 +149,159 @@ resolve_repo_root() {
   success_echo "已识别仓库：${REPO_ROOT}"
 }
 
+# 收集父仓索引中真实登记的 gitlink 路径。
+collect_gitlink_paths() {
+  GITLINK_PATHS=()
+  local entry=""
+  local mode=""
+  local submodule_path=""
+
+  while IFS= read -r -d '' entry; do
+    mode="${entry%% *}"
+    [[ "$mode" == "160000" ]] || continue
+    submodule_path="${entry#*$'\t'}"
+    [[ -n "$submodule_path" ]] && GITLINK_PATHS+=("$submodule_path")
+  done < <(git -C "$REPO_ROOT" ls-files -s -z)
+}
+
+# 判断 gitlink 是否在 .gitmodules 中有可用的路径和 URL 配置。
+submodule_has_valid_config() {
+  local submodule_path="$1"
+  local key=""
+  local configured_path=""
+  local section=""
+  local url=""
+
+  [[ -f "${REPO_ROOT}/.gitmodules" ]] || return 1
+  while IFS= read -r key; do
+    [[ -n "$key" ]] || continue
+    configured_path="$(git -C "$REPO_ROOT" config --file .gitmodules --get "$key" 2>/dev/null || true)"
+    [[ "$configured_path" == "$submodule_path" ]] || continue
+    section="${key#submodule.}"
+    section="${section%.path}"
+    url="$(git -C "$REPO_ROOT" config --file .gitmodules --get "submodule.${section}.url" 2>/dev/null || true)"
+    [[ -n "$url" ]]
+    return
+  done < <(git -C "$REPO_ROOT" config --file .gitmodules --name-only --get-regexp '^submodule\..*\.path$' 2>/dev/null || true)
+
+  return 1
+}
+
+# 判断子模块路径是否已经是有效 Git 工作树。
+is_valid_submodule_worktree() {
+  local submodule_path="$1"
+  local child_root="${REPO_ROOT}/${submodule_path}"
+  local actual_root=""
+  [[ -d "$child_root" && -e "${child_root}/.git" ]] || return 1
+  actual_root="$(git -C "$child_root" rev-parse --show-toplevel 2>/dev/null || true)"
+  [[ -n "$actual_root" && "${actual_root:A}" == "${child_root:A}" ]]
+}
+
+# 判断子模块路径是否只是上次失败初始化留下的空目录。
+is_empty_submodule_directory() {
+  local submodule_path="$1"
+  local child_root="${REPO_ROOT}/${submodule_path}"
+  [[ -d "$child_root" ]] || return 1
+  [[ -z "$(find "$child_root" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]
+}
+
+# 输出子模块内部变更，并阻止父仓误暂存。
+report_dirty_submodule() {
+  local submodule_path="$1"
+  error_echo "子模块内部存在未提交修改，已停止暂存：${submodule_path}"
+  git -C "${REPO_ROOT}/${submodule_path}" status --short --untracked-files=all 2>/dev/null | sed 's/^/  /' | tee -a "$LOG_FILE"
+  warn_echo "请先在子模块内提交、暂存或明确处理这些改动；脚本不会自动丢弃。"
+}
+
+# 对本轮初始化后留下的半成品工作树做安全收口。
+recover_new_submodule_worktree() {
+  local submodule_path="$1"
+  local child_root="${REPO_ROOT}/${submodule_path}"
+  local expected_sha=""
+  local current_sha=""
+
+  is_valid_submodule_worktree "$submodule_path" || return 1
+  expected_sha="$(git -C "$REPO_ROOT" ls-files -s -- "$submodule_path" | awk '$1 == 160000 { print $2; exit }')"
+  current_sha="$(git -C "$child_root" rev-parse HEAD 2>/dev/null || true)"
+  [[ -n "$current_sha" ]] || return 1
+
+  if [[ -n "$expected_sha" ]] && git -C "$child_root" cat-file -e "${expected_sha}^{commit}" 2>/dev/null; then
+    git -C "$child_root" checkout --detach "$expected_sha" >> "$LOG_FILE" 2>&1 || return 1
+    current_sha="$expected_sha"
+  else
+    warn_echo "父仓锁定的子模块提交已不可用：${submodule_path} ${expected_sha:-unknown}"
+    warn_echo "已保留新克隆工作树的当前有效 HEAD：${current_sha}"
+  fi
+
+  git -C "$child_root" restore --source=HEAD --staged --worktree -- . || return 1
+  if [[ -n "$(git -C "$child_root" status --porcelain --untracked-files=all)" ]]; then
+    return 1
+  fi
+
+  success_echo "子模块工作树已收口为 clean：${submodule_path} @ ${current_sha}"
+}
+
+# 初始化缺失子模块，并防止缺失 gitlink 被误暂存为删除。
+ensure_submodule_worktree() {
+  local submodule_path="$1"
+
+  if is_valid_submodule_worktree "$submodule_path"; then
+    return 0
+  fi
+  if [[ -e "${REPO_ROOT}/${submodule_path}" ]] && ! is_empty_submodule_directory "$submodule_path"; then
+    error_echo "子模块路径已存在，但不是有效 Git 工作树：${submodule_path}"
+    return 1
+  fi
+  if ! submodule_has_valid_config "$submodule_path"; then
+    error_echo "gitlink 缺少有效 .gitmodules 配置，不会将它暂存为删除：${submodule_path}"
+    return 1
+  fi
+
+  warn_echo "检测到缺失子模块工作树，正在按父仓登记尝试初始化：${submodule_path}"
+  if git -C "$REPO_ROOT" submodule update --init --recursive -- "$submodule_path" 2>&1 | tee -a "$LOG_FILE"; then
+    success_echo "子模块已初始化：${submodule_path}"
+    return 0
+  fi
+
+  warn_echo "按父仓锁定提交初始化失败，检查是否为远端历史重写。"
+  if recover_new_submodule_worktree "$submodule_path"; then
+    return 0
+  fi
+
+  error_echo "子模块无法安全恢复，已中止：${submodule_path}"
+  return 1
+}
+
+# 在全量暂存前检查所有 gitlink，子模块不安全时整体中止。
+preflight_submodules() {
+  collect_gitlink_paths
+  if [[ ${#GITLINK_PATHS[@]} -eq 0 ]]; then
+    info_echo "当前仓库没有 Git 子模块。"
+    return 0
+  fi
+
+  info_echo "检测到 ${#GITLINK_PATHS[@]} 个 Git 子模块，开始安全检查。"
+  local submodule_path=""
+  local failures=0
+  for submodule_path in "${GITLINK_PATHS[@]}"; do
+    if ! ensure_submodule_worktree "$submodule_path"; then
+      failures=$((failures + 1))
+      continue
+    fi
+    if [[ -n "$(git -C "${REPO_ROOT}/${submodule_path}" status --porcelain --untracked-files=all)" ]]; then
+      report_dirty_submodule "$submodule_path"
+      failures=$((failures + 1))
+      continue
+    fi
+    success_echo "子模块检查通过：${submodule_path}"
+  done
+
+  if [[ "$failures" -gt 0 ]]; then
+    error_echo "共有 ${failures} 个子模块未通过检查，未执行 git add -A。"
+    return 1
+  fi
+}
+
 # 统一暂存工作区与索引中的全部改动。
 stage_all_changes() {
   info_echo "正在安全暂存全部改动 ..."
@@ -167,11 +323,12 @@ print_staged_summary() {
   printf '%s\n' "$summary" | tee -a "$LOG_FILE"
 }
 
-# 串联自述、仓库识别、索引刷新与结果输出。
+# 串联自述、仓库识别、子模块预检、索引刷新与结果输出。
 run_main_flow() {
   initialize_script_runtime
   show_script_intro_and_wait
   resolve_repo_root "${1:-$PWD}"
+  preflight_submodules
   stage_all_changes
   print_staged_summary
   success_echo "处理完成。请回到 Sourcetree 刷新后检查并提交。"
