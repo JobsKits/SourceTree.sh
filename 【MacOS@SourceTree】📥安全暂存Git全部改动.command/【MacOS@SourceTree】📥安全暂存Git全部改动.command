@@ -187,6 +187,62 @@ submodule_has_valid_config() {
   return 1
 }
 
+# 根据 HEAD 与当前 .gitmodules 的同一 section，识别子模块路径迁移。
+find_migrated_submodule_path() {
+  local old_path="$1"
+  local key=""
+  local head_path=""
+  local section=""
+  local current_path=""
+
+  git -C "$REPO_ROOT" cat-file -e 'HEAD:.gitmodules' 2>/dev/null || return 1
+  [[ -f "${REPO_ROOT}/.gitmodules" ]] || return 1
+  while IFS= read -r key; do
+    [[ -n "$key" ]] || continue
+    head_path="$(git -C "$REPO_ROOT" config --blob HEAD:.gitmodules --get "$key" 2>/dev/null || true)"
+    [[ "$head_path" == "$old_path" ]] || continue
+    section="${key#submodule.}"
+    section="${section%.path}"
+    current_path="$(git -C "$REPO_ROOT" config --file .gitmodules --get "submodule.${section}.path" 2>/dev/null || true)"
+    if [[ -n "$current_path" && "$current_path" != "$old_path" ]]; then
+      printf '%s\n' "$current_path"
+      return 0
+    fi
+  done < <(git -C "$REPO_ROOT" config --blob HEAD:.gitmodules --name-only --get-regexp '^submodule\..*\.path$' 2>/dev/null || true)
+
+  return 1
+}
+
+# 修正直接移动子模块目录后仍指向旧路径的 core.worktree。
+repair_migrated_submodule_worktree() {
+  local submodule_path="$1"
+  local child_root="${REPO_ROOT}/${submodule_path}"
+  local git_file="${child_root}/.git"
+  local gitdir_value=""
+  local gitdir_path=""
+  local modules_root=""
+
+  is_valid_submodule_worktree "$submodule_path" && return 0
+  [[ -f "$git_file" ]] || return 1
+  gitdir_value="$(sed -n 's/^gitdir: //p' "$git_file" | head -n 1)"
+  [[ -n "$gitdir_value" ]] || return 1
+  gitdir_path="${child_root}/${gitdir_value}"
+  gitdir_path="${gitdir_path:A}"
+  modules_root="$(git -C "$REPO_ROOT" rev-parse --git-path modules 2>/dev/null || true)"
+  [[ -n "$modules_root" ]] || return 1
+  [[ "$modules_root" == /* ]] || modules_root="${REPO_ROOT}/${modules_root}"
+  modules_root="${modules_root:A}"
+  [[ "$gitdir_path" == "${modules_root}/"* && -f "${gitdir_path}/config" ]] || return 1
+
+  git config --file "${gitdir_path}/config" core.worktree "$child_root" || return 1
+  if is_valid_submodule_worktree "$submodule_path"; then
+    success_echo "已修正子模块 core.worktree：${submodule_path}"
+    return 0
+  fi
+
+  return 1
+}
+
 # 判断子模块路径是否已经是有效 Git 工作树。
 is_valid_submodule_worktree() {
   local submodule_path="$1"
@@ -282,18 +338,32 @@ preflight_submodules() {
 
   info_echo "检测到 ${#GITLINK_PATHS[@]} 个 Git 子模块，开始安全检查。"
   local submodule_path=""
+  local effective_path=""
+  local migrated_path=""
   local failures=0
   for submodule_path in "${GITLINK_PATHS[@]}"; do
-    if ! ensure_submodule_worktree "$submodule_path"; then
+    effective_path="$submodule_path"
+    migrated_path="$(find_migrated_submodule_path "$submodule_path" 2>/dev/null || true)"
+    if [[ -n "$migrated_path" ]]; then
+      effective_path="$migrated_path"
+      warn_echo "检测到子模块路径迁移：${submodule_path} -> ${effective_path}"
+      if ! repair_migrated_submodule_worktree "$effective_path"; then
+        error_echo "新路径不是有效子模块工作树，已停止：${effective_path}"
+        failures=$((failures + 1))
+        continue
+      fi
+    else
+      if ! ensure_submodule_worktree "$submodule_path"; then
+        failures=$((failures + 1))
+        continue
+      fi
+    fi
+    if [[ -n "$(git -C "${REPO_ROOT}/${effective_path}" status --porcelain --untracked-files=all)" ]]; then
+      report_dirty_submodule "$effective_path"
       failures=$((failures + 1))
       continue
     fi
-    if [[ -n "$(git -C "${REPO_ROOT}/${submodule_path}" status --porcelain --untracked-files=all)" ]]; then
-      report_dirty_submodule "$submodule_path"
-      failures=$((failures + 1))
-      continue
-    fi
-    success_echo "子模块检查通过：${submodule_path}"
+    success_echo "子模块检查通过：${effective_path}"
   done
 
   if [[ "$failures" -gt 0 ]]; then
@@ -302,10 +372,24 @@ preflight_submodules() {
   fi
 }
 
+# 在删除或迁移 gitlink 前优先暂存 .gitmodules，满足 Git 的子模块安全校验顺序。
+stage_gitmodules_first() {
+  if [[ ! -e "${REPO_ROOT}/.gitmodules" && ! -e "${REPO_ROOT}/.git/modules" ]]; then
+    return 0
+  fi
+  if git -C "$REPO_ROOT" diff --quiet -- .gitmodules 2>/dev/null; then
+    return 0
+  fi
+
+  info_echo "检测到 .gitmodules 未暂存变更，正在优先写入索引 ..."
+  git -C "$REPO_ROOT" add -A -- .gitmodules
+  success_echo ".gitmodules 已优先暂存，可安全处理后续 gitlink 变更。"
+}
+
 # 统一暂存工作区与索引中的全部改动。
 stage_all_changes() {
   info_echo "正在安全暂存全部改动 ..."
-  git -C "$REPO_ROOT" add -A -- .
+  git -C "$REPO_ROOT" -c advice.addEmbeddedRepo=false add -A -- .
   success_echo "Git 索引已刷新。"
 }
 
@@ -329,6 +413,7 @@ run_main_flow() {
   show_script_intro_and_wait
   resolve_repo_root "${1:-$PWD}"
   preflight_submodules
+  stage_gitmodules_first
   stage_all_changes
   print_staged_summary
   success_echo "处理完成。请回到 Sourcetree 刷新后检查并提交。"
