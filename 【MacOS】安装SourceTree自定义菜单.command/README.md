@@ -76,7 +76,30 @@ SourceTree.command/
 | `actions.plist` | Sourcetree 自定义菜单模板 |
 | `README.md` | 双击执行前阅读说明 |
 
-### 2.3、业务脚本目录
+### 2.3、自定义操作菜单
+
+`actions.plist` 以当前 Mac 中右键单个项目后显示的“自定义操作”为菜单基准，按下列顺序安装：
+
+| 顺序 | 菜单名称 | 目标脚本 |
+| --- | --- | --- |
+| 1 | `📘用Typora打开` | `【MacOS@SourceTree】📘用Typora打开蓝皮书.command` |
+| 2 | `🌹用Xcode打开（递归）` | `【MacOS@SourceTree】（递归目录寻找工程@不适用于多工程项目）用Xcode打开.command` |
+| 3 | `🌹用Xcode打开（当下目录）` | `【MacOS@SourceTree】（只打开当前目录）用Xcode打开.command` |
+| 4 | `🫘Pod_Install` | `【MacOS@SourceTree】Pod_Install.command` |
+| 5 | `🔥打开/运行Flutter项目` | `【MacOS@SourceTree】🐦Flutter运行setup.command.command` |
+| 6 | `💤Git提交本地回退（识别子Git）` | `【MacOS@SourceTree】♻️双击Git（识别子Git） 提交回退.command` |
+| 7 | `📥安全暂存Git全部改动` | `【MacOS@SourceTree】📥安全暂存Git全部改动.command` |
+| 8 | `🏥Flutter项目体检.` | `【MacOS@SourceTree】🐦Flutter项目体检.command` |
+| 9 | `🔨修复Flutter项目中文路径` | `【MacOS@SourceTree】♻️修复Flutter项目中文路径.command` |
+| 10 | `3️⃣Flutter重新拉取第三方依赖` | `【MacOS@SourceTree】🐦Flutter重新拉取第三方依赖.command` |
+| 11 | `📦打包生成APK文件（Flutter.Android）` | `【MacOS@SourceTree】📦双击打包Flutter.android.command` |
+| 12 | `📦打包生成iPA文件（Flutter.iOS）` | `【MacOS@SourceTree】📦双击打包Flutter.iOS.command` |
+| 13 | `📦打包生成iPA文件（iOS原生）` | `【MacOS@SourceTree】📦双击自动生成ipa文件.command` |
+| 14 | `🌍同步edgetunnel代码后手动升级` | `【MacOS@SourceTree】同步edgetunnel代码后手动升级.command` |
+
+这些操作都是仓库级自定义操作，参数统一为 `$REPO`，并在独立窗口中显示完整输出。
+
+### 2.4、业务脚本目录
 
 除了安装器目录外，其它业务脚本目录必须满足：
 
@@ -193,7 +216,9 @@ ${HOME}/SourceTree.command/assets
 
 ### 6.2、生成运行时 `actions.plist`
 
-脚本不会直接把模板 `actions.plist` 原样写入 Sourcetree，而是会用 `python3` 读取模板，扫描固定部署目录里的业务 `.command` 脚本，并把模板里旧的脚本路径改写成固定部署目录下的真实路径。
+模板 `actions.plist` 保存了右键“自定义操作”的菜单顺序、名称、参数和输出方式。安装脚本会用 `python3` 读取模板，扫描固定部署目录里的业务 `.command` 脚本，并把模板里的脚本路径改写成当前用户固定部署目录下的真实路径。
+
+安装时以模板中的 14 项菜单为完整目标集合，不会自动把脚本包里其它 `.command` 目录追加到菜单。
 
 例如模板里引用：
 
@@ -352,6 +377,7 @@ brew install python
 | --- | --- |
 | 覆盖部署目录 | 会复制/覆盖 `${HOME}/SourceTree.command` 下同名脚本文件夹和安装器目录 |
 | 改写菜单配置 | 会写入 `${HOME}/Library/Application Support/SourceTree/actions.plist` |
+| 菜单集合替换 | 目标 `actions.plist` 会按模板的 14 项自定义操作完整替换，不保留模板外的菜单项 |
 | 自动备份 | 覆盖前会备份旧 `actions.plist`，但仍属于配置替换操作 |
 | 自动重启 | 仅当 `actions.plist` 实际变化时，会自动重启 Sourcetree |
 | 路径绑定 | 菜单最终会绑定到 `${HOME}/SourceTree.command` 下的脚本，不再指向源目录 |
@@ -390,7 +416,7 @@ cat "/tmp/【MacOS】安装SourceTree自定义菜单.log"
 
 ## 十二、未执行声明 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-当前 README 仅根据 `【MacOS】安装SourceTree自定义菜单.command` 的脚本内容编写。
+当前 README 根据 `【MacOS】安装SourceTree自定义菜单.command` 的脚本行为，以及本机 Sourcetree 右键“自定义操作”的实际菜单结构编写。
 
 未在本机实际执行以下有副作用操作：
 
