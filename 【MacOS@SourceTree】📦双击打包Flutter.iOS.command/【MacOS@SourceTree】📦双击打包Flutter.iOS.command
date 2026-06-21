@@ -1,9 +1,13 @@
 #!/bin/zsh
+# 脚本自述：
+# - 脚本名称：【MacOS@SourceTree】📦双击打包Flutter.iOS.command
+# - 核心用途：执行“📦双击打包Flutter.iOS”对应的移动端项目自动化任务。
+# - 影响范围：可能修改项目依赖、生成文件、构建产物或开发工具配置。
+# - 运行提示：运行后会先打印内置自述；Sourcetree 模式无交互连续执行，终端模式确认后继续。
 # =====================================================================
 # Jobs 标准化脚本外壳
 # 说明：保留原脚本业务逻辑，补齐 README 防误触、彩色日志、zsh 入口、Homebrew 健康自检标准。
 # =====================================================================
-
 # Sourcetree 自定义动作可能只传脚本名，不传绝对路径；这里兜底找回真实脚本位置。
 resolve_script_path() {
   local script_source="${BASH_SOURCE[0]:-${(%):-%x}}"
@@ -13,8 +17,8 @@ resolve_script_path() {
   for candidate in \
     "$script_source" \
     "${PWD}/${script_source}" \
-    "${HOME}/SourceTree.sh/${script_name}/${script_name}" \
-    "${HOME}/Documents/Github/JobsGenesis/SourceTree.sh/${script_name}/${script_name}"; do
+    "${HOME}/SourceTree.command/${script_name}/${script_name}" \
+    "${HOME}/Documents/Github/JobsGenesis/SourceTree.command/${script_name}/${script_name}"; do
     [[ -n "$candidate" && -f "$candidate" ]] || continue
     (cd "$(dirname "$candidate")" 2>/dev/null && printf "%s/%s\n" "$(pwd -P)" "$(basename "$candidate")")
     return 0
@@ -27,13 +31,11 @@ SCRIPT_PATH="$(resolve_script_path)"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd -P)"
 SCRIPT_BASENAME="$(basename "$SCRIPT_PATH" | sed 's/\.[^.]*$//')"
 LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"
-: > "$LOG_FILE"
-
 # 识别 Sourcetree 自定义动作的瘦身运行环境，系统终端双击运行不降级。
 is_sourcetree_runtime() {
   env | grep -Eqi '^SOURCETREE|^SOURCE_TREE' && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/SourceTree.sh/"* ]] && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/Documents/Github/JobsGenesis/SourceTree.sh/"* ]] && return 0
+  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/SourceTree.command/"* ]] && return 0
+  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/Documents/Github/JobsGenesis/SourceTree.command/"* ]] && return 0
 
   local pid="$PPID"
   local command_name=""
@@ -49,21 +51,13 @@ is_sourcetree_runtime() {
 }
 
 IS_SOURCETREE_RUNTIME=0
-is_sourcetree_runtime && IS_SOURCETREE_RUNTIME=1
 
-[[ -n "${TERM:-}" ]] || export TERM="dumb"
 SOURCETREE_PLAIN_OUTPUT=0
-if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" ]]; then
-  SOURCETREE_PLAIN_OUTPUT=1
-  export NO_COLOR="${NO_COLOR:-1}"
-  export CLICOLOR="0"
-  export ANSI_COLORS_DISABLED="1"
-fi
-
+# 封装 strip ansi text 对应的独立处理逻辑。
 strip_ansi_text() {
   perl -pe 's/\e\[[0-9;]*[[:alpha:]]//g'
 }
-
+# 统一输出终端信息并同步记录日志。
 log() {
   if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == "1" ]]; then
     printf "%b\n" "$1" | strip_ansi_text | tee -a "$LOG_FILE"
@@ -71,25 +65,37 @@ log() {
     printf "%b\n" "$1" | tee -a "$LOG_FILE"
   fi
 }
+# 输出 color echo 对应级别的日志信息。
 color_echo()     { log "\033[1;32m$1\033[0m"; }
+# 输出 info echo 对应级别的日志信息。
 info_echo()      { log "\033[1;34mℹ $1\033[0m"; }
+# 输出 success echo 对应级别的日志信息。
 success_echo()   { log "\033[1;32m✔ $1\033[0m"; }
+# 输出 warn echo 对应级别的日志信息。
 warn_echo()      { log "\033[1;33m⚠ $1\033[0m"; }
+# 输出 warm echo 对应级别的日志信息。
 warm_echo()      { log "\033[1;33m$1\033[0m"; }
+# 输出 note echo 对应级别的日志信息。
 note_echo()      { log "\033[1;35m➤ $1\033[0m"; }
+# 输出 error echo 对应级别的日志信息。
 error_echo()     { log "\033[1;31m✖ $1\033[0m"; }
+# 输出 err echo 对应级别的日志信息。
 err_echo()       { log "\033[1;31m$1\033[0m"; }
+# 输出 debug echo 对应级别的日志信息。
 debug_echo()     { log "\033[1;35m🐞 $1\033[0m"; }
+# 输出 highlight echo 对应级别的日志信息。
 highlight_echo() { log "\033[1;36m🔹 $1\033[0m"; }
+# 输出 gray echo 对应级别的日志信息。
 gray_echo()      { log "\033[0;90m$1\033[0m"; }
+# 输出 bold echo 对应级别的日志信息。
 bold_echo()      { log "\033[1m$1\033[0m"; }
+# 输出 underline echo 对应级别的日志信息。
 underline_echo() { log "\033[4m$1\033[0m"; }
-
 # ============================= 标准工具函数 =============================
 get_cpu_arch() {
   [[ "$(uname -m)" == "arm64" ]] && echo "arm64" || echo "x86_64"
 }
-
+# 封装 abs path 对应的独立处理逻辑。
 abs_path() {
   local p="$1"
   [[ -z "$p" ]] && return 1
@@ -103,8 +109,12 @@ abs_path() {
     return 1
   fi
 }
-
+# 收集并校验 ask run 对应的用户确认。
 ask_run() {
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
+    gray_echo "Sourcetree 连续执行模式已跳过当前可选交互。"
+    return 1
+  fi
   echo ""
   note_echo "👉 $1"
   gray_echo "【回车=跳过，输入任意字符后回车=执行】"
@@ -112,8 +122,12 @@ ask_run() {
   IFS= read -r "input?➤ "
   [[ -n "$input" ]]
 }
-
+# 收集并校验 confirm yes 对应的用户确认。
 confirm_yes() {
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
+    gray_echo "Sourcetree 连续执行模式已跳过当前可选交互。"
+    return 1
+  fi
   echo ""
   warn_echo "⚠ $1"
   gray_echo "危险操作必须输入 YES 后回车；其它输入一律取消。"
@@ -121,7 +135,7 @@ confirm_yes() {
   IFS= read -r "input?➤ "
   [[ "$input" == "YES" ]]
 }
-
+# 封装 inject shellenv block 对应的独立处理逻辑。
 inject_shellenv_block() {
   local profile_file="$1"
   local shellenv_cmd="$2"
@@ -143,7 +157,7 @@ inject_shellenv_block() {
   fi
   eval "$shellenv_cmd" || true
 }
-
+# 封装 activate homebrew shellenv 对应的独立处理逻辑。
 activate_homebrew_shellenv() {
   local arch="$(get_cpu_arch)"
   local brew_bin=""
@@ -166,7 +180,7 @@ activate_homebrew_shellenv() {
   inject_shellenv_block "$profile_file" "eval \"\$(${brew_bin} shellenv)\""
   eval "$(${brew_bin} shellenv)"
 }
-
+# 执行 run brew health update 对应的独立业务步骤。
 run_brew_health_update() {
   info_echo "正在执行 Homebrew 健康更新..."
   brew update  || { error_echo "brew update 失败"; return 1; }
@@ -176,7 +190,7 @@ run_brew_health_update() {
   brew -v      || warn_echo "打印 brew 版本失败，可忽略"
   success_echo "Homebrew 健康更新完成"
 }
-
+# 准备并配置 install homebrew 对应的运行条件。
 install_homebrew() {
   local arch="$(get_cpu_arch)"
   local brew_bin=""
@@ -203,7 +217,7 @@ install_homebrew() {
     note_echo "已跳过 Homebrew 更新"
   fi
 }
-
+# 封装 brew install or upgrade 对应的独立处理逻辑。
 brew_install_or_upgrade() {
   local formula="$1"
   [[ -z "$formula" ]] && return 1
@@ -222,8 +236,11 @@ brew_install_or_upgrade() {
     fi
   fi
 }
-
+# 输出 show readme and wait 对应的说明与结果。
 show_readme_and_wait() {
+  if typeset -f is_sourcetree_runtime >/dev/null 2>&1 && is_sourcetree_runtime; then
+    IS_SOURCETREE_RUNTIME=1
+  fi
   if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
     clear
   fi
@@ -240,13 +257,17 @@ show_readme_and_wait() {
   highlight_echo "======================================================================="
   echo ""
 
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 0 ]]; then
-    read "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..."
-  else
-    gray_echo "当前为 Sourcetree 或非交互输入环境，已跳过回车等待。"
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
+    gray_echo "已识别为 Sourcetree 自定义动作，将跳过交互并连续执行。"
+    return 0
   fi
+  if [[ ! -t 0 ]]; then
+    error_echo "当前不是 Sourcetree，且没有可交互输入；请在终端中重新运行。"
+    return 1
+  fi
+  read "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..."
 }
-
+# 执行 run original logic 对应的独立业务步骤。
 run_original_logic() {
   # ============================= 原脚本业务逻辑区 =============================
   # 【SourceTree 专用】Flutter iOS 打包（自动发现子项目，纯文本；全局心跳 + 分阶段耗时）
@@ -257,14 +278,21 @@ run_original_logic() {
   SCRIPT_BASENAME="macos_sourcetree_build_ios"
   LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"; : > "$LOG_FILE"
   BUILD_LOG="/tmp/flutter_build_ios.log"; : > "$BUILD_LOG"
-
+  # 统一输出终端信息并同步记录日志。
   log()      { echo "$1" | tee -a "$LOG_FILE"; }
+  # 输出 info 对应级别的日志信息。
   info()     { log "[INFO] $*"; }
+  # 封装 ok 对应的独立处理逻辑。
   ok()       { log "[OK]   $*"; }
+  # 输出 warn 对应级别的日志信息。
   warn()     { log "[WARN] $*"; }
+  # 输出 err 对应级别的日志信息。
   err()      { log "[ERR]  $*" >&2; }
+  # 封装 hr 对应的独立处理逻辑。
   hr()       { log "----------------------------------------------------------------"; }
+  # 封装 section 对应的独立处理逻辑。
   section()  { hr; log "== $* =="; hr; }
+  # 封装 ts 对应的独立处理逻辑。
   ts()       { date "+%Y-%m-%d %H:%M:%S"; }
 
   HEARTBEAT_SECS="${HEARTBEAT_SECS:-15}"   # 心跳间隔（秒）
@@ -273,6 +301,7 @@ run_original_logic() {
 
   # ======== 全局存活心跳（无论卡哪都能看到） ========
   HB_PID=""
+  # 封装 start global hb 对应的独立处理逻辑。
   start_global_hb() {
     (
       while :; do
@@ -281,8 +310,9 @@ run_original_logic() {
       done
     ) & HB_PID=$!
   }
+  # 封装 stop global hb 对应的独立处理逻辑。
   stop_global_hb() { [[ -n "${HB_PID:-}" ]] && kill "$HB_PID" 2>/dev/null || true; }
-
+  # 封装 cleanup 对应的独立处理逻辑。
   cleanup() { stop_global_hb; }
   trap cleanup EXIT INT TERM
 
@@ -301,10 +331,8 @@ run_original_logic() {
   done
 
   BASE_DIR="${1:-$PWD}"
-
   # ================= 辅助函数 =================
   is_flutter_root() { [[ -f "$1/pubspec.yaml" && -d "$1/lib" ]]; }
-
   # 带心跳的长任务执行器（阶段心跳 + 耗时 + 保留退出码）
   run_with_heartbeat() {
     local title="$1"; shift
@@ -342,7 +370,6 @@ run_original_logic() {
     fi
     return $ec
   }
-
   # ================= 定位 Flutter 项目（自动向下搜索） =================
   resolve_flutter_root() {
     STEP="resolve"
@@ -370,7 +397,6 @@ run_original_logic() {
     err "未找到 Flutter 项目（缺 pubspec.yaml 或 lib/）"
     exit 1
   }
-
   # ================= 选择 flutter 命令 =================
   choose_flutter_cmd() {
     STEP="choose_flutter"
@@ -380,7 +406,6 @@ run_original_logic() {
       FLUTTER_CMD=("flutter"); info "使用：flutter"
     fi
   }
-
   # ================= 环境检查 =================
   check_env() {
     STEP="check_env"
@@ -394,7 +419,6 @@ run_original_logic() {
     fi
     ok "环境检查完成"
   }
-
   # ================= 版本打印（安全，不早退） =================
   print_versions() {
     STEP="versions"
@@ -418,16 +442,15 @@ run_original_logic() {
     fi
     set -e
   }
-
   # ================= pub get & build ipa =================
   pub_get()   { run_with_heartbeat "flutter pub get" "$FLUTTER_ROOT" "${FLUTTER_CMD[@]}" pub get; }
+  # 执行 build ios 对应的独立业务步骤。
   build_ios() {
     local args=(build ipa "--$BUILD_MODE")
     [[ -n "$FLAVOR" ]] && args+=(--flavor "$FLAVOR")
     run_with_heartbeat "flutter build ipa ($BUILD_MODE${FLAVOR:+ / flavor=$FLAVOR})" \
                        "$FLUTTER_ROOT" "${FLUTTER_CMD[@]}" "${args[@]}"
   }
-
   # ================= 打开产物（存在才开） =================
   open_if_exists() {
     local p="$1"
@@ -438,7 +461,7 @@ run_original_logic() {
       warn "不存在：$p"
     fi
   }
-
+  # 执行 open outputs 对应的独立业务步骤。
   open_outputs() {
     STEP="open_outputs"
     local ipa_dir="$FLUTTER_ROOT/build/ios/ipa"
@@ -467,7 +490,6 @@ run_original_logic() {
 
     warn "未发现 IPA 或 xcarchive。请查看构建日志：$BUILD_LOG"
   }
-
   # ================= 主流程 =================
   main() {
     start_global_hb
@@ -498,10 +520,28 @@ run_original_logic() {
 
   # =========================== 原脚本业务逻辑区结束 ===========================
 }
-
+# 编排脚本的高层业务流程。
+# 初始化脚本运行环境，并集中承载原有的顶层执行逻辑。
+initialize_script_runtime() {
+  : > "$LOG_FILE"
+  is_sourcetree_runtime && IS_SOURCETREE_RUNTIME=1
+  [[ -n "${TERM:-}" ]] || export TERM="dumb"
+  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" ]]; then
+    SOURCETREE_PLAIN_OUTPUT=1
+    export NO_COLOR="${NO_COLOR:-1}"
+    export CLICOLOR="0"
+    export ANSI_COLORS_DISABLED="1"
+  fi
+}
+# 编排脚本的高层业务流程。
 main() {
+  # 展示脚本内置自述，并按运行入口完成防误触确认。
   show_readme_and_wait
+  # 初始化 Shell 选项、日志、依赖和入口运行状态。
+  initialize_script_runtime
+  # 执行 run_original_logic 对应的核心业务步骤。
   run_original_logic "$@"
+  # 输出脚本执行结果、摘要和日志位置。
   success_echo "脚本执行结束。日志：$LOG_FILE"
 }
 
