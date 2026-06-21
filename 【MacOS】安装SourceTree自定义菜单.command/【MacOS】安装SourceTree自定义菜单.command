@@ -12,6 +12,7 @@ SCRIPT_PATH="${0:A}"
 SCRIPT_DIR="${SCRIPT_PATH:h}"
 SCRIPT_BASENAME="${SCRIPT_PATH:t:r}"
 INSTALL_DIR_NAME="${SCRIPT_DIR:t}"
+LEGACY_INSTALL_DIR_NAME="install.command"
 LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"
 
 SOURCE_PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
@@ -138,6 +139,24 @@ check_local_actions_plist() {
     success_echo "检测通过：actions.plist 模板存在"
     gray_echo "模板路径：${SOURCE_ACTIONS_PLIST}"
 }
+# 识别当前安装器目录与旧版 install.command 安装器残留。
+is_installer_directory() {
+    local command_dir="$1"
+    local command_name="${command_dir:t}"
+    local installer_file="${command_dir}/${SCRIPT_PATH:t}"
+
+    if [[ "${command_name}" == "${INSTALL_DIR_NAME}" ]]; then
+        return 0
+    fi
+
+    if [[ "${command_name}" == "${LEGACY_INSTALL_DIR_NAME}" \
+        && -f "${command_dir}/actions.plist" \
+        && -f "${installer_file}" ]]; then
+        return 0
+    fi
+
+    return 1
+}
 # 检查 check command structure in dir 所需条件，不满足时阻止继续执行。
 check_command_structure_in_dir() {
     local base_dir="$1"
@@ -158,11 +177,14 @@ check_command_structure_in_dir() {
     for command_dir in "${base_dir}"/*.command(N/); do
         command_name="${command_dir:t}"
 
-        # install.command 是安装器目录，里面放 actions.plist 和本安装脚本。
-        # 它不是 SourceTree 菜单业务脚本目录，所以不能按“同名 .command + README.md”的业务格式校验。
-        if [[ "${command_name}" == "${INSTALL_DIR_NAME}" ]]; then
+        # 安装器目录不是菜单业务脚本；旧版 install.command 必须同时包含模板和安装脚本才能跳过。
+        if is_installer_directory "${command_dir}"; then
             skipped_installer_count=$((skipped_installer_count + 1))
-            gray_echo "跳过安装器目录：${command_dir}"
+            if [[ "${command_name}" == "${LEGACY_INSTALL_DIR_NAME}" ]]; then
+                warn_echo "跳过旧版安装器残留：${command_dir}"
+            else
+                gray_echo "跳过安装器目录：${command_dir}"
+            fi
             continue
         fi
 
@@ -720,7 +742,7 @@ prompt_open_result_dirs() {
 # 1. 显示说明并等待用户确认
 # 2. 禁止 sudo/root 误执行
 # 3. 校验源 actions.plist 模板是否存在
-# 4. 校验源脚本包是否为业务 .command 独立文件夹结构，并跳过 install.command 安装器目录
+# 4. 校验源脚本包是否为业务 .command 独立文件夹结构，并识别当前/旧版安装器目录
 # 5. 把脚本包部署到 ${HOME}/SourceTree.command，也就是 Jobs 机器上的 /Users/jobs/SourceTree.command
 # 6. 校验 SourceTree 是否已安装；未安装则引导安装并循环等待
 # 7. 基于固定部署目录生成运行时 actions.plist

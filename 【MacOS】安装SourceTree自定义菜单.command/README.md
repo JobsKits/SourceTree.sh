@@ -76,6 +76,10 @@ SourceTree.command/
 | `actions.plist` | Sourcetree 自定义菜单模板 |
 | `README.md` | 双击执行前阅读说明 |
 
+旧版曾将安装器部署到 `${HOME}/SourceTree.command/install.command`。当该目录同时包含 `actions.plist` 和 `【MacOS】安装SourceTree自定义菜单.command` 时，脚本会将它识别为旧版安装器残留，不按“同名业务脚本”规则校验。
+
+该兼容逻辑不会自动删除旧目录；当前安装器仍统一部署到 `${HOME}/SourceTree.command/【MacOS】安装SourceTree自定义菜单.command`。
+
 ### 2.3、自定义操作菜单
 
 `actions.plist` 以当前 Mac 中右键单个项目后显示的“自定义操作”为菜单基准，按下列顺序安装：
@@ -366,6 +370,19 @@ brew install python
    ```
 
 4. 日志文件中是否有路径改写失败、脚本缺失或权限失败提示。
+
+### 9.6、提示 `install.command/install.command` 缺失
+
+这通常不是缺少业务脚本，而是固定部署目录中保留了旧版安装器：
+
+```text
+${HOME}/SourceTree.command/install.command/
+├── 【MacOS】安装SourceTree自定义菜单.command
+├── actions.plist
+└── README.md
+```
+
+脚本会通过 `actions.plist` 和安装脚本联合确认它的身份并跳过业务结构校验。如果同名目录不满足这两项条件，仍会按普通业务 `.command` 目录报错，避免静默忽略真实结构问题。
 
 ---
 
