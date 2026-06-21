@@ -15,7 +15,7 @@
 固定部署目录：
 
 ```shell
-${HOME}/SourceTree.sh
+${HOME}/SourceTree.command
 ```
 
 Sourcetree 自定义菜单配置文件：
@@ -29,7 +29,7 @@ ${HOME}/Library/Application Support/SourceTree/actions.plist
 ## 一、适用场景 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 - 已经整理好一套 Sourcetree 自定义菜单脚本，希望一键安装到当前 Mac 用户环境。
-- 希望 Sourcetree 菜单里的脚本路径稳定指向 `${HOME}/SourceTree.sh`，而不是临时目录。
+- 希望 Sourcetree 菜单里的脚本路径稳定指向 `${HOME}/SourceTree.command`，而不是临时目录。
 - 需要把多个业务 `.command` 脚本以统一结构部署，并同步写入 Sourcetree 的 `actions.plist`。
 - 适合从压缩包、仓库目录或本地脚本包中执行安装。
 
@@ -42,7 +42,7 @@ ${HOME}/Library/Application Support/SourceTree/actions.plist
 脚本包建议保持下面这种结构：
 
 ```text
-SourceTree.sh/
+SourceTree.command/
 ├── 业务脚本A.command/
 │   ├── 业务脚本A.command
 │   └── README.md
@@ -101,7 +101,7 @@ SourceTree.sh/
 | `actions.plist` | 必须和安装脚本位于同一目录 |
 | 业务脚本 | 每个业务 `.command` 文件夹内必须有同名 `.command` 文件 |
 | [**Python**](https://www.python.org) | 系统需要能找到 `python3`，用于安全改写 `actions.plist` |
-| 权限 | 当前用户需要能写入 `${HOME}/SourceTree.sh` 和 Sourcetree 配置目录 |
+| 权限 | 当前用户需要能写入 `${HOME}/SourceTree.command` 和 Sourcetree 配置目录 |
 
 不要使用下面这种方式运行：
 
@@ -152,7 +152,7 @@ flowchart TD
     B --> C[禁止 sudo/root 执行]
     C --> D[检查安装器目录 actions.plist]
     D --> E[检查源项目业务 .command 目录结构]
-    E --> F[部署脚本包到 HOME/SourceTree.sh]
+    E --> F[部署脚本包到 HOME/SourceTree.command]
     F --> G[检查 Sourcetree 是否已安装]
     G --> H[基于固定部署目录生成运行时 actions.plist]
     H --> I[比较运行时 actions.plist 与 Sourcetree 目标文件]
@@ -174,22 +174,22 @@ flowchart TD
 脚本会把源项目根目录下的业务 `.command` 文件夹复制到：
 
 ```shell
-${HOME}/SourceTree.sh
+${HOME}/SourceTree.command
 ```
 
 同时会复制当前安装器目录到：
 
 ```shell
-${HOME}/SourceTree.sh/【MacOS】安装SourceTree自定义菜单.command
+${HOME}/SourceTree.command/【MacOS】安装SourceTree自定义菜单.command
 ```
 
 如果源项目根目录存在 `assets` 目录，也会同步到：
 
 ```shell
-${HOME}/SourceTree.sh/assets
+${HOME}/SourceTree.command/assets
 ```
 
-根目录下的普通文件也会复制到 `${HOME}/SourceTree.sh`。
+根目录下的普通文件也会复制到 `${HOME}/SourceTree.command`。
 
 ### 6.2、生成运行时 `actions.plist`
 
@@ -204,7 +204,7 @@ ${HOME}/SourceTree.sh/assets
 运行时会被改写成类似：
 
 ```text
-/Users/jobs/SourceTree.sh/同步代码.command/同步代码.command
+/Users/jobs/SourceTree.command/同步代码.command/同步代码.command
 ```
 
 这里的 `/Users/jobs` 会随当前用户的 `${HOME}` 自动变化。
@@ -246,8 +246,8 @@ actions.plist.bak.年月日_时分秒
 
 | 路径 | 说明 |
 | --- | --- |
-| `${HOME}/SourceTree.sh` | 固定部署目录 |
-| `${HOME}/SourceTree.sh/【MacOS】安装SourceTree自定义菜单.command` | 安装器部署目录 |
+| `${HOME}/SourceTree.command` | 固定部署目录 |
+| `${HOME}/SourceTree.command/【MacOS】安装SourceTree自定义菜单.command` | 安装器部署目录 |
 | `${HOME}/Library/Application Support/SourceTree` | Sourcetree 配置目录 |
 | `${HOME}/Library/Application Support/SourceTree/actions.plist` | Sourcetree 自定义菜单配置 |
 | `/tmp/【MacOS】安装SourceTree自定义菜单.log` | 本脚本日志文件 |
@@ -305,7 +305,7 @@ tail -f "/tmp/【MacOS】安装SourceTree自定义菜单.log"
 正确结构示例：
 
 ```text
-SourceTree.sh/
+SourceTree.command/
 ├── 某业务脚本.command/
 │   ├── 某业务脚本.command
 │   └── README.md
@@ -350,13 +350,13 @@ brew install python
 
 | 风险点 | 说明 |
 | --- | --- |
-| 覆盖部署目录 | 会复制/覆盖 `${HOME}/SourceTree.sh` 下同名脚本文件夹和安装器目录 |
+| 覆盖部署目录 | 会复制/覆盖 `${HOME}/SourceTree.command` 下同名脚本文件夹和安装器目录 |
 | 改写菜单配置 | 会写入 `${HOME}/Library/Application Support/SourceTree/actions.plist` |
 | 自动备份 | 覆盖前会备份旧 `actions.plist`，但仍属于配置替换操作 |
 | 自动重启 | 仅当 `actions.plist` 实际变化时，会自动重启 Sourcetree |
-| 路径绑定 | 菜单最终会绑定到 `${HOME}/SourceTree.sh` 下的脚本，不再指向源目录 |
+| 路径绑定 | 菜单最终会绑定到 `${HOME}/SourceTree.command` 下的脚本，不再指向源目录 |
 
-脚本不会主动删除 `${HOME}/SourceTree.sh` 里的额外文件，但会覆盖同名业务脚本文件夹、安装器目录和根目录同名文件。
+脚本不会主动删除 `${HOME}/SourceTree.command` 里的额外文件，但会覆盖同名业务脚本文件夹、安装器目录和根目录同名文件。
 
 ---
 
@@ -371,7 +371,7 @@ zsh -n "./【MacOS】安装SourceTree自定义菜单.command"
 执行后可以检查固定部署目录：
 
 ```shell
-find "${HOME}/SourceTree.sh" -maxdepth 2 -type f
+find "${HOME}/SourceTree.command" -maxdepth 2 -type f
 ```
 
 检查 Sourcetree 配置文件：
@@ -401,7 +401,7 @@ cat "/tmp/【MacOS】安装SourceTree自定义菜单.log"
 也未实际写入：
 
 ```shell
-${HOME}/SourceTree.sh
+${HOME}/SourceTree.command
 ${HOME}/Library/Application Support/SourceTree/actions.plist
 ```
 

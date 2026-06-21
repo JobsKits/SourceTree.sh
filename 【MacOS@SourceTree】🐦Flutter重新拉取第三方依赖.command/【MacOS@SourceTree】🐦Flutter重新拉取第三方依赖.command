@@ -1,9 +1,13 @@
 #!/bin/zsh
+# 脚本自述：
+# - 脚本名称：【MacOS@SourceTree】🐦Flutter重新拉取第三方依赖.command
+# - 核心用途：执行“🐦Flutter重新拉取第三方依赖”对应的移动端项目自动化任务。
+# - 影响范围：可能修改项目依赖、生成文件、构建产物或开发工具配置。
+# - 运行提示：运行后会先打印内置自述；Sourcetree 模式无交互连续执行，终端模式确认后继续。
 # =====================================================================
 # Jobs 标准化脚本外壳
 # 说明：保留原脚本业务逻辑，补齐 README 防误触、彩色日志、zsh 入口、Homebrew 健康自检标准。
 # =====================================================================
-
 # Sourcetree 自定义动作可能只传脚本名，不传绝对路径；这里兜底找回真实脚本位置。
 resolve_script_path() {
   local script_source="${BASH_SOURCE[0]:-${(%):-%x}}"
@@ -13,8 +17,8 @@ resolve_script_path() {
   for candidate in \
     "$script_source" \
     "${PWD}/${script_source}" \
-    "${HOME}/SourceTree.sh/${script_name}/${script_name}" \
-    "${HOME}/Documents/Github/JobsGenesis/SourceTree.sh/${script_name}/${script_name}"; do
+    "${HOME}/SourceTree.command/${script_name}/${script_name}" \
+    "${HOME}/Documents/Github/JobsGenesis/SourceTree.command/${script_name}/${script_name}"; do
     [[ -n "$candidate" && -f "$candidate" ]] || continue
     (cd "$(dirname "$candidate")" 2>/dev/null && printf "%s/%s\n" "$(pwd -P)" "$(basename "$candidate")")
     return 0
@@ -27,13 +31,11 @@ SCRIPT_PATH="$(resolve_script_path)"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd -P)"
 SCRIPT_BASENAME="$(basename "$SCRIPT_PATH" | sed 's/\.[^.]*$//')"
 LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"
-: > "$LOG_FILE"
-
 # 识别 Sourcetree 自定义动作的瘦身运行环境，系统终端双击运行不降级。
 is_sourcetree_runtime() {
   env | grep -Eqi '^SOURCETREE|^SOURCE_TREE' && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/SourceTree.sh/"* ]] && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/Documents/Github/JobsGenesis/SourceTree.sh/"* ]] && return 0
+  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/SourceTree.command/"* ]] && return 0
+  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/Documents/Github/JobsGenesis/SourceTree.command/"* ]] && return 0
 
   local pid="$PPID"
   local command_name=""
@@ -49,22 +51,12 @@ is_sourcetree_runtime() {
 }
 
 IS_SOURCETREE_RUNTIME=0
-is_sourcetree_runtime && IS_SOURCETREE_RUNTIME=1
 
-[[ -n "${TERM:-}" ]] || export TERM="dumb"
 SOURCETREE_PLAIN_OUTPUT=0
-if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" ]]; then
-  SOURCETREE_PLAIN_OUTPUT=1
-  export NO_COLOR="${NO_COLOR:-1}"
-  export CLICOLOR="0"
-  export ANSI_COLORS_DISABLED="1"
-fi
-
 # 封装 strip_ansi_text 对应的独立处理逻辑。
 strip_ansi_text() {
   perl -pe 's/\e\[[0-9;]*[[:alpha:]]//g'
 }
-
 # 按当前输出级别记录终端信息，并同步写入脚本日志。
 log() {
   if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == "1" ]]; then
@@ -99,12 +91,10 @@ gray_echo()      { log "\033[0;90m$1\033[0m"; }
 bold_echo()      { log "\033[1m$1\033[0m"; }
 # 按当前输出级别记录终端信息，并同步写入脚本日志。
 underline_echo() { log "\033[4m$1\033[0m"; }
-
 # ============================= 标准工具函数 =============================
 get_cpu_arch() {
   [[ "$(uname -m)" == "arm64" ]] && echo "arm64" || echo "x86_64"
 }
-
 # 封装 abs_path 对应的独立处理逻辑。
 abs_path() {
   local p="$1"
@@ -119,9 +109,12 @@ abs_path() {
     return 1
   fi
 }
-
 # 收集并校验用户输入，决定后续执行路径。
 ask_run() {
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
+    gray_echo "Sourcetree 连续执行模式已跳过当前可选交互。"
+    return 1
+  fi
   echo ""
   note_echo "👉 $1"
   gray_echo "【回车=跳过，输入任意字符后回车=执行】"
@@ -129,9 +122,12 @@ ask_run() {
   IFS= read -r "input?➤ "
   [[ -n "$input" ]]
 }
-
 # 收集并校验用户输入，决定后续执行路径。
 confirm_yes() {
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
+    gray_echo "Sourcetree 连续执行模式已跳过当前可选交互。"
+    return 1
+  fi
   echo ""
   warn_echo "⚠ $1"
   gray_echo "危险操作必须输入 YES 后回车；其它输入一律取消。"
@@ -139,7 +135,6 @@ confirm_yes() {
   IFS= read -r "input?➤ "
   [[ "$input" == "YES" ]]
 }
-
 # 封装 inject_shellenv_block 对应的独立处理逻辑。
 inject_shellenv_block() {
   local profile_file="$1"
@@ -162,7 +157,6 @@ inject_shellenv_block() {
   fi
   eval "$shellenv_cmd" || true
 }
-
 # 封装 activate_homebrew_shellenv 对应的独立处理逻辑。
 activate_homebrew_shellenv() {
   local arch="$(get_cpu_arch)"
@@ -186,7 +180,6 @@ activate_homebrew_shellenv() {
   inject_shellenv_block "$profile_file" "eval \"\$(${brew_bin} shellenv)\""
   eval "$(${brew_bin} shellenv)"
 }
-
 # 执行已经拆分完成的独立业务步骤。
 run_brew_health_update() {
   info_echo "正在执行 Homebrew 健康更新..."
@@ -197,7 +190,6 @@ run_brew_health_update() {
   brew -v      || warn_echo "打印 brew 版本失败，可忽略"
   success_echo "Homebrew 健康更新完成"
 }
-
 # 执行对应的环境配置或同步处理。
 install_homebrew() {
   local arch="$(get_cpu_arch)"
@@ -225,7 +217,6 @@ install_homebrew() {
     note_echo "已跳过 Homebrew 更新"
   fi
 }
-
 # 封装 brew_install_or_upgrade 对应的独立处理逻辑。
 brew_install_or_upgrade() {
   local formula="$1"
@@ -245,9 +236,11 @@ brew_install_or_upgrade() {
     fi
   fi
 }
-
 # 展示脚本用途和影响范围，并在执行前等待用户确认。
 show_readme_and_wait() {
+  if typeset -f is_sourcetree_runtime >/dev/null 2>&1 && is_sourcetree_runtime; then
+    IS_SOURCETREE_RUNTIME=1
+  fi
   if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
     clear
   fi
@@ -264,13 +257,16 @@ show_readme_and_wait() {
   highlight_echo "======================================================================="
   echo ""
 
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 0 ]]; then
-    read "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..."
-  else
-    gray_echo "当前为 Sourcetree 或非交互输入环境，已跳过回车等待。"
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
+    gray_echo "已识别为 Sourcetree 自定义动作，将跳过交互并连续执行。"
+    return 0
   fi
+  if [[ ! -t 0 ]]; then
+    error_echo "当前不是 Sourcetree，且没有可交互输入；请在终端中重新运行。"
+    return 1
+  fi
+  read "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..."
 }
-
 # 执行已经拆分完成的独立业务步骤。
 run_original_logic() {
   # ============================= 原脚本业务逻辑区 =============================
@@ -279,14 +275,12 @@ run_original_logic() {
   # ================================== 全局变量 ==================================
   SCRIPT_BASENAME="$(basename "$SCRIPT_PATH" | sed 's/\.[^.]*$//')"
   LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"
-
   # ================================== 输出函数 ==================================
   log()            { echo -e "$1" | tee -a "$LOG_FILE"; }
   # 按当前输出级别记录终端信息，并同步写入脚本日志。
   success_echo()   { log "✔ $1"; }
   # 按当前输出级别记录终端信息，并同步写入脚本日志。
   error_echo()     { log "❌ $1"; }
-
   # ================================== 参数检查 ==================================
   check_args() {
     PROJECT_DIR="${1:-}"
@@ -301,7 +295,6 @@ run_original_logic() {
     fi
     echo "$PROJECT_DIR"
   }
-
   # ================================== 执行核心逻辑 ==================================
   run_flutter_clean_get() {
     local dir="$1"
@@ -317,7 +310,6 @@ run_original_logic() {
 
     success_echo "执行完成 ✅"
   }
-
   # ================================== 主函数 ==================================
   main() {
     local project_dir
@@ -329,18 +321,29 @@ run_original_logic() {
 
   # =========================== 原脚本业务逻辑区结束 ===========================
 }
-
-# 编排完整业务流程，复杂步骤继续下沉到职责明确的函数。
-run_main_flow() {
-  show_readme_and_wait
-  run_original_logic "$@"
-  success_echo "脚本执行结束。日志：$LOG_FILE"
+# 编排脚本的高层业务流程。
+# 初始化脚本运行环境，并集中承载原有的顶层执行逻辑。
+initialize_script_runtime() {
+  : > "$LOG_FILE"
+  is_sourcetree_runtime && IS_SOURCETREE_RUNTIME=1
+  [[ -n "${TERM:-}" ]] || export TERM="dumb"
+  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" ]]; then
+    SOURCETREE_PLAIN_OUTPUT=1
+    export NO_COLOR="${NO_COLOR:-1}"
+    export CLICOLOR="0"
+    export ANSI_COLORS_DISABLED="1"
+  fi
 }
-
-# 统一收口脚本入口，仅委托已经拆分完成的业务流程。
+# 编排脚本的高层业务流程。
 main() {
-  # 主入口只负责委托完整业务流程，复杂逻辑统一下沉。
-  run_main_flow "$@"
+  # 展示脚本内置自述，并按运行入口完成防误触确认。
+  show_readme_and_wait
+  # 初始化 Shell 选项、日志、依赖和入口运行状态。
+  initialize_script_runtime
+  # 执行 run_original_logic 对应的核心业务步骤。
+  run_original_logic "$@"
+  # 输出脚本执行结果、摘要和日志位置。
+  success_echo "脚本执行结束。日志：$LOG_FILE"
 }
 
 main "$@"

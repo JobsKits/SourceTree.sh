@@ -72,7 +72,7 @@ npx wrangler deploy --config .wrangler.jobs.local.toml
 也可以直接命令行运行：
 
 ```shell
-/Users/jobs/SourceTree.sh/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command \
+/Users/jobs/SourceTree.command/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command \
   /Users/jobs/Documents/Github/edgetunnel
 ```
 
@@ -109,7 +109,7 @@ npx wrangler deploy --config .wrangler.jobs.local.toml
 | 配置项 | 推荐值 |
 | --- | --- |
 | 菜单标题 | `同步edgetunnel代码后手动升级` |
-| 运行的脚本 | `/Users/jobs/SourceTree.sh/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command` |
+| 运行的脚本 | `/Users/jobs/SourceTree.command/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command` |
 | 参数 | `$REPO` |
 | 在单独窗口中打开 | 勾选 |
 | 显示完整输出 | 勾选 |
@@ -142,8 +142,8 @@ npx wrangler deploy --config .wrangler.jobs.local.toml
 如果刚替换过脚本，建议修复权限：
 
 ```shell
-chmod +x "/Users/jobs/SourceTree.sh/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command"
-xattr -dr com.apple.quarantine "/Users/jobs/SourceTree.sh/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command" 2>/dev/null || true
+chmod +x "/Users/jobs/SourceTree.command/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command"
+xattr -dr com.apple.quarantine "/Users/jobs/SourceTree.command/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command" 2>/dev/null || true
 ```
 
 如果刚替换过 SourceTree 自定义菜单脚本包，建议重新运行一次：
@@ -207,7 +207,7 @@ wrangler deploy --config .wrangler.jobs.local.toml
 - 如果仍想在终端里强制使用纯文本，可以这样运行：
 
   ```shell
-  JOBS_PLAIN_OUTPUT=1 /Users/jobs/SourceTree.sh/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command \
+  JOBS_PLAIN_OUTPUT=1 /Users/jobs/SourceTree.command/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command \
     /Users/jobs/Documents/Github/edgetunnel
   ```
 
@@ -323,14 +323,14 @@ xattr -dr com.apple.quarantine "/Users/jobs/Documents/Github/edgetunnel/node_mod
 重点检查：
 
 ```text
-运行的脚本 = /Users/jobs/SourceTree.sh/脚本.command/脚本.command
+运行的脚本 = /Users/jobs/SourceTree.command/脚本.command/脚本.command
 参数       = $REPO
 ```
 
 然后修复执行权限：
 
 ```shell
-chmod +x "/Users/jobs/SourceTree.sh/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command"
+chmod +x "/Users/jobs/SourceTree.command/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command"
 ```
 
 ### 7.6、SourceTree 里提示未登录怎么办？
@@ -340,7 +340,7 @@ chmod +x "/Users/jobs/SourceTree.sh/【MacOS@SourceTree】同步edgetunnel代码
 先回到终端执行：
 
 ```shell
-/Users/jobs/SourceTree.sh/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command \
+/Users/jobs/SourceTree.command/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command \
   /Users/jobs/Documents/Github/edgetunnel
 ```
 

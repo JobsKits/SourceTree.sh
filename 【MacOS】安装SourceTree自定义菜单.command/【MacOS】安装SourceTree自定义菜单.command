@@ -1,4 +1,9 @@
 #!/bin/zsh
+# 脚本自述：
+# - 脚本名称：【MacOS】安装SourceTree自定义菜单.command
+# - 核心用途：执行“安装SourceTree自定义菜单”对应的 Git / Sourcetree 自动化操作。
+# - 影响范围：可能修改当前仓库、工作区、分支、菜单配置或 Git 索引。
+# - 运行提示：运行后会先打印内置自述；Sourcetree 模式无交互连续执行，终端模式确认后继续。
 
 # =========================
 # 基础路径变量
@@ -8,15 +13,14 @@ SCRIPT_DIR="${SCRIPT_PATH:h}"
 SCRIPT_BASENAME="${SCRIPT_PATH:t:r}"
 INSTALL_DIR_NAME="${SCRIPT_DIR:t}"
 LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"
-: > "$LOG_FILE"
 
 SOURCE_PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
 SOURCE_ACTIONS_PLIST="${SCRIPT_DIR}/actions.plist"
 
 # SourceTree 执行自定义菜单时必须使用稳定路径，不能指向临时解压目录或当前代码目录。
-# 在 Jobs 的电脑上，${HOME} 即 /Users/jobs，因此最终部署目录为：/Users/jobs/SourceTree.sh
+# 在 Jobs 的电脑上，${HOME} 即 /Users/jobs，因此最终部署目录为：/Users/jobs/SourceTree.command
 DEPLOY_PARENT_DIR="${HOME}"
-DEPLOY_PROJECT_ROOT="${DEPLOY_PARENT_DIR}/SourceTree.sh"
+DEPLOY_PROJECT_ROOT="${DEPLOY_PARENT_DIR}/SourceTree.command"
 DEPLOY_INSTALL_DIR="${DEPLOY_PROJECT_ROOT}/${INSTALL_DIR_NAME}"
 DEPLOY_ACTIONS_PLIST_TEMPLATE="${DEPLOY_INSTALL_DIR}/actions.plist"
 
@@ -34,38 +38,36 @@ SOURCETREE_OFFICIAL_URL="https://www.sourcetreeapp.com/"
 DID_SYNC_SCRIPT_PACKAGE=0
 DID_SYNC_ACTIONS_PLIST=0
 PATCHED_ACTION_TARGET_COUNT=0
-
 # =========================
 # 彩色日志输出函数
 # =========================
 log()            { printf "%b\n" "$1" | tee -a "$LOG_FILE"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
+# 输出 color echo 对应级别的日志信息。
 color_echo()     { log "\033[1;32m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
+# 输出 info echo 对应级别的日志信息。
 info_echo()      { log "\033[1;34mℹ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
+# 输出 success echo 对应级别的日志信息。
 success_echo()   { log "\033[1;32m✔ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
+# 输出 warn echo 对应级别的日志信息。
 warn_echo()      { log "\033[1;33m⚠ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
+# 输出 warm echo 对应级别的日志信息。
 warm_echo()      { log "\033[1;33m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
+# 输出 note echo 对应级别的日志信息。
 note_echo()      { log "\033[1;35m➤ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
+# 输出 error echo 对应级别的日志信息。
 error_echo()     { log "\033[1;31m✖ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
+# 输出 err echo 对应级别的日志信息。
 err_echo()       { log "\033[1;31m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
+# 输出 debug echo 对应级别的日志信息。
 debug_echo()     { log "\033[1;35m🐞 $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
+# 输出 highlight echo 对应级别的日志信息。
 highlight_echo() { log "\033[1;36m🔹 $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
+# 输出 gray echo 对应级别的日志信息。
 gray_echo()      { log "\033[0;90m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
+# 输出 bold echo 对应级别的日志信息。
 bold_echo()      { log "\033[1m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
+# 输出 underline echo 对应级别的日志信息。
 underline_echo() { log "\033[4m$1\033[0m"; }
-
 # =========================
 # 通用交互与错误处理
 # =========================
@@ -74,9 +76,11 @@ cleanup_runtime_dir() {
         rm -rf -- "$RUNTIME_DIR"
     fi
 }
-trap cleanup_runtime_dir EXIT
-
-# 展示脚本用途和影响范围，并在执行前等待用户确认。
+# 注册退出清理，确保运行时临时目录不会残留。
+register_cleanup_trap() {
+    trap cleanup_runtime_dir EXIT
+}
+# 输出 show readme and wait 对应的说明与结果。
 show_readme_and_wait() {
   if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
     clear
@@ -94,33 +98,33 @@ show_readme_and_wait() {
   highlight_echo "======================================================================="
   echo ""
 
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 0 ]]; then
-    read "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..."
-  else
-    gray_echo "当前为 Sourcetree 或非交互输入环境，已跳过回车等待。"
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
+    gray_echo "已识别为 Sourcetree 自定义动作，将跳过交互并连续执行。"
+    return 0
   fi
+  if [[ ! -t 0 ]]; then
+    error_echo "当前不是 Sourcetree，且没有可交互输入；请在终端中重新运行。"
+    return 1
+  fi
+  read "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..."
 }
-
-# 封装 wait_for_enter 对应的独立处理逻辑。
+# 封装 wait for enter 对应的独立处理逻辑。
 wait_for_enter() {
     local prompt_text="${1:-请按回车继续...}"
     warm_echo "${prompt_text}"
     read -r
 }
-
-# 封装 exit_with_error 对应的独立处理逻辑。
+# 封装 exit with error 对应的独立处理逻辑。
 exit_with_error() {
     error_echo "$1"
     exit 1
 }
-
-# 检查当前运行条件是否满足后续流程要求。
+# 检查 ensure not root home 所需条件，不满足时阻止继续执行。
 ensure_not_root_home() {
     if [[ "${HOME}" == "/var/root" || "${EUID}" -eq 0 ]]; then
         exit_with_error "请不要使用 sudo/root 执行本脚本。当前 HOME=${HOME}，会导致脚本部署到错误位置。"
     fi
 }
-
 # =========================
 # 条件检查模块
 # =========================
@@ -134,8 +138,7 @@ check_local_actions_plist() {
     success_echo "检测通过：actions.plist 模板存在"
     gray_echo "模板路径：${SOURCE_ACTIONS_PLIST}"
 }
-
-# 检查当前运行条件是否满足后续流程要求。
+# 检查 check command structure in dir 所需条件，不满足时阻止继续执行。
 check_command_structure_in_dir() {
     local base_dir="$1"
     local scene_name="$2"
@@ -193,13 +196,11 @@ check_command_structure_in_dir() {
     success_echo "检测通过：${scene_name} 发现 ${command_dir_count} 个有效业务 .command 独立文件夹"
     [[ "${skipped_installer_count}" -gt 0 ]] && gray_echo "已跳过安装器目录数：${skipped_installer_count}"
 }
-
-# 检查当前运行条件是否满足后续流程要求。
+# 检查 check source command structure 所需条件，不满足时阻止继续执行。
 check_source_command_structure() {
     check_command_structure_in_dir "${SOURCE_PROJECT_ROOT}" "源项目目录"
 }
-
-# 解析并返回后续流程需要的目标信息。
+# 解析并返回 find python3 所需信息。
 find_python3() {
     local python_bin=""
 
@@ -221,8 +222,7 @@ find_python3() {
 
     return 1
 }
-
-# 解析并返回后续流程需要的目标信息。
+# 解析并返回 detect sourcetree app path 所需信息。
 detect_sourcetree_app_path() {
     local app_path=""
 
@@ -235,13 +235,11 @@ detect_sourcetree_app_path() {
 
     return 1
 }
-
-# 检查当前运行条件是否满足后续流程要求。
+# 判断 is sourcetree installed 对应条件是否成立。
 is_sourcetree_installed() {
     detect_sourcetree_app_path >/dev/null 2>&1 || [[ -d "${TARGET_SOURCETREE_DIR}" ]]
 }
-
-# 检查当前运行条件是否满足后续流程要求。
+# 检查 ensure sourcetree installed 所需条件，不满足时阻止继续执行。
 ensure_sourcetree_installed() {
     info_echo "检查当前机器是否已安装 SourceTree ..."
 
@@ -278,7 +276,6 @@ ensure_sourcetree_installed() {
     success_echo "SourceTree 配置目录已就绪"
     gray_echo "配置目录：${TARGET_SOURCETREE_DIR}"
 }
-
 # =========================
 # 脚本包部署模块
 # =========================
@@ -301,8 +298,7 @@ copy_directory_content() {
     rm -rf -- "${target_dir}" || return 1
     cp -R "${source_dir}" "${target_dir}" || return 1
 }
-
-# 执行对应的环境配置或同步处理。
+# 更新并同步 sync script package to home 对应的目标状态。
 sync_script_package_to_home() {
     info_echo "开始把脚本包部署到固定目录 ..."
     gray_echo "源目录：${SOURCE_PROJECT_ROOT}"
@@ -361,7 +357,6 @@ sync_script_package_to_home() {
 
     check_command_structure_in_dir "${DEPLOY_PROJECT_ROOT}" "固定部署目录"
 }
-
 # =========================
 # actions.plist 生成与校验模块
 # =========================
@@ -427,7 +422,6 @@ def patch_value(value):
         return tuple(patch_value(item) for item in value)
 
     if isinstance(value, dict):
-        # 封装 return 对应的独立处理逻辑。
         return {patch_value(key): patch_value(item) for key, item in value.items()}
 
     return value
@@ -519,7 +513,6 @@ PY
     ACTIVE_ACTIONS_PLIST="${RUNTIME_ACTIONS_PLIST}"
     success_echo "运行时 actions.plist 生成完成"
 }
-
 # =========================
 # 文件同步模块
 # =========================
@@ -530,8 +523,7 @@ is_actions_plist_same() {
 
     cmp -s "${ACTIVE_ACTIONS_PLIST}" "${TARGET_ACTIONS_PLIST}"
 }
-
-# 执行对应的环境配置或同步处理。
+# 更新并同步 sync actions plist 对应的目标状态。
 sync_actions_plist() {
     [[ -z "${ACTIVE_ACTIONS_PLIST}" ]] && exit_with_error "缺少运行时 actions.plist，请先生成后再同步"
 
@@ -571,7 +563,6 @@ sync_actions_plist() {
 
     return 0
 }
-
 # =========================
 # 通用 App 管理模块
 # =========================
@@ -579,20 +570,17 @@ is_app_running() {
     local process_name="$1"
     pgrep -x "${process_name}" >/dev/null 2>&1
 }
-
-# 封装 quit_app_gracefully 对应的独立处理逻辑。
+# 封装 quit app gracefully 对应的独立处理逻辑。
 quit_app_gracefully() {
     local app_name="$1"
     osascript -e "tell application \"${app_name}\" to quit" >/dev/null 2>&1 || true
 }
-
-# 封装 force_kill_app 对应的独立处理逻辑。
+# 封装 force kill app 对应的独立处理逻辑。
 force_kill_app() {
     local process_name="$1"
     pkill -x "${process_name}" >/dev/null 2>&1 || true
 }
-
-# 封装 wait_for_app_exit 对应的独立处理逻辑。
+# 封装 wait for app exit 对应的独立处理逻辑。
 wait_for_app_exit() {
     local process_name="$1"
     local timeout_seconds="${2:-15}"
@@ -610,8 +598,7 @@ wait_for_app_exit() {
 
     return 0
 }
-
-# 封装 launch_app 对应的独立处理逻辑。
+# 封装 launch app 对应的独立处理逻辑。
 launch_app() {
     local app_name="$1"
     local app_path="$2"
@@ -627,8 +614,7 @@ launch_app() {
 
     success_echo "${app_name} 已重新启动"
 }
-
-# 封装 restart_app 对应的独立处理逻辑。
+# 封装 restart app 对应的独立处理逻辑。
 restart_app() {
     local app_name="$1"
     local process_name="$2"
@@ -663,13 +649,11 @@ restart_app() {
 
     launch_app "${app_name}" "${app_path}"
 }
-
-# 封装 restart_sourcetree 对应的独立处理逻辑。
+# 封装 restart sourcetree 对应的独立处理逻辑。
 restart_sourcetree() {
     local app_path="$(detect_sourcetree_app_path 2>/dev/null || true)"
     restart_app "${SOURCETREE_APP_NAME}" "${SOURCETREE_PROCESS_NAME}" "${app_path}" 15
 }
-
 # =========================
 # 收尾模块
 # =========================
@@ -696,8 +680,7 @@ print_finish_message() {
     gray_echo "目标文件：${TARGET_ACTIONS_PLIST}"
     gray_echo "日志文件：${LOG_FILE}"
 }
-
-# 收集并校验用户输入，决定后续执行路径。
+# 收集并校验 prompt open result dirs 对应的用户确认。
 prompt_open_result_dirs() {
     gray_echo ""
     highlight_echo "是否打开固定部署目录？"
@@ -731,7 +714,6 @@ prompt_open_result_dirs() {
         gray_echo "已跳过打开 SourceTree 配置目录"
     fi
 }
-
 # =========================
 # 主函数
 # 统一收口所有执行流程：
@@ -739,35 +721,54 @@ prompt_open_result_dirs() {
 # 2. 禁止 sudo/root 误执行
 # 3. 校验源 actions.plist 模板是否存在
 # 4. 校验源脚本包是否为业务 .command 独立文件夹结构，并跳过 install.command 安装器目录
-# 5. 把脚本包部署到 ${HOME}/SourceTree.sh，也就是 Jobs 机器上的 /Users/jobs/SourceTree.sh
+# 5. 把脚本包部署到 ${HOME}/SourceTree.command，也就是 Jobs 机器上的 /Users/jobs/SourceTree.command
 # 6. 校验 SourceTree 是否已安装；未安装则引导安装并循环等待
 # 7. 基于固定部署目录生成运行时 actions.plist
 # 8. 比较运行时文件与 SourceTree 目标文件是否一致
 # 9. 仅在需要时备份并覆盖复制
 # 10. 仅在发生复制时安全重启 SourceTree
 # 11. 输出执行结果并询问是否打开相关目录
-# =========================
-run_main_flow() {
-    show_readme_and_wait
+# 执行入口下沉后的完整业务流程和控制逻辑。
+run_main_business_flow() {
+    # 拒绝 root 环境，避免把部署文件写入错误的用户目录。
     ensure_not_root_home
+    # 注册退出清理，统一回收生成菜单时使用的临时目录。
+    register_cleanup_trap
+    # 校验安装包内的 actions.plist 菜单模板。
     check_local_actions_plist
+    # 校验源脚本包是否符合一目录一脚本的结构约定。
     check_source_command_structure
+    # 将业务脚本和安装器同步到固定运行目录。
     sync_script_package_to_home
+    # 确认 Sourcetree 已安装并准备好配置目录。
     ensure_sourcetree_installed
+    # 根据固定运行目录生成本机菜单配置。
     generate_runtime_actions_plist
 
+    # 仅在菜单配置发生变化时重启 Sourcetree 使配置生效。
     if sync_actions_plist; then
+        # 安全重启 Sourcetree，重新载入最新动作菜单。
         restart_sourcetree
     fi
 
+    # 输出脚本部署和菜单更新结果摘要。
     print_finish_message
+    # 询问是否打开部署目录和 Sourcetree 配置目录。
     prompt_open_result_dirs
 }
-
-# 统一收口脚本入口，仅委托已经拆分完成的业务流程。
+# 编排脚本的高层业务流程。
+# 初始化脚本运行环境，并集中承载原有的顶层执行逻辑。
+initialize_script_runtime() {
+  : > "$LOG_FILE"
+}
+# 编排脚本的高层业务流程。
 main() {
-  # 主入口只负责委托完整业务流程，复杂逻辑统一下沉。
-  run_main_flow "$@"
+  # 展示脚本内置自述，并按运行入口完成防误触确认。
+  show_readme_and_wait
+  # 初始化 Shell 选项、日志、依赖和入口运行状态。
+  initialize_script_runtime
+  # 执行入口下沉后的完整业务流程。
+  run_main_business_flow "$@"
 }
 
 main "$@"
