@@ -13,7 +13,11 @@
 export LANG="${LANG:-en_US.UTF-8}"
 export LC_ALL="${LC_ALL:-en_US.UTF-8}"
 # 统一 zsh 行为；避免路径中含 [] 等字符时触发 nomatch。
+<<<<<<< HEAD
 # 解析并返回 resolve script path 所需信息。
+=======
+# 解析并返回后续流程需要的目标信息。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 resolve_script_path() {
   local src="${(%):-%x}"
   [[ -z "$src" ]] && src="$0"
@@ -51,6 +55,7 @@ is_sourcetree_runtime() {
 IS_SOURCETREE_RUNTIME=0
 
 SOURCETREE_PLAIN_OUTPUT=0
+<<<<<<< HEAD
 # 封装 strip ansi text 对应的独立处理逻辑。
 strip_ansi_text() {
   perl -pe 's/\e\[[0-9;]*[[:alpha:]]//g'
@@ -64,6 +69,21 @@ log() {
   print -r -- "$1" | tee -a "$LOG_FILE"
 }
 # 封装 color log 对应的独立处理逻辑。
+=======
+# 封装 strip_ansi_text 对应的独立处理逻辑。
+strip_ansi_text() {
+  perl -pe 's/\e\[[0-9;]*[[:alpha:]]//g'
+}
+# 封装 supports_color 对应的独立处理逻辑。
+supports_color() {
+  [[ -t 1 && -n "${TERM:-}" && "${TERM:-}" != "dumb" ]]
+}
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+log() {
+  print -r -- "$1" | tee -a "$LOG_FILE"
+}
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 color_log() {
   local code="$1"
   local message="$2"
@@ -73,6 +93,7 @@ color_log() {
     print -r -- "$message" | tee -a "$LOG_FILE"
   fi
 }
+<<<<<<< HEAD
 # 输出 color echo 对应级别的日志信息。
 color_echo()     { color_log "1;32" "$1"; }
 # 输出 info echo 对应级别的日志信息。
@@ -98,12 +119,43 @@ gray_echo()      { color_log "0;90" "$1"; }
 # 输出 bold echo 对应级别的日志信息。
 bold_echo()      { color_log "1" "$1"; }
 # 输出 underline echo 对应级别的日志信息。
+=======
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+color_echo()     { color_log "1;32" "$1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+info_echo()      { color_log "1;34" "ℹ $1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+success_echo()   { color_log "1;32" "✔ $1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+warn_echo()      { color_log "1;33" "⚠ $1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+warm_echo()      { color_log "1;33" "$1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+note_echo()      { color_log "1;35" "➤ $1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+error_echo()     { color_log "1;31" "✖ $1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+err_echo()       { color_log "1;31" "$1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+debug_echo()     { color_log "1;35" "🐞 $1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+highlight_echo() { color_log "1;36" "🔹 $1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+gray_echo()      { color_log "0;90" "$1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+bold_echo()      { color_log "1" "$1"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 underline_echo() { color_log "4" "$1"; }
 # ============================= 标准工具函数 =============================
 get_cpu_arch() {
   [[ "$(uname -m)" == "arm64" ]] && echo "arm64" || echo "x86_64"
 }
+<<<<<<< HEAD
 # 封装 abs path 对应的独立处理逻辑。
+=======
+# 封装 abs_path 对应的独立处理逻辑。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 abs_path() {
   local p="$1"
   [[ -z "$p" ]] && return 1
@@ -117,7 +169,11 @@ abs_path() {
     return 1
   fi
 }
+<<<<<<< HEAD
 # 收集并校验 ask run 对应的用户确认。
+=======
+# 收集并校验用户输入，决定后续执行路径。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 ask_run() {
   if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
     gray_echo "Sourcetree 连续执行模式已跳过当前可选交互。"
@@ -130,7 +186,11 @@ ask_run() {
   IFS= read -r "input?➤ "
   [[ -n "$input" ]]
 }
+<<<<<<< HEAD
 # 收集并校验 confirm yes 对应的用户确认。
+=======
+# 收集并校验用户输入，决定后续执行路径。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 confirm_yes() {
   if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
     gray_echo "Sourcetree 连续执行模式已跳过当前可选交互。"
@@ -143,7 +203,11 @@ confirm_yes() {
   IFS= read -r "input?➤ "
   [[ "$input" == "YES" ]]
 }
+<<<<<<< HEAD
 # 封装 inject shellenv block 对应的独立处理逻辑。
+=======
+# 封装 inject_shellenv_block 对应的独立处理逻辑。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 inject_shellenv_block() {
   local profile_file="$1"
   local shellenv_cmd="$2"
@@ -165,7 +229,11 @@ inject_shellenv_block() {
   fi
   eval "$shellenv_cmd" || true
 }
+<<<<<<< HEAD
 # 封装 activate homebrew shellenv 对应的独立处理逻辑。
+=======
+# 封装 activate_homebrew_shellenv 对应的独立处理逻辑。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 activate_homebrew_shellenv() {
   local arch="$(get_cpu_arch)"
   local brew_bin=""
@@ -188,7 +256,11 @@ activate_homebrew_shellenv() {
   inject_shellenv_block "$profile_file" "eval \"\$(${brew_bin} shellenv)\""
   eval "$(${brew_bin} shellenv)"
 }
+<<<<<<< HEAD
 # 执行 run brew health update 对应的独立业务步骤。
+=======
+# 执行已经拆分完成的独立业务步骤。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 run_brew_health_update() {
   info_echo "正在执行 Homebrew 健康更新..."
   brew update  || { error_echo "brew update 失败"; return 1; }
@@ -198,7 +270,11 @@ run_brew_health_update() {
   brew -v      || warn_echo "打印 brew 版本失败，可忽略"
   success_echo "Homebrew 健康更新完成"
 }
+<<<<<<< HEAD
 # 准备并配置 install homebrew 对应的运行条件。
+=======
+# 执行对应的环境配置或同步处理。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 install_homebrew() {
   local arch="$(get_cpu_arch)"
   local brew_bin=""
@@ -225,7 +301,11 @@ install_homebrew() {
     note_echo "已跳过 Homebrew 更新"
   fi
 }
+<<<<<<< HEAD
 # 封装 brew install or upgrade 对应的独立处理逻辑。
+=======
+# 封装 brew_install_or_upgrade 对应的独立处理逻辑。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 brew_install_or_upgrade() {
   local formula="$1"
   [[ -z "$formula" ]] && return 1
@@ -244,11 +324,19 @@ brew_install_or_upgrade() {
     fi
   fi
 }
+<<<<<<< HEAD
 # 判断 is interactive terminal 对应条件是否成立。
 is_interactive_terminal() {
   [[ -t 0 && -t 1 ]]
 }
 # 输出 show readme and wait 对应的说明与结果。
+=======
+# 检查当前运行条件是否满足后续流程要求。
+is_interactive_terminal() {
+  [[ -t 0 && -t 1 ]]
+}
+# 展示脚本用途和影响范围，并在执行前等待用户确认。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 show_readme_and_wait() {
   if typeset -f is_sourcetree_runtime >/dev/null 2>&1 && is_sourcetree_runtime; then
     IS_SOURCETREE_RUNTIME=1
@@ -279,12 +367,17 @@ show_readme_and_wait() {
   fi
   read "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..."
 }
+<<<<<<< HEAD
 # 执行 run original logic 对应的独立业务步骤。
+=======
+# 执行已经拆分完成的独立业务步骤。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 run_original_logic() {
   # ============================= 原脚本业务逻辑区 =============================
   # ============================== 基本配置 ==============================
   umask 022
   LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"; : > "$LOG_FILE"
+<<<<<<< HEAD
   # 统一输出终端信息并同步记录日志。
   log()  { echo "$*"; echo "$*" >>"$LOG_FILE"; }
   # 输出 info 对应级别的日志信息。
@@ -294,6 +387,17 @@ run_original_logic() {
   # 输出 warn 对应级别的日志信息。
   warn() { log "⚠️  $*"; }
   # 输出 err 对应级别的日志信息。
+=======
+  # 按当前输出级别记录终端信息，并同步写入脚本日志。
+  log()  { echo "$*"; echo "$*" >>"$LOG_FILE"; }
+  # 按当前输出级别记录终端信息，并同步写入脚本日志。
+  info() { log "ℹ️  $*"; }
+  # 封装 ok 对应的独立处理逻辑。
+  ok()   { log "✅ $*"; }
+  # 按当前输出级别记录终端信息，并同步写入脚本日志。
+  warn() { log "⚠️  $*"; }
+  # 按当前输出级别记录终端信息，并同步写入脚本日志。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
   err()  { log "❌ $*"; }
 
   # 修复 SourceTree 的精简 PATH。
@@ -321,7 +425,11 @@ run_original_logic() {
     done
     return 1
   }
+<<<<<<< HEAD
   # 封装 do pod install 对应的独立处理逻辑。
+=======
+  # 封装 do_pod_install 对应的独立处理逻辑。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
   do_pod_install(){
     local dir="$1"
     if command -v bundle >/dev/null 2>&1 && [[ -f "$dir/Gemfile" ]]; then
@@ -334,14 +442,22 @@ run_original_logic() {
       (cd "$dir" && "$pod_cmd" install)
     fi
   }
+<<<<<<< HEAD
   # 执行 open in xcode 对应的独立业务步骤。
+=======
+  # 封装 open_in_xcode 对应的独立处理逻辑。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
   open_in_xcode(){
     local target="$1"
     [[ -e "$target" ]] || { err "打开目标不存在：$target"; return 1; }
     info "打开：$target"
     /usr/bin/open -a "Xcode" "$target"
   }
+<<<<<<< HEAD
   # 判断 has workspace 对应条件是否成立。
+=======
+  # 检查当前运行条件是否满足后续流程要求。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
   has_workspace(){
     local dir="$1"
     local proj="$2"
@@ -482,13 +598,22 @@ print(cands[0] if cands else (schemes[0] if schemes else ""))
 }
 # 执行入口下沉后的完整业务流程和控制逻辑。
 run_main_business_flow() {
+<<<<<<< HEAD
+=======
+  # 执行原脚本保留的核心业务逻辑。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
   run_original_logic "$@"
+  # 初始化当前流程后续步骤需要使用的变量。
   local exit_code=$?
+  # 根据当前条件选择对应的执行分支。
   if (( exit_code == 0 )); then
+    # 输出当前流程的完成状态、摘要和日志位置。
     success_echo "脚本执行结束。日志：$LOG_FILE"
   else
+    # 执行当前流程中的独立业务步骤：error_echo。
     error_echo "脚本执行失败，退出码：$exit_code。日志：$LOG_FILE"
   fi
+  # 执行当前流程中的独立业务步骤：return。
   return $exit_code
 }
 # 编排脚本的高层业务流程。

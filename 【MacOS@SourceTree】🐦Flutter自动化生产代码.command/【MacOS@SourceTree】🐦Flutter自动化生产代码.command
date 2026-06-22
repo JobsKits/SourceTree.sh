@@ -53,11 +53,19 @@ is_sourcetree_runtime() {
 IS_SOURCETREE_RUNTIME=0
 
 SOURCETREE_PLAIN_OUTPUT=0
+<<<<<<< HEAD
 # 封装 strip ansi text 对应的独立处理逻辑。
 strip_ansi_text() {
   perl -pe 's/\e\[[0-9;]*[[:alpha:]]//g'
 }
 # 统一输出终端信息并同步记录日志。
+=======
+# 封装 strip_ansi_text 对应的独立处理逻辑。
+strip_ansi_text() {
+  perl -pe 's/\e\[[0-9;]*[[:alpha:]]//g'
+}
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 log() {
   if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == "1" ]]; then
     printf "%b\n" "$1" | strip_ansi_text | tee -a "$LOG_FILE"
@@ -65,6 +73,7 @@ log() {
     printf "%b\n" "$1" | tee -a "$LOG_FILE"
   fi
 }
+<<<<<<< HEAD
 # 输出 color echo 对应级别的日志信息。
 color_echo()     { log "\033[1;32m$1\033[0m"; }
 # 输出 info echo 对应级别的日志信息。
@@ -90,12 +99,43 @@ gray_echo()      { log "\033[0;90m$1\033[0m"; }
 # 输出 bold echo 对应级别的日志信息。
 bold_echo()      { log "\033[1m$1\033[0m"; }
 # 输出 underline echo 对应级别的日志信息。
+=======
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+color_echo()     { log "\033[1;32m$1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+info_echo()      { log "\033[1;34mℹ $1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+success_echo()   { log "\033[1;32m✔ $1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+warn_echo()      { log "\033[1;33m⚠ $1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+warm_echo()      { log "\033[1;33m$1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+note_echo()      { log "\033[1;35m➤ $1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+error_echo()     { log "\033[1;31m✖ $1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+err_echo()       { log "\033[1;31m$1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+debug_echo()     { log "\033[1;35m🐞 $1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+highlight_echo() { log "\033[1;36m🔹 $1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+gray_echo()      { log "\033[0;90m$1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+bold_echo()      { log "\033[1m$1\033[0m"; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 underline_echo() { log "\033[4m$1\033[0m"; }
 # ============================= 标准工具函数 =============================
 get_cpu_arch() {
   [[ "$(uname -m)" == "arm64" ]] && echo "arm64" || echo "x86_64"
 }
+<<<<<<< HEAD
 # 封装 abs path 对应的独立处理逻辑。
+=======
+# 封装 abs_path 对应的独立处理逻辑。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 abs_path() {
   local p="$1"
   [[ -z "$p" ]] && return 1
@@ -109,7 +149,11 @@ abs_path() {
     return 1
   fi
 }
+<<<<<<< HEAD
 # 收集并校验 ask run 对应的用户确认。
+=======
+# 收集并校验用户输入，决定后续执行路径。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 ask_run() {
   if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
     gray_echo "Sourcetree 连续执行模式已跳过当前可选交互。"
@@ -122,7 +166,11 @@ ask_run() {
   IFS= read -r "input?➤ "
   [[ -n "$input" ]]
 }
+<<<<<<< HEAD
 # 收集并校验 confirm yes 对应的用户确认。
+=======
+# 收集并校验用户输入，决定后续执行路径。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 confirm_yes() {
   if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
     gray_echo "Sourcetree 连续执行模式已跳过当前可选交互。"
@@ -135,7 +183,11 @@ confirm_yes() {
   IFS= read -r "input?➤ "
   [[ "$input" == "YES" ]]
 }
+<<<<<<< HEAD
 # 封装 inject shellenv block 对应的独立处理逻辑。
+=======
+# 封装 inject_shellenv_block 对应的独立处理逻辑。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 inject_shellenv_block() {
   local profile_file="$1"
   local shellenv_cmd="$2"
@@ -157,7 +209,11 @@ inject_shellenv_block() {
   fi
   eval "$shellenv_cmd" || true
 }
+<<<<<<< HEAD
 # 封装 activate homebrew shellenv 对应的独立处理逻辑。
+=======
+# 封装 activate_homebrew_shellenv 对应的独立处理逻辑。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 activate_homebrew_shellenv() {
   local arch="$(get_cpu_arch)"
   local brew_bin=""
@@ -180,7 +236,11 @@ activate_homebrew_shellenv() {
   inject_shellenv_block "$profile_file" "eval \"\$(${brew_bin} shellenv)\""
   eval "$(${brew_bin} shellenv)"
 }
+<<<<<<< HEAD
 # 执行 run brew health update 对应的独立业务步骤。
+=======
+# 执行已经拆分完成的独立业务步骤。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 run_brew_health_update() {
   info_echo "正在执行 Homebrew 健康更新..."
   brew update  || { error_echo "brew update 失败"; return 1; }
@@ -190,7 +250,11 @@ run_brew_health_update() {
   brew -v      || warn_echo "打印 brew 版本失败，可忽略"
   success_echo "Homebrew 健康更新完成"
 }
+<<<<<<< HEAD
 # 准备并配置 install homebrew 对应的运行条件。
+=======
+# 执行对应的环境配置或同步处理。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 install_homebrew() {
   local arch="$(get_cpu_arch)"
   local brew_bin=""
@@ -217,7 +281,11 @@ install_homebrew() {
     note_echo "已跳过 Homebrew 更新"
   fi
 }
+<<<<<<< HEAD
 # 封装 brew install or upgrade 对应的独立处理逻辑。
+=======
+# 封装 brew_install_or_upgrade 对应的独立处理逻辑。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 brew_install_or_upgrade() {
   local formula="$1"
   [[ -z "$formula" ]] && return 1
@@ -236,7 +304,11 @@ brew_install_or_upgrade() {
     fi
   fi
 }
+<<<<<<< HEAD
 # 输出 show readme and wait 对应的说明与结果。
+=======
+# 展示脚本用途和影响范围，并在执行前等待用户确认。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 show_readme_and_wait() {
   if typeset -f is_sourcetree_runtime >/dev/null 2>&1 && is_sourcetree_runtime; then
     IS_SOURCETREE_RUNTIME=1
@@ -267,7 +339,11 @@ show_readme_and_wait() {
   fi
   read "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..."
 }
+<<<<<<< HEAD
 # 执行 run original logic 对应的独立业务步骤。
+=======
+# 执行已经拆分完成的独立业务步骤。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
 run_original_logic() {
   # ============================= 原脚本业务逻辑区 =============================
   # ============================== 配置开关（可用环境变量覆盖） ==============================
@@ -276,7 +352,11 @@ run_original_logic() {
 
   # ============================== 工具链选择（FVM 优先） ==============================
   typeset -ga flutter_cmd dart_cmd
+<<<<<<< HEAD
   # 封装 set toolchain 对应的独立处理逻辑。
+=======
+  # 封装 _set_toolchain 对应的独立处理逻辑。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
   _set_toolchain() {
     if command -v fvm >/dev/null 2>&1 && [[ -f ".fvmrc" || -d ".fvm" ]]; then
       flutter_cmd=(fvm flutter)
@@ -298,7 +378,11 @@ run_original_logic() {
   }
   # ============================== TTY 检测 & 说明 ==============================
   _is_tty() { [[ -t 0 && -t 1 ]]; }
+<<<<<<< HEAD
   # 输出 print description 对应的说明与结果。
+=======
+  # 封装 print_description 对应的独立处理逻辑。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
   print_description() {
     cat <<'DESC'
 [目的]
@@ -311,7 +395,11 @@ run_original_logic() {
 - 使用 FVM 时自动用 FVM 的 flutter/dart；否则用系统 flutter 与其内置 dart。
 DESC
   }
+<<<<<<< HEAD
   # 封装 wait for user to start 对应的独立处理逻辑。
+=======
+  # 封装 wait_for_user_to_start 对应的独立处理逻辑。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
   wait_for_user_to_start() {
     echo ""
     read "?👉 按下回车开始执行（Ctrl+C 取消）"
@@ -319,7 +407,11 @@ DESC
   }
   # ============================== 项目根判断 & 查找 ==============================
   _is_flutter_root() { [[ -d "$1/lib" && -f "$1/pubspec.yaml" ]]; }
+<<<<<<< HEAD
   # 封装 find flutter root upwards 对应的独立处理逻辑。
+=======
+  # 封装 _find_flutter_root_upwards 对应的独立处理逻辑。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
   _find_flutter_root_upwards() {
     local d="$1"
     while [[ "$d" != "/" && -n "$d" ]]; do
@@ -328,7 +420,11 @@ DESC
     done
     return 1
   }
+<<<<<<< HEAD
   # 解析并返回 detect and cd flutter root 所需信息。
+=======
+  # 解析并返回后续流程需要的目标信息。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
   detect_and_cd_flutter_root() {
     # 优先显式指定
     if [[ -n "$PROJECT_DIR" ]]; then
@@ -391,7 +487,11 @@ DESC
   }
   # 封装 exists 对应的独立处理逻辑。
   exists() { command -v "$1" >/dev/null 2>&1; }
+<<<<<<< HEAD
   # 判断 has yaml key 对应条件是否成立。
+=======
+  # 检查当前运行条件是否满足后续流程要求。
+>>>>>>> 9491b75b9ce08b1f889c0329325763a4360af6ac
   has_yaml_key() { grep -qE "^[[:space:]]*$1[[:space:]]*:" pubspec.yaml; }
   # ============================== 图标产物汇总 ==============================
   show_icon_summary() {
