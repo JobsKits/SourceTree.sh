@@ -314,6 +314,8 @@ run_original_logic() {
 
   # 可选：强制只开 .xcodeproj（1=只开 project；默认=0）。
   FORCE_XCODEPROJ="${FORCE_XCODEPROJ:-0}"
+  # 可选：打开前不阻塞解析 SwiftPM；需要时手动设为 1。
+  RESOLVE_SWIFTPM_BEFORE_OPEN="${RESOLVE_SWIFTPM_BEFORE_OPEN:-0}"
 
   # ============================== 入口路径 ==============================
   local root_candidate="${REPO:-${1:-$PWD}}"
@@ -417,7 +419,11 @@ print(cands[0] if cands else (schemes[0] if schemes else ""))
   open_workspace_properly() {
     local ws="$1"
     clear_spm_quarantine
-    resolve_swiftpm_for_workspace "$ws"
+    if [[ "$RESOLVE_SWIFTPM_BEFORE_OPEN" == "1" ]]; then
+      resolve_swiftpm_for_workspace "$ws"
+    else
+      info "跳过打开前 SwiftPM 解析，避免 SourceTree 调用 Swift 工程时被 xcodebuild 阻塞"
+    fi
     open_in_xcode "$ws"
   }
 
@@ -430,13 +436,15 @@ print(cands[0] if cands else (schemes[0] if schemes else ""))
     \( \
       -path "*/Pods" -o \
       -path "*/.git" -o \
+      -path "*/.build" -o \
+      -path "*/.dart_tool" -o \
       -path "*/build" -o \
       -path "*/DerivedData" -o \
       -path "*/node_modules" -o \
       -path "*/vendor" -o \
       -path "*/third_party" \
     \) -prune -o \
-    -type d -name "*.xcodeproj" -print 2>/dev/null || true)"
+    -type d -name "*.xcodeproj" -print -prune 2>/dev/null || true)"
 
   [[ -n "$FIND_OUT" ]] && PROJ_LIST=("${(@f)FIND_OUT}")
   [[ ${#PROJ_LIST[@]} -gt 0 ]] || { err "未找到任何 .xcodeproj"; return 2; }

@@ -43,6 +43,7 @@ chmod +x './【MacOS@SourceTree】（只打开当前目录）用Xcode打开.comm
 - 脚本使用 `#!/bin/zsh` 和 `main "$@"` 统一收口，先展示自述说明，再进入真实业务逻辑。
 - 系统终端双击运行时，脚本保持完整终端体验：可清屏、可彩色输出、可等待用户回车确认。
 - Sourcetree 自定义动作运行时，脚本会识别瘦身环境，自动跳过 `clear` 和回车等待，并关闭 ANSI 彩色码，避免日志里出现 ANSI 转义码。
+- Xcode 打开逻辑优先打开当前目录下与 `.xcodeproj` 同名的 `.xcworkspace`；默认不在打开前执行 `xcodebuild` SwiftPM 解析，避免 Swift 工程在 SourceTree 调用时被阻塞。
 - 脚本会兜底解析真实脚本目录，确保 Sourcetree 只传脚本名时仍能读取同目录 `README.md`。
 - 终端输出和日志同步落盘；排查时优先查看 README 中声明的 `/tmp/脚本名.log`。
 
