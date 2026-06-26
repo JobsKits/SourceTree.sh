@@ -2,7 +2,7 @@
 # 脚本自述：
 # - 脚本名称：【MacOS@SourceTree】📥安全暂存Git全部改动.command
 # - 核心用途：检查子模块后，统一暂存当前 Git 仓库中的新增、修改、删除和重命名。
-# - 关键场景：处理文件与同名目录转换，并防止缺失或脏子模块被 Sourcetree 误判。
+# - 关键场景：处理文件与同名目录转换，并识别子模块目录改名后的 Git worktree 路径错位。
 # - 影响范围：修改 Git 索引；可初始化缺失子模块，但不清理已有子模块的真实修改。
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
@@ -110,7 +110,7 @@ show_script_intro_and_wait() {
   highlight_echo "============================== 脚本内置自述 =============================="
   note_echo "脚本名称：${SCRIPT_BASENAME}.command"
   note_echo "核心行为：先检查 Git 子模块，再执行 git add -A -- . 完整刷新索引。"
-  note_echo "适用场景：普通变更、文件与同名目录转换，以及缺失子模块工作树。"
+  note_echo "适用场景：普通变更、文件与同名目录转换、缺失子模块工作树，以及 .git/core.worktree 路径错位。"
   note_echo "子模块策略：缺失时尝试初始化；已存在但内部有修改时立即停止，不代替用户清理。"
   note_echo "安全边界：不提交、不推送、不删除文件、不强制添加已忽略文件。"
   note_echo "文档关系：同目录 README.md 只作为静态说明，脚本运行时不依赖它。"
@@ -130,6 +130,94 @@ show_script_intro_and_wait() {
   read -r "?👉 已阅读说明，按回车继续执行；按 Ctrl+C 取消：" _
 }
 
+# 解析 .git 文件指向的真实 gitdir 路径。
+resolve_gitdir_from_git_file() {
+  local worktree_root="$1"
+  local git_file="${worktree_root}/.git"
+  local gitdir_value=""
+  local gitdir_path=""
+
+  [[ -f "$git_file" ]] || return 1
+  gitdir_value="$(sed -n 's/^gitdir: //p' "$git_file" | head -n 1)"
+  [[ -n "$gitdir_value" ]] || return 1
+  gitdir_path="${worktree_root}/${gitdir_value}"
+  print -r -- "${gitdir_path:A}"
+}
+# 读取 gitdir/config 里登记的 core.worktree 绝对路径。
+read_configured_worktree_path() {
+  local gitdir_path="$1"
+  local configured_worktree=""
+  local configured_path=""
+
+  [[ -f "${gitdir_path}/config" ]] || return 1
+  configured_worktree="$(git config --file "${gitdir_path}/config" --get core.worktree 2>/dev/null || true)"
+  [[ -n "$configured_worktree" ]] || return 1
+  if [[ "$configured_worktree" == /* ]]; then
+    configured_path="$configured_worktree"
+  else
+    configured_path="${gitdir_path}/${configured_worktree}"
+  fi
+  print -r -- "${configured_path:A}"
+}
+# 将误借用其它 gitdir 的目录转换为独立 Git 工作树。
+convert_mislinked_git_file_to_standalone_worktree() {
+  local target_abs="$1"
+  local gitdir_path="$2"
+  local backup_path="${target_abs}/.git.mislinked-backup-$(date +%Y%m%d%H%M%S)"
+  local failed_path="${target_abs}/.git.failed-standalone-$(date +%Y%m%d%H%M%S)"
+
+  [[ -f "${target_abs}/.git" && -d "$gitdir_path" ]] || return 1
+  warn_echo "正在把错位目录转换为独立 Git 工作树：${target_abs}"
+  mv "${target_abs}/.git" "$backup_path" || return 1
+  mkdir -p "${target_abs}/.git"
+  if ! rsync -a --exclude='fsmonitor--daemon*' "${gitdir_path}/" "${target_abs}/.git/" >> "$LOG_FILE" 2>&1; then
+    mv "${target_abs}/.git" "$failed_path" 2>/dev/null || true
+    mv "$backup_path" "${target_abs}/.git" 2>/dev/null || true
+    error_echo "复制 Git 元数据失败，已恢复原 .git 指针文件：${target_abs}"
+    return 1
+  fi
+
+  git config --file "${target_abs}/.git/config" --unset core.worktree 2>/dev/null || true
+  git config --file "${target_abs}/.git/config" core.bare false
+  if [[ "$(git -C "$target_abs" rev-parse --is-inside-work-tree 2>/dev/null || true)" != "true" ]]; then
+    mv "${target_abs}/.git" "$failed_path" 2>/dev/null || true
+    mv "$backup_path" "${target_abs}/.git" 2>/dev/null || true
+    error_echo "独立 Git 工作树验证失败，已恢复原 .git 指针文件：${target_abs}"
+    return 1
+  fi
+
+  mv "$backup_path" "${target_abs}/.git/$(basename "$backup_path")"
+  success_echo "已转换为独立 Git 工作树：${target_abs}"
+}
+# 判断传入路径是否因目录改名导致 .git 与 core.worktree 指向不一致。
+repair_invoked_gitdir_worktree_if_safe() {
+  local target="$1"
+  local target_abs="${target:A}"
+  local gitdir_path=""
+  local configured_path=""
+  local inside_worktree=""
+
+  [[ -d "$target_abs" && -f "${target_abs}/.git" ]] || return 0
+  inside_worktree="$(git -C "$target_abs" rev-parse --is-inside-work-tree 2>/dev/null || true)"
+  [[ "$inside_worktree" != "true" ]] || return 0
+  gitdir_path="$(resolve_gitdir_from_git_file "$target_abs" 2>/dev/null || true)"
+  [[ -n "$gitdir_path" ]] || return 0
+  configured_path="$(read_configured_worktree_path "$gitdir_path" 2>/dev/null || true)"
+  [[ -n "$configured_path" && "$configured_path" != "$target_abs" ]] || return 0
+
+  if [[ -e "$configured_path" ]]; then
+    warn_echo "检测到 Git 工作树路径错位：${target_abs}"
+    warn_echo ".git 指向：${gitdir_path}"
+    warn_echo "core.worktree 指向：${configured_path}"
+    warn_echo "真实工作树仍存在，当前目录将改为独立 Git 工作树，避免 Sourcetree 继续显示 HEAD。"
+    convert_mislinked_git_file_to_standalone_worktree "$target_abs" "$gitdir_path"
+    return
+  fi
+
+  warn_echo "检测到目录改名后的 core.worktree 旧路径失效，正在修正：${target_abs}"
+  git config --file "${gitdir_path}/config" core.worktree "$target_abs" || return 1
+  success_echo "已修正 core.worktree：${target_abs}"
+}
 # 从 Sourcetree 参数或当前目录解析 Git 仓库根目录。
 resolve_repo_root() {
   local target="${1:-$PWD}"
@@ -141,6 +229,7 @@ resolve_repo_root() {
     error_echo "目标路径不存在：${target}"
     return 1
   fi
+  repair_invoked_gitdir_worktree_if_safe "$target"
   if ! REPO_ROOT="$(git -C "$target" rev-parse --show-toplevel 2>/dev/null)"; then
     error_echo "目标路径不在 Git 工作树内：${target}"
     return 1
@@ -183,6 +272,17 @@ submodule_has_valid_config() {
     [[ -n "$url" ]]
     return
   done < <(git -C "$REPO_ROOT" config --file .gitmodules --name-only --get-regexp '^submodule\..*\.path$' 2>/dev/null || true)
+
+  return 1
+}
+# 判断相对路径是否是父仓索引登记的 gitlink。
+is_index_gitlink_path() {
+  local relative_path="$1"
+  local submodule_path=""
+
+  for submodule_path in "${GITLINK_PATHS[@]}"; do
+    [[ "$submodule_path" == "$relative_path" ]] && return 0
+  done
 
   return 1
 }
@@ -251,6 +351,53 @@ is_valid_submodule_worktree() {
   [[ -d "$child_root" && -e "${child_root}/.git" ]] || return 1
   actual_root="$(git -C "$child_root" rev-parse --show-toplevel 2>/dev/null || true)"
   [[ -n "$actual_root" && "${actual_root:A}" == "${child_root:A}" ]]
+}
+# 扫描嵌套 .git 文件，阻止 Sourcetree 把错位副本当作可提交路径。
+preflight_gitdir_worktree_aliases() {
+  collect_gitlink_paths
+  local git_file=""
+  local candidate_root=""
+  local relative_path=""
+  local gitdir_path=""
+  local configured_path=""
+  local inside_worktree=""
+  local failures=0
+
+  while IFS= read -r -d '' git_file; do
+    candidate_root="$(dirname "$git_file")"
+    [[ "${candidate_root:A}" == "${REPO_ROOT:A}" ]] && continue
+    relative_path="${candidate_root#${REPO_ROOT}/}"
+    inside_worktree="$(git -C "$candidate_root" rev-parse --is-inside-work-tree 2>/dev/null || true)"
+    [[ "$inside_worktree" == "true" ]] && continue
+    gitdir_path="$(resolve_gitdir_from_git_file "$candidate_root" 2>/dev/null || true)"
+    [[ -n "$gitdir_path" ]] || continue
+    configured_path="$(read_configured_worktree_path "$gitdir_path" 2>/dev/null || true)"
+    [[ -n "$configured_path" && "$configured_path" != "${candidate_root:A}" ]] || continue
+
+    if is_index_gitlink_path "$relative_path"; then
+      if repair_migrated_submodule_worktree "$relative_path"; then
+        continue
+      fi
+    fi
+
+    error_echo "检测到错位 Git 工作树副本，已停止暂存：${relative_path}"
+    warn_echo ".git 指向：${gitdir_path}"
+    warn_echo "core.worktree 指向：${configured_path}"
+    if [[ -e "$configured_path" ]]; then
+      warn_echo "真实工作树仍存在：${configured_path}"
+      warn_echo "请在 Sourcetree 打开真实工作树，并手动处理当前异常目录：${candidate_root}"
+    else
+      warn_echo "core.worktree 指向的旧路径不存在，但当前路径不是父仓登记的 gitlink，脚本不会擅自接管。"
+    fi
+    failures=$((failures + 1))
+  done < <(find "$REPO_ROOT" \
+    \( -path "${REPO_ROOT}/.git" -o -path '*/.git/*' -o -path '*/node_modules/*' -o -path '*/Pods/*' -o -path '*/.dart_tool/*' -o -path '*/build/*' -o -path '*/DerivedData/*' \) -prune \
+    -o -type f -name .git -print0)
+
+  if [[ "$failures" -gt 0 ]]; then
+    error_echo "共有 ${failures} 个 .git/core.worktree 路径错位，未执行 git add -A。"
+    return 1
+  fi
 }
 
 # 判断子模块路径是否只是上次失败初始化留下的空目录。
@@ -412,6 +559,7 @@ run_main_flow() {
   initialize_script_runtime
   show_script_intro_and_wait
   resolve_repo_root "${1:-$PWD}"
+  preflight_gitdir_worktree_aliases
   preflight_submodules
   stage_gitmodules_first
   stage_all_changes
