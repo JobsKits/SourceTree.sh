@@ -1,8 +1,8 @@
 #!/bin/zsh
 # 脚本自述：
-# - 脚本名称：【MacOS@SourceTree】📥安全暂存Git全部改动.command
-# - 核心用途：检查子模块后，统一暂存当前 Git 仓库中的新增、修改、删除和重命名。
-# - 关键场景：处理文件与同名目录转换，并识别子模块目录改名后的 Git worktree 路径错位。
+# - 脚本名称：【MacOS@SourceTree】📥修复Git无法Commit.command
+# - 核心用途：检查子模块后，统一暂存当前 Git 仓库中的新增、修改、删除和重命名，规避 Sourcetree 分步 add/rm 导致的 Commit 阻塞。
+# - 关键场景：处理文件与同名目录转换、旧 gitlink 删除前 .gitmodules 未暂存、子模块目录改名或复制后的 Git worktree 路径错位。
 # - 影响范围：修改 Git 索引；可初始化缺失子模块，但不清理已有子模块的真实修改。
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
@@ -31,7 +31,9 @@ resolve_script_path() {
 SCRIPT_PATH="$(resolve_script_path)"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd -P)"
 SCRIPT_BASENAME="$(basename "$SCRIPT_PATH" | sed 's/\.[^.]*$//')"
-LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"
+LOG_DIR="${TMPDIR:-/tmp}"
+LOG_DIR="${LOG_DIR%/}"
+LOG_FILE="${LOG_DIR}/${SCRIPT_BASENAME}.log"
 IS_SOURCETREE_RUNTIME=0
 PLAIN_OUTPUT=0
 REPO_ROOT=""
@@ -109,10 +111,12 @@ show_script_intro_and_wait() {
 
   highlight_echo "============================== 脚本内置自述 =============================="
   note_echo "脚本名称：${SCRIPT_BASENAME}.command"
-  note_echo "核心行为：先检查 Git 子模块，再执行 git add -A -- . 完整刷新索引。"
-  note_echo "适用场景：普通变更、文件与同名目录转换、缺失子模块工作树，以及 .git/core.worktree 路径错位。"
+  note_echo "核心行为：优先暂存 .gitmodules，再检查 Git 子模块，最后执行 git add -A -- . 完整刷新索引。"
+  note_echo "适用场景：普通变更、文件与同名目录转换、缺失子模块工作树、旧 gitlink 删除，以及 .git/core.worktree 路径错位。"
+  note_echo "副本修复：已登记到 .gitmodules 的同源子模块副本，会尝试创建独立 gitdir 后继续。"
   note_echo "子模块策略：缺失时尝试初始化；已存在但内部有修改时立即停止，不代替用户清理。"
-  note_echo "安全边界：不提交、不推送、不删除文件、不强制添加已忽略文件。"
+  note_echo "典型报错：please stage your changes to .gitmodules or stash them to proceed。"
+  note_echo "安全边界：不提交、不推送、不主动删除文件、不强制添加已忽略文件。"
   note_echo "文档关系：同目录 README.md 只作为静态说明，脚本运行时不依赖它。"
   gray_echo "日志文件：${LOG_FILE}"
   highlight_echo "============================================================================="
@@ -275,6 +279,39 @@ submodule_has_valid_config() {
 
   return 1
 }
+# 读取 .gitmodules 中指定子模块路径对应的 URL。
+submodule_config_url() {
+  local submodule_path="$1"
+  local key=""
+  local configured_path=""
+  local section=""
+  local url=""
+
+  [[ -f "${REPO_ROOT}/.gitmodules" ]] || return 1
+  while IFS= read -r key; do
+    [[ -n "$key" ]] || continue
+    configured_path="$(git -C "$REPO_ROOT" config --file .gitmodules --get "$key" 2>/dev/null || true)"
+    [[ "$configured_path" == "$submodule_path" ]] || continue
+    section="${key#submodule.}"
+    section="${section%.path}"
+    url="$(git -C "$REPO_ROOT" config --file .gitmodules --get "submodule.${section}.url" 2>/dev/null || true)"
+    [[ -n "$url" ]] || return 1
+    print -r -- "$url"
+    return 0
+  done < <(git -C "$REPO_ROOT" config --file .gitmodules --name-only --get-regexp '^submodule\..*\.path$' 2>/dev/null || true)
+
+  return 1
+}
+# 计算父仓 .git/modules 下某个子模块路径应该使用的 gitdir。
+submodule_gitdir_path() {
+  local submodule_path="$1"
+  local modules_root=""
+
+  modules_root="$(git -C "$REPO_ROOT" rev-parse --git-path modules 2>/dev/null || true)"
+  [[ -n "$modules_root" ]] || return 1
+  [[ "$modules_root" == /* ]] || modules_root="${REPO_ROOT}/${modules_root}"
+  print -r -- "${modules_root:A}/${submodule_path}"
+}
 # 判断相对路径是否是父仓索引登记的 gitlink。
 is_index_gitlink_path() {
   local relative_path="$1"
@@ -352,6 +389,68 @@ is_valid_submodule_worktree() {
   actual_root="$(git -C "$child_root" rev-parse --show-toplevel 2>/dev/null || true)"
   [[ -n "$actual_root" && "${actual_root:A}" == "${child_root:A}" ]]
 }
+# 将已登记到 .gitmodules 的同源子模块副本改成独立 gitdir，避免共用旧路径元数据。
+repair_configured_submodule_alias_copy() {
+  local relative_path="$1"
+  local candidate_root="$2"
+  local borrowed_gitdir="$3"
+  local target_url=""
+  local borrowed_url=""
+  local new_gitdir=""
+  local backup_git_file=""
+  local failed_git_file=""
+  local failed_gitdir=""
+  local copied_gitdir=0
+
+  target_url="$(submodule_config_url "$relative_path" 2>/dev/null || true)"
+  [[ -n "$target_url" && -f "${borrowed_gitdir}/config" ]] || return 1
+  borrowed_url="$(git config --file "${borrowed_gitdir}/config" --get remote.origin.url 2>/dev/null || true)"
+  [[ -n "$borrowed_url" && "$borrowed_url" == "$target_url" ]] || return 1
+  new_gitdir="$(submodule_gitdir_path "$relative_path" 2>/dev/null || true)"
+  [[ -n "$new_gitdir" && "$new_gitdir" != "$borrowed_gitdir" ]] || return 1
+  if ! command -v rsync >/dev/null 2>&1; then
+    error_echo "未找到 rsync，无法为子模块副本复制独立 gitdir：${relative_path}"
+    return 1
+  fi
+
+  warn_echo "检测到 ${relative_path} 已登记到 .gitmodules，但仍借用旧 gitdir，正在创建独立 gitdir。"
+  gray_echo "旧 gitdir：${borrowed_gitdir}"
+  gray_echo "新 gitdir：${new_gitdir}"
+  if [[ ! -d "$new_gitdir" ]]; then
+    mkdir -p "${new_gitdir:h}" || return 1
+    if ! rsync -a --exclude='fsmonitor--daemon*' "${borrowed_gitdir}/" "${new_gitdir}/" >> "$LOG_FILE" 2>&1; then
+      failed_gitdir="${new_gitdir}.failed-alias-$(date +%Y%m%d%H%M%S)"
+      mv "$new_gitdir" "$failed_gitdir" 2>/dev/null || true
+      error_echo "复制子模块 Git 元数据失败，已停止：${relative_path}"
+      [[ -n "$failed_gitdir" ]] && warn_echo "失败残留已转存：${failed_gitdir}"
+      return 1
+    fi
+    copied_gitdir=1
+  fi
+
+  git config --file "${new_gitdir}/config" core.worktree "$candidate_root" || return 1
+  git config --file "${new_gitdir}/config" core.bare false
+  backup_git_file="${candidate_root}/.git.alias-backup-$(date +%Y%m%d%H%M%S)"
+  failed_git_file="${candidate_root}/.git.failed-alias-$(date +%Y%m%d%H%M%S)"
+  mv "${candidate_root}/.git" "$backup_git_file" || return 1
+  printf 'gitdir: %s\n' "$new_gitdir" > "${candidate_root}/.git"
+
+  if is_valid_submodule_worktree "$relative_path"; then
+    mv "$backup_git_file" "${new_gitdir}/$(basename "$backup_git_file")" 2>/dev/null || true
+    success_echo "已为子模块副本创建独立 gitdir：${relative_path}"
+    return 0
+  fi
+
+  mv "${candidate_root}/.git" "$failed_git_file" 2>/dev/null || true
+  mv "$backup_git_file" "${candidate_root}/.git" 2>/dev/null || true
+  if [[ "$copied_gitdir" == "1" ]]; then
+    failed_gitdir="${new_gitdir}.failed-alias-$(date +%Y%m%d%H%M%S)"
+    mv "$new_gitdir" "$failed_gitdir" 2>/dev/null || true
+    warn_echo "新 gitdir 验证失败，已转存：${failed_gitdir}"
+  fi
+  error_echo "子模块副本独立 gitdir 验证失败，已恢复原 .git 指针：${relative_path}"
+  return 1
+}
 # 扫描嵌套 .git 文件，阻止 Sourcetree 把错位副本当作可提交路径。
 preflight_gitdir_worktree_aliases() {
   collect_gitlink_paths
@@ -378,6 +477,9 @@ preflight_gitdir_worktree_aliases() {
       if repair_migrated_submodule_worktree "$relative_path"; then
         continue
       fi
+    fi
+    if repair_configured_submodule_alias_copy "$relative_path" "$candidate_root" "$gitdir_path"; then
+      continue
     fi
 
     error_echo "检测到错位 Git 工作树副本，已停止暂存：${relative_path}"
@@ -444,6 +546,21 @@ recover_new_submodule_worktree() {
   success_echo "子模块工作树已收口为 clean：${submodule_path} @ ${current_sha}"
 }
 
+# 判断 .gitmodules 是否已经在索引中记录变更。
+gitmodules_has_staged_change() {
+  ! git -C "$REPO_ROOT" diff --cached --quiet -- .gitmodules 2>/dev/null
+}
+
+# 判断旧 gitlink 是否已从当前 .gitmodules 移除，允许后续 git add -A 暂存删除。
+is_retired_gitlink_after_gitmodules_change() {
+  local submodule_path="$1"
+  local child_root="${REPO_ROOT}/${submodule_path}"
+
+  gitmodules_has_staged_change || return 1
+  submodule_has_valid_config "$submodule_path" && return 1
+  [[ ! -e "$child_root" ]] || is_empty_submodule_directory "$submodule_path"
+}
+
 # 初始化缺失子模块，并防止缺失 gitlink 被误暂存为删除。
 ensure_submodule_worktree() {
   local submodule_path="$1"
@@ -500,6 +617,10 @@ preflight_submodules() {
         continue
       fi
     else
+      if is_retired_gitlink_after_gitmodules_change "$submodule_path"; then
+        warn_echo "检测到旧 gitlink 已从当前 .gitmodules 移除，稍后由 git add -A 暂存删除：${submodule_path}"
+        continue
+      fi
       if ! ensure_submodule_worktree "$submodule_path"; then
         failures=$((failures + 1))
         continue
@@ -521,14 +642,21 @@ preflight_submodules() {
 
 # 在删除或迁移 gitlink 前优先暂存 .gitmodules，满足 Git 的子模块安全校验顺序。
 stage_gitmodules_first() {
-  if [[ ! -e "${REPO_ROOT}/.gitmodules" && ! -e "${REPO_ROOT}/.git/modules" ]]; then
+  local gitmodules_status=""
+
+  if [[ ! -e "${REPO_ROOT}/.gitmodules" ]] && ! git -C "$REPO_ROOT" ls-files --error-unmatch .gitmodules >/dev/null 2>&1; then
     return 0
   fi
-  if git -C "$REPO_ROOT" diff --quiet -- .gitmodules 2>/dev/null; then
+  gitmodules_status="$(git -C "$REPO_ROOT" status --porcelain -- .gitmodules 2>/dev/null || true)"
+  [[ -n "$gitmodules_status" ]] || return 0
+
+  if git -C "$REPO_ROOT" diff --quiet -- .gitmodules 2>/dev/null && gitmodules_has_staged_change; then
+    info_echo ".gitmodules 已在索引中记录变更，继续处理 gitlink 删除/迁移。"
     return 0
   fi
 
-  info_echo "检测到 .gitmodules 未暂存变更，正在优先写入索引 ..."
+  info_echo "检测到 .gitmodules 变更，正在优先写入索引 ..."
+  gray_echo "典型场景：Sourcetree 先执行 git rm -q -f -- 旧子模块时，Git 会要求先暂存 .gitmodules。"
   git -C "$REPO_ROOT" add -A -- .gitmodules
   success_echo ".gitmodules 已优先暂存，可安全处理后续 gitlink 变更。"
 }
@@ -554,14 +682,14 @@ print_staged_summary() {
   printf '%s\n' "$summary" | tee -a "$LOG_FILE"
 }
 
-# 串联自述、仓库识别、子模块预检、索引刷新与结果输出。
+# 串联自述、仓库识别、.gitmodules 优先暂存、子模块预检、索引刷新与结果输出。
 run_main_flow() {
   initialize_script_runtime
   show_script_intro_and_wait
   resolve_repo_root "${1:-$PWD}"
+  stage_gitmodules_first
   preflight_gitdir_worktree_aliases
   preflight_submodules
-  stage_gitmodules_first
   stage_all_changes
   print_staged_summary
   success_echo "处理完成。请回到 Sourcetree 刷新后检查并提交。"
