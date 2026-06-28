@@ -14,7 +14,7 @@
 
 ### 2、自动（脚本）配置
 
-- 实际是替换`/Users/jobs/Library/Application Support/SourceTree/actions.plist  `
+- 实际是替换`~/Library/Application Support/SourceTree/actions.plist  `
 
   ```shell
   open ~/Library/Application\ Support/SourceTree
@@ -35,7 +35,7 @@
     > 直接用[**VSCode**](https://code.visualstudio.com/)打开
 
     ```shell
-    #!/bin/zsh
+    # shell: zsh
     
     open -a "Visual Studio Code" "$1"
     ```
@@ -45,7 +45,7 @@
     > 用**openjdk64-17.0.16**环境，打开[**VSCode**](https://code.visualstudio.com/)打开
     
     ```shell
-    #!/bin/zsh
+    # shell: zsh
     set -euo pipefail
     
     # -------- 纯文本日志函数（无颜色/无 emoji/兼容非TTY） --------
@@ -57,19 +57,19 @@
     ensure_brew() {
       if command -v brew >/dev/null 2>&1; then
         ok "检测到 Homebrew，跳过安装。"
-        if [[ -x /opt/homebrew/bin/brew ]]; then
-          eval "$(/opt/homebrew/bin/brew shellenv)"
-        elif [[ -x /usr/local/bin/brew ]]; then
-          eval "$(/usr/local/bin/brew shellenv)"
+        if [[ -x $(brew --prefix)/bin/brew ]]; then
+          eval "$($(brew --prefix)/bin/brew shellenv)"
+        elif [[ -x $(brew --prefix)/bin/brew ]]; then
+          eval "$($(brew --prefix)/bin/brew shellenv)"
         fi
         return
       fi
       warn "未检测到 Homebrew，开始安装…"
-      NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-      if [[ -x /opt/homebrew/bin/brew ]]; then
-        eval "$(/opt/homebrew/bin/brew shellenv)"
-      elif [[ -x /usr/local/bin/brew ]]; then
-        eval "$(/usr/local/bin/brew shellenv)"
+      NONINTERACTIVE=1 $SYSTEM_BIN_DIR/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      if [[ -x $(brew --prefix)/bin/brew ]]; then
+        eval "$($(brew --prefix)/bin/brew shellenv)"
+      elif [[ -x $(brew --prefix)/bin/brew ]]; then
+        eval "$($(brew --prefix)/bin/brew shellenv)"
       else
         err "Homebrew 安装后未找到可执行文件。"; exit 1
       fi
@@ -87,12 +87,12 @@
     }
     
     ensure_jdk17() {
-      if ! /usr/libexec/java_home -v 17 >/dev/null 2>&1; then
+      if ! $SYSTEM_USR_DIR/libexec/java_home -v 17 >/dev/null 2>&1; then
         err "系统未安装 JDK 17；请先安装（Temurin 17 / Zulu 17 等）。"
         exit 1
       fi
     
-      jenv add "$(/usr/libexec/java_home -v 17)" >/dev/null 2>&1 || true
+      jenv add "$($SYSTEM_USR_DIR/libexec/java_home -v 17)" >/dev/null 2>&1 || true
       jenv rehash
     
       local pick_17
@@ -119,9 +119,9 @@
       fi
     
       local -a CANDIDATES=(
-        "/Applications/Visual Studio Code.app"
+        "$APPLICATIONS_DIR/Visual Studio Code.app"
         "$HOME/Applications/Visual Studio Code.app"
-        "/Applications/Visual Studio Code - Insiders.app"
+        "$APPLICATIONS_DIR/Visual Studio Code - Insiders.app"
         "$HOME/Applications/Visual Studio Code - Exploration.app"
       )
       local app

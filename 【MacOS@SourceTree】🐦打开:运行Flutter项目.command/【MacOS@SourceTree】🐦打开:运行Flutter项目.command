@@ -6,7 +6,7 @@
 # - 运行提示：运行后会先打印内置自述；Sourcetree 模式无交互连续执行，终端模式确认后继续。
 # =====================================================================
 # Jobs 标准化脚本外壳
-# 说明：Sourcetree 中只定位 Flutter 工程 setup.command，再交给系统 Terminal 执行。
+# 说明：Sourcetree 中优先定位 Flutter 工程 setup.command；没有 setup.command 时，回退到 flutter run。
 # =====================================================================
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
@@ -101,6 +101,12 @@ show_readme_and_wait() {
   if typeset -f is_sourcetree_runtime >/dev/null 2>&1 && is_sourcetree_runtime; then
     IS_SOURCETREE_RUNTIME=1
   fi
+  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || "${TERM:-}" == "dumb" || -n "${NO_COLOR:-}" ]]; then
+    SOURCETREE_PLAIN_OUTPUT=1
+    export NO_COLOR="${NO_COLOR:-1}"
+    export CLICOLOR="0"
+    export ANSI_COLORS_DISABLED="1"
+  fi
   if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
     clear
   fi
@@ -109,8 +115,8 @@ show_readme_and_wait() {
   note_echo "脚本名称：${SCRIPT_BASENAME}.command"
   note_echo "脚本路径：${SCRIPT_PATH}"
   note_echo "运行入口：兼容系统终端双击运行和 Sourcetree 自定义动作运行。"
-  note_echo "核心行为：定位当前 Git / Flutter 工程中的 setup.command，并交给系统 Terminal 执行。"
-  note_echo "设计原因：setup.command 内部有入口、设备、运行宿主等人工选择，不适合直接在 Sourcetree 受限窗口里执行。"
+  note_echo "核心行为：优先定位当前 Git / Flutter 工程中的 setup.command；没有 setup.command 时先启动 iOS Simulator，再回退执行 flutter run。"
+  note_echo "设计原因：setup.command、模拟器启动或 flutter run 可能涉及入口、设备、运行宿主等人工选择，不适合直接在 Sourcetree 受限窗口里执行。"
   note_echo "环境策略：系统终端保留清屏、彩色输出和回车确认；Sourcetree 瘦身环境自动跳过清屏和等待，并输出纯文本日志。"
   note_echo "文档关系：同目录 README.md 只作为外部说明文档保留，运行时自述不读取、不拼接、不依赖 README.md。"
   warn_echo "继续前请确认 SourceTree 传入路径、当前仓库或拖入路径正确；按 Ctrl+C 可以取消。"
@@ -278,14 +284,16 @@ resolve_project_root() {
     warn_echo "没有找到 pubspec.yaml，请重新输入。"
   done
 }
-# 定位 setup.command 并确保它具备执行权限。
+# 定位 setup.command；标准 Flutter 工程没有 setup.command 时回退到模拟器启动和 flutter run。
 resolve_setup_command() {
   local candidate=""
 
   candidate="$(find_setup_command_under_dir "$PROJECT_ROOT" 2>/dev/null || true)"
   if [[ -z "$candidate" ]]; then
-    error_echo "未在当前工程中找到 setup.command：${PROJECT_ROOT}"
-    return 1
+    SETUP_COMMAND_PATH=""
+    warn_echo "未在当前工程中找到 setup.command：${PROJECT_ROOT}"
+    warn_echo "将回退为在系统 Terminal 中先启动 iOS Simulator，再执行 flutter run。"
+    return 0
   fi
 
   SETUP_COMMAND_PATH="$(abs_path "$candidate")"
@@ -300,10 +308,19 @@ resolve_setup_command() {
 
   success_echo "已找到 setup.command：${SETUP_COMMAND_PATH}"
 }
-# 使用系统 Terminal 执行 setup.command，让后续人工选择回到完整终端。
+# 生成标准 Flutter 工程的运行命令，先拉起 iOS Simulator 再进入 flutter run。
+build_flutter_run_command() {
+  local project_root_quoted="${(q)PROJECT_ROOT}"
+  print -r -- "cd ${project_root_quoted} && flutter emulators --launch apple_ios_simulator >/dev/null 2>&1 || open -a Simulator; for i in {1..60}; do xcrun simctl list devices booted 2>/dev/null | grep -q '(Booted)' && break; sleep 1; done; flutter run"
+}
+# 使用系统 Terminal 执行 setup.command 或标准 Flutter 运行命令，让后续人工选择回到完整终端。
 open_setup_in_terminal() {
   local command_text=""
-  command_text="cd ${(q)PROJECT_ROOT} && ${(q)SETUP_COMMAND_PATH}"
+  if [[ -n "${SETUP_COMMAND_PATH:-}" ]]; then
+    command_text="cd ${(q)PROJECT_ROOT} && ${(q)SETUP_COMMAND_PATH}"
+  else
+    command_text="$(build_flutter_run_command)"
+  fi
 
   if [[ "${JOBS_SOURCETREE_SETUP_DRY_RUN:-}" == "1" ]]; then
     success_echo "Dry-run：已生成 Terminal 命令，未实际打开 Terminal。"
@@ -326,7 +343,7 @@ on run argv
 end run
 APPLESCRIPT_EOF
   then
-    success_echo "已交给系统 Terminal 执行 setup.command。"
+    success_echo "已交给系统 Terminal 执行 Flutter 运行命令。"
     gray_echo "Terminal 命令：${command_text}"
     return 0
   fi

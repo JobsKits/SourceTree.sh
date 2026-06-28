@@ -50,14 +50,14 @@ $REPO
 ### 2.2、终端运行
 
 ```shell
-zsh "./【MacOS@SourceTree】⚙️收集当前Flutter工程的依赖.command" "/path/to/flutter_app"
+zsh "./【MacOS@SourceTree】⚙️收集当前Flutter工程的依赖.command" "<flutter-root>_app"
 ```
 
 可选参数：
 
 | 参数 | 作用 |
 | --- | --- |
-| `/path/to/app` | 指定 Flutter / Dart 工程根目录 |
+| `<path-to>/app` | 指定 Flutter / Dart 工程根目录 |
 | `-s`、`--select` | 使用 [**fzf**](https://formulae.brew.sh/formula/fzf) 多选 Dart / Flutter 依赖 |
 | `--pub-get` | 执行 `flutter pub get` 刷新依赖解析文件 |
 | `--no-pub-get` | 不执行 `flutter pub get`，直接使用现有解析文件 |
@@ -103,7 +103,7 @@ flowchart TD
 - Sourcetree 模式默认不修改工程依赖，只读取和复制文件。
 - 终端模式显式传入 `--pub-get` 时，`flutter pub get` 可能更新 `.dart_tool`、`pubspec.lock` 或依赖解析结果。
 - 压缩包大小取决于依赖规模和现有原生依赖目录，包含 `Pods` 时可能较大。
-- 临时目录创建在 `/tmp` 下，退出时只清理本次脚本创建的临时目录。
+- 临时目录创建在 `$TMPDIR` 下，退出时只清理本次脚本创建的临时目录。
 
 ---
 
@@ -112,7 +112,7 @@ flowchart TD
 日志路径：
 
 ```text
-/tmp/【MacOS@SourceTree】⚙️收集当前Flutter工程的依赖.log
+$TMPDIR/【MacOS@SourceTree】⚙️收集当前Flutter工程的依赖.log
 ```
 
 失败时优先查看日志中的 `✖` 错误信息和对应路径。

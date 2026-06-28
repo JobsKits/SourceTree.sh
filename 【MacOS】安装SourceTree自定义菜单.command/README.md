@@ -32,15 +32,15 @@ actions.plist.bak.年月日_时分秒
 - 需要保持下面两个等位脚本包的 `actions.plist` 一致：
 
   ```text
-  /Users/jobs/SourceTree.command/【MacOS】安装SourceTree自定义菜单.command/actions.plist
-  /Users/jobs/Documents/Github/JobsGenesis/SourceTree.command/【MacOS】安装SourceTree自定义菜单.command/actions.plist
+  ~/SourceTree.command/【MacOS】安装SourceTree自定义菜单.command/actions.plist
+  ./actions.plist
   ```
 
 ---
 
 ## 二、执行前检查 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-- 不要使用 `sudo` 执行，避免把配置写入 `/var/root`。
+- 不要使用 `sudo` 执行，避免把配置写入 `root 用户家目录`。
 - 当前用户需要能写入 Sourcetree 配置目录：
 
   ```text
@@ -119,7 +119,7 @@ flowchart TD
 日志路径：
 
 ```text
-/tmp/【MacOS】安装SourceTree自定义菜单.log
+$TMPDIR/【MacOS】安装SourceTree自定义菜单.log
 ```
 
 失败时优先查看日志中的 `✖` 错误信息。

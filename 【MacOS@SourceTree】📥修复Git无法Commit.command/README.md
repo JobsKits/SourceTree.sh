@@ -63,7 +63,7 @@ git add -A -- .
 - 需要指定仓库时，可在终端执行：
 
   ```shell
-  '/Users/jobs/SourceTree.command/【MacOS@SourceTree】📥安全暂存Git全部改动.command/【MacOS@SourceTree】📥安全暂存Git全部改动.command' '/目标/Git仓库'
+  '~/SourceTree.command/【MacOS@SourceTree】📥安全暂存Git全部改动.command/【MacOS@SourceTree】📥安全暂存Git全部改动.command' '/目标/Git仓库'
   ```
 
 ## 四、风险说明 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
@@ -85,7 +85,7 @@ git add -A -- .
 运行日志同步保存到：
 
 ```text
-/tmp/【MacOS@SourceTree】📥安全暂存Git全部改动.log
+$TMPDIR/【MacOS@SourceTree】📥安全暂存Git全部改动.log
 ```
 
 ## 六、常见问题 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
