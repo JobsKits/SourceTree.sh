@@ -40,19 +40,19 @@ chmod +x './【MacOS@SourceTree】用Trae打开@openjdk64-17.0.16.command'
 
 ## 三、脚本运行策略 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-- 脚本使用 `#!/bin/zsh` 和 `main "$@"` 统一收口，先展示自述说明，再进入真实业务逻辑。
+- 脚本使用 `# shell: zsh` 和 `main "$@"` 统一收口，先展示自述说明，再进入真实业务逻辑。
 - 系统终端双击运行时，脚本保持完整终端体验：可清屏、可彩色输出、可等待用户回车确认。
 - Sourcetree 自定义动作运行时，脚本会识别瘦身环境，自动跳过 `clear` 和回车等待，并关闭 ANSI 彩色码，避免日志里出现 ANSI 转义码。
 - 脚本会兜底解析真实脚本目录，确保 Sourcetree 只传脚本名时仍能读取同目录 `README.md`。
-- 终端输出和日志同步落盘；排查时优先查看 README 中声明的 `/tmp/脚本名.log`。
+- 终端输出和日志同步落盘；排查时优先查看 README 中声明的 `$TMPDIR/脚本名.log`。
 
 ## 四、Homebrew 标准 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 若脚本涉及 Homebrew，统一遵循下面的健康标准：
 
 - 自动识别 `arm64` / `x86_64`。
-- Apple Silicon 优先使用 `/opt/homebrew/bin/brew`。
-- Intel 优先使用 `/usr/local/bin/brew`。
+- Apple Silicon 优先使用 `$(brew --prefix)/bin/brew`。
+- Intel 优先使用 `$(brew --prefix)/bin/brew`。
 - 自动把 `brew shellenv` 写入当前 shell 对应配置文件。
 - 当前会话立即 `eval "$({brew_bin} shellenv)"` 生效。
 - 已安装时不强制升级，而是询问：**回车跳过，输入任意字符后回车升级**。
@@ -64,7 +64,7 @@ chmod +x './【MacOS@SourceTree】用Trae打开@openjdk64-17.0.16.command'
 - 首次运行前建议先阅读本 README，再执行脚本。
 - 如果脚本涉及工程目录，请确认当前目录或拖入路径正确。
 - 如果脚本涉及 Git / CocoaPods / Flutter 依赖更新，建议先提交或备份本地改动。
-- 运行日志默认写入：`/tmp/【MacOS@SourceTree】用Trae打开@openjdk64-17.0.16.log`。
+- 运行日志默认写入：`$TMPDIR/【MacOS@SourceTree】用Trae打开@openjdk64-17.0.16.log`。
 
 ## 六、流程图 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 

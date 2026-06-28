@@ -33,14 +33,14 @@
 
 ```shell
 chmod +x './【MacOS@SourceTree】🐦Flutter运行setup.command.command'
-'./【MacOS@SourceTree】🐦Flutter运行setup.command.command' '/path/to/flutter/project'
+'./【MacOS@SourceTree】🐦Flutter运行setup.command.command' '<flutter-root>/project'
 ```
 
 独立运行且未能从当前目录定位 Flutter 工程时，脚本会提示输入或拖入 Flutter 工程目录、`pubspec.yaml` 或仓库内任意文件。
 
 ## 三、脚本运行策略 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-- 脚本使用 `#!/bin/zsh` 和 `main "$@"` 统一收口，先展示脚本内置自述，再进入真实业务逻辑。
+- 脚本使用 `# shell: zsh` 和 `main "$@"` 统一收口，先展示脚本内置自述，再进入真实业务逻辑。
 - 系统终端双击运行时，脚本保持完整终端体验：可清屏、可彩色输出、可等待用户回车确认。
 - Sourcetree 自定义动作运行时，脚本会识别瘦身环境，自动跳过 `clear` 和回车等待，并关闭 ANSI 彩色码，避免日志里出现 ANSI 转义码。
 - 脚本会兜底解析真实脚本目录，确保 Sourcetree 只传脚本名时仍能定位自身。
@@ -48,14 +48,14 @@ chmod +x './【MacOS@SourceTree】🐦Flutter运行setup.command.command'
 - `setup.command` 查找顺序为：工程根目录 `setup.command` → `tool/setup/setup.command` → 递归查找。
 - 递归查找会跳过 `.git`、`Pods`、`.dart_tool`、`build`、`DerivedData`、`node_modules`。
 - 找到 `setup.command` 后，脚本只把命令交给系统 Terminal；入口、宿主、设备等人工选择仍由成熟的 `setup.command` 自己处理。
-- 终端输出和日志同步落盘；排查时优先查看 README 中声明的 `/tmp/脚本名.log`。
+- 终端输出和日志同步落盘；排查时优先查看 README 中声明的 `$TMPDIR/脚本名.log`。
 
 ## 四、Sourcetree 配置建议 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 | 配置项 | 建议值 |
 |---|---|
 | 菜单名称 | `Flutter运行setup.command` |
-| 脚本路径 | `/Users/jobs/SourceTree.command/【MacOS@SourceTree】🐦Flutter运行setup.command.command/【MacOS@SourceTree】🐦Flutter运行setup.command.command` |
+| 脚本路径 | `~/SourceTree.command/【MacOS@SourceTree】🐦Flutter运行setup.command.command/【MacOS@SourceTree】🐦Flutter运行setup.command.command` |
 | 参数 | 当前仓库路径或 Sourcetree 支持的当前文件 / 当前仓库变量 |
 | 执行结果 | Sourcetree 输出窗口只显示定位结果，后续交互在系统 Terminal 中继续 |
 
@@ -66,7 +66,7 @@ chmod +x './【MacOS@SourceTree】🐦Flutter运行setup.command.command'
 - 如果 `setup.command` 没有执行权限，脚本会尝试 `chmod +x` 当前目标文件。
 - 如果脚本涉及 Git / CocoaPods / Flutter 依赖更新，建议先提交或备份本地改动。
 - Dry-run 验证可以设置环境变量：`JOBS_SOURCETREE_SETUP_DRY_RUN=1`。
-- 运行日志默认写入：`/tmp/【MacOS@SourceTree】🐦Flutter运行setup.command.log`。
+- 运行日志默认写入：`$TMPDIR/【MacOS@SourceTree】🐦Flutter运行setup.command.log`。
 
 ## 六、流程图 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
