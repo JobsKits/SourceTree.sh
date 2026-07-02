@@ -1,7 +1,7 @@
 #!/bin/zsh
 # 脚本自述：
 # - 脚本名称：【MacOS@SourceTree】Pod_Install.command
-# - 核心用途：执行“Pod_Install”对应的移动端项目自动化任务。
+# - 核心用途：对传入工程目录执行 pod install，默认只处理当前工程根目录。
 # - 影响范围：可能修改项目依赖、生成文件、构建产物或开发工具配置。
 # - 运行提示：运行后会先打印内置自述；Sourcetree 模式无交互连续执行，终端模式确认后继续。
 # =====================================================================
@@ -261,7 +261,9 @@ show_readme_and_wait() {
   note_echo "脚本名称：${SCRIPT_BASENAME}.command"
   note_echo "脚本路径：${SCRIPT_PATH}"
   note_echo "运行入口：兼容系统终端双击运行和 Sourcetree 自定义动作运行。"
-  note_echo "核心行为：按脚本名称执行对应的 SourceTree 效率动作，运行前会先展示这段内置自述，避免误触。"
+  note_echo "核心行为：默认只对传入目录执行一次 pod install --no-repo-update，避免递归扫进第三方示例工程。"
+  note_echo "纯净策略：默认启用 JOBS_POD_INSTALL_PURE=1，跳过 Podfile 中可选外部增强脚本；需要完整增强时传 --with-hooks。"
+  note_echo "递归策略：只有手动传 --recursive 时才扫描子目录 Podfile。"
   note_echo "环境策略：系统终端保留清屏、彩色输出和回车确认；Sourcetree 瘦身环境自动跳过清屏和等待，并输出纯文本日志。"
   note_echo "文档关系：同目录 README.md 只作为外部说明文档保留，运行时自述不读取、不拼接、不依赖 README.md。"
   warn_echo "继续前请确认 SourceTree 传入路径、当前仓库或拖入路径正确；按 Ctrl+C 可以取消。"
@@ -292,7 +294,10 @@ run_original_logic() {
   export RUBYOPT="-EUTF-8:UTF-8"
   export COCOAPODS_DISABLE_STATS="true"
 
-  ROOT_DIR="${1:-$PWD}"
+  ROOT_DIR="$PWD"
+  POD_INSTALL_RECURSIVE=0
+  POD_INSTALL_PURE=1
+  POD_INSTALL_ARGS=(--no-repo-update)
   LOG_FILE="/tmp/Pod_Install.log"
   : > "$LOG_FILE"
   # 按当前输出级别记录终端信息，并同步写入脚本日志。
@@ -303,23 +308,92 @@ run_original_logic() {
   success() { log "✅ $1"; }
   # 按当前输出级别记录终端信息，并同步写入脚本日志。
   error()   { log "❌ $1"; }
-  # 封装 process_dir 对应的独立处理逻辑。
+  # 解析传入路径和 pod install 运行模式。
+  parse_pod_install_args() {
+    while (($#)); do
+      case "$1" in
+        --recursive)
+          POD_INSTALL_RECURSIVE=1
+          ;;
+        --pure)
+          POD_INSTALL_PURE=1
+          ;;
+        --with-hooks|--full)
+          POD_INSTALL_PURE=0
+          ;;
+        --repo-update)
+          POD_INSTALL_ARGS=(--repo-update)
+          ;;
+        --deployment)
+          POD_INSTALL_ARGS+=("--deployment")
+          ;;
+        --)
+          shift
+          [[ $# -gt 0 ]] && ROOT_DIR="$1"
+          break
+          ;;
+        -*)
+          error "未知参数：$1"
+          return 1
+          ;;
+        *)
+          ROOT_DIR="$1"
+          ;;
+      esac
+      shift
+    done
+
+    local resolved_root=""
+    resolved_root="$(abs_path "$ROOT_DIR")" || { error "路径不存在：$ROOT_DIR"; return 1; }
+    [[ -f "$resolved_root" ]] && resolved_root="${resolved_root:h}"
+    ROOT_DIR="$resolved_root"
+  }
+  # 输出本次 pod install 的范围、模式和参数。
+  describe_pod_install_scope() {
+    info "起始目录：$ROOT_DIR"
+    if (( POD_INSTALL_RECURSIVE )); then
+      info "执行范围：递归扫描子目录 Podfile（手动 --recursive）"
+    else
+      info "执行范围：仅处理传入目录本身，不递归扫描子目录"
+    fi
+
+    if (( POD_INSTALL_PURE )); then
+      info "运行模式：纯净模式，跳过 Podfile 中可选外部增强脚本"
+    else
+      info "运行模式：完整模式，允许 Podfile 中可选外部增强脚本"
+    fi
+    info "pod 参数：${POD_INSTALL_ARGS[*]}"
+  }
+  # 对单个目录执行 pod install，并同步记录日志。
   process_dir() {
     local d="$1"
+    local env_args=()
     info "处理目录：$d"
-    if [[ -f "$d/Podfile" ]] && find "$d" -maxdepth 1 -name "*.xcodeproj" | grep -q .; then
-      (cd "$d" && pod install --no-repo-update 2>&1 | tee -a "$LOG_FILE") \
-        && success "pod install 成功：$d" \
-        || { error "pod install 失败：$d"; return 1; }
-    else
-      info "跳过：无 Podfile 或无 xcodeproj"
+
+    if [[ ! -f "$d/Podfile" ]]; then
+      error "目标目录没有 Podfile：$d"
+      return 1
     fi
+    if ! find "$d" -maxdepth 1 -name "*.xcodeproj" | grep -q .; then
+      error "目标目录没有 xcodeproj：$d"
+      return 1
+    fi
+
+    if (( POD_INSTALL_PURE )); then
+      env_args=(JOBS_POD_INSTALL_PURE=1 JOBS_POD_INSTALL_SKIP_EXTERNAL_SCRIPTS=1)
+    else
+      env_args=(JOBS_POD_INSTALL_PURE=0 JOBS_POD_INSTALL_SKIP_EXTERNAL_SCRIPTS=0)
+    fi
+
+    (cd "$d" && env "${env_args[@]}" pod install "${POD_INSTALL_ARGS[@]}" 2>&1 | tee -a "$LOG_FILE") \
+      && success "pod install 成功：$d" \
+      || { error "pod install 失败：$d"; return 1; }
   }
-  # 统一收口脚本入口，仅委托已经拆分完成的业务流程。
-  main() {
+  # 递归扫描 Podfile，仅在手动 --recursive 时使用。
+  run_recursive_pod_install() {
     local total_count=0
     local failed_count=0
-    info "起始目录：$ROOT_DIR"
+
     while IFS= read -r -d '' podfile; do
       total_count=$((total_count + 1))
       process_dir "$(dirname "$podfile")" || failed_count=$((failed_count + 1))
@@ -333,6 +407,20 @@ run_original_logic() {
     fi
 
     success "任务完成：总计 ${total_count} 个 Podfile，失败 0 个。日志：$LOG_FILE"
+  }
+  # 根据运行模式选择单目录或递归执行。
+  run_pod_install_scope() {
+    if (( POD_INSTALL_RECURSIVE )); then
+      run_recursive_pod_install
+    else
+      process_dir "$ROOT_DIR"
+    fi
+  }
+  # 统一收口脚本入口，仅编排参数解析、范围说明和安装动作。
+  main() {
+    parse_pod_install_args "$@" # 解析路径和运行模式。
+    describe_pod_install_scope # 输出本次执行范围。
+    run_pod_install_scope # 执行 pod install。
   }
 
   main "$@"
