@@ -3,7 +3,7 @@
 # - 脚本名称：【MacOS】安装SourceTree自定义菜单.command
 # - 核心用途：先把 SourceTree.command 库发送到目标目录，再维护 Sourcetree 自定义菜单 actions.plist。
 # - 影响范围：可能替换目标目录下的 SourceTree.command；选择同步方向时可能覆盖 Sourcetree 当前用户 actions.plist。
-# - 运行提示：运行后会先打印内置自述；发送库时可输入目标目录，安装菜单时可通过 fzf 选择同步方向或取消同步。
+# - 运行提示：运行后会先打印内置自述；脚本包缺少 actions.plist 时会从 Sourcetree 默认路径自动回收。
 
 SCRIPT_PATH="${0:A}"
 SCRIPT_DIR="${SCRIPT_PATH:h}"
@@ -23,6 +23,9 @@ DEPLOYED_PACKAGE_ROOT=""
 DEPLOY_TARGET_PACKAGE=""
 SOURCETREE_APP_NAME="Sourcetree"
 SOURCETREE_PROCESS_NAME="Sourcetree"
+ACTION_SYNC_PACKAGE_TO_SOURCETREE="将脚本包 actions.plist 同步到 Sourcetree 当前用户配置"
+ACTION_SYNC_SOURCETREE_TO_PACKAGES="将 Sourcetree 当前用户配置同步回所有脚本包 actions.plist"
+ACTION_SYNC_CANCEL="取消同步"
 
 # 输出日志并同步写入日志文件。
 log() {
@@ -95,7 +98,7 @@ show_script_intro_and_wait() {
   print -r -- "脚本名称：${SCRIPT_BASENAME}.command"
   print -r -- "脚本路径：${SCRIPT_PATH}"
   print -r -- "第一阶段：发送 ${SOURCE_PACKAGE_NAME} 库到目标目录，默认目标父目录为当前用户家目录。"
-  print -r -- "第二阶段：通过 fzf 选择同步方向，安装、回收或取消 Sourcetree 自定义菜单 actions.plist 同步。"
+  print -r -- "第二阶段：脚本包有 actions.plist 时通过 fzf 选择同步方向；没有时从 Sourcetree 默认路径自动回收。"
   print -r -- "影响范围：可能替换目标 ${SOURCE_PACKAGE_NAME} 目录；选择同步方向时可能覆盖 Sourcetree 的 actions.plist。"
   print -r -- "安全策略：目标库已存在时直接回车保留并继续；输入 YES 才会备份替换；actions.plist 覆盖前自动备份。"
   print -r -- "日志文件：${LOG_FILE}"
@@ -129,9 +132,12 @@ check_package_send_environment() {
 }
 # 检查 Sourcetree 自定义菜单同步需要的命令。
 check_menu_environment() {
-  command -v fzf >/dev/null 2>&1 || exit_with_error "未找到 fzf，请先执行：brew install fzf"
   command -v plutil >/dev/null 2>&1 || exit_with_error "未找到 plutil，无法校验 actions.plist。"
   command -v cmp >/dev/null 2>&1 || exit_with_error "未找到 cmp，无法比较文件。"
+}
+# 检查需要进入交互选择时的 fzf 依赖。
+check_fzf_environment() {
+  command -v fzf >/dev/null 2>&1 || exit_with_error "未找到 fzf，请先执行：brew install fzf"
 }
 # 去掉用户拖入路径时可能带上的外层引号和换行。
 strip_outer_quotes() {
@@ -420,6 +426,22 @@ sync_sourcetree_to_peer_packages() {
     copy_file_with_backup "$TARGET_ACTIONS_PLIST" "$peer_plist" || true
   done < <(peer_install_dirs)
 }
+# 输出当前参与同步的脚本包 actions.plist 路径。
+log_peer_actions_plist_paths() {
+  local peer_dir=""
+
+  while IFS= read -r peer_dir; do
+    [[ -n "$peer_dir" && -d "$peer_dir" ]] || continue
+    gray_echo "脚本包 actions.plist：${peer_dir}/actions.plist"
+  done < <(peer_install_dirs)
+}
+# 输出 Sourcetree 自定义菜单同步结果。
+finish_sourcetree_menu_sync() {
+  success_echo "SourceTree 自定义菜单同步完成。"
+  log_peer_actions_plist_paths
+  gray_echo "Sourcetree actions.plist：${TARGET_ACTIONS_PLIST}"
+  gray_echo "日志文件：${LOG_FILE}"
+}
 # 查找 Sourcetree 应用路径。
 detect_sourcetree_app_path() {
   local app_path=""
@@ -463,13 +485,14 @@ restart_sourcetree_if_needed() {
 # 使用 fzf 选择 actions.plist 同步方向。
 select_sync_action() {
   local choice=""
+  check_fzf_environment
   choice="$(printf "%s\n%s\n%s\n" \
-    "将目前的actions.plist同步至sourcetree里面" \
-    "将目前sourcetree里面的配置同步至actions.plist里面" \
-    "取消同步" \
+    "$ACTION_SYNC_PACKAGE_TO_SOURCETREE" \
+    "$ACTION_SYNC_SOURCETREE_TO_PACKAGES" \
+    "$ACTION_SYNC_CANCEL" \
     | fzf --prompt="SourceTree actions.plist 同步方向 > " --height=40% --border --reverse --no-multi)" || true
 
-  [[ -n "$choice" ]] || choice="取消同步"
+  [[ -n "$choice" ]] || choice="$ACTION_SYNC_CANCEL"
   print -r -- "$choice"
 }
 # 把当前脚本包 actions.plist 安装到 Sourcetree 当前用户配置。
@@ -482,27 +505,40 @@ sync_current_actions_to_sourcetree() {
   sync_local_to_peer_packages
   [[ "$copied" -eq 0 ]] && restart_sourcetree_if_needed
 }
-# 把 Sourcetree 当前用户配置同步回脚本包。
+# 把 Sourcetree 当前用户配置同步回所有脚本包。
 sync_sourcetree_actions_to_current() {
-  info_echo "准备将 Sourcetree 当前配置同步回脚本包 actions.plist。"
+  info_echo "准备将 Sourcetree 当前配置同步回所有脚本包 actions.plist。"
   validate_plist "$TARGET_ACTIONS_PLIST"
   sync_sourcetree_to_peer_packages
+}
+# 本地缺少 actions.plist 时，从 Sourcetree 默认路径自动回收到脚本包。
+sync_missing_local_actions_from_sourcetree() {
+  [[ ! -f "$LOCAL_ACTIONS_PLIST" ]] || return 1
+
+  warn_echo "当前脚本包未找到 actions.plist，跳过 fzf 选择。"
+  info_echo "准备从 Sourcetree 默认配置备份到脚本包 actions.plist。"
+  validate_plist "$TARGET_ACTIONS_PLIST"
+  sync_sourcetree_to_peer_packages
+  finish_sourcetree_menu_sync
+  return 0
 }
 # 执行 Sourcetree 自定义菜单安装和回收流程。
 run_sourcetree_menu_install_flow() {
   local choice=""
 
+  sync_missing_local_actions_from_sourcetree && return 0
+  validate_local_actions_plist
   choice="$(select_sync_action)"
   case "$choice" in
-    "将目前的actions.plist同步至sourcetree里面")
+    "$ACTION_SYNC_PACKAGE_TO_SOURCETREE")
       sync_current_actions_to_sourcetree
       ;;
-    "将目前sourcetree里面的配置同步至actions.plist里面")
+    "$ACTION_SYNC_SOURCETREE_TO_PACKAGES")
       sync_sourcetree_actions_to_current
       ;;
-    "取消同步")
+    "$ACTION_SYNC_CANCEL")
       info_echo "已选择取消同步，本次不覆盖任何 actions.plist。"
-      gray_echo "脚本包 actions.plist：${LOCAL_ACTIONS_PLIST}"
+      log_peer_actions_plist_paths
       gray_echo "Sourcetree actions.plist：${TARGET_ACTIONS_PLIST}"
       gray_echo "日志文件：${LOG_FILE}"
       return 0
@@ -512,10 +548,7 @@ run_sourcetree_menu_install_flow() {
       ;;
   esac
 
-  success_echo "SourceTree 自定义菜单同步完成。"
-  gray_echo "脚本包 actions.plist：${LOCAL_ACTIONS_PLIST}"
-  gray_echo "Sourcetree actions.plist：${TARGET_ACTIONS_PLIST}"
-  gray_echo "日志文件：${LOG_FILE}"
+  finish_sourcetree_menu_sync
 }
 # 编排脚本说明、库发送和 Sourcetree 菜单安装流程。
 main() {
@@ -525,9 +558,8 @@ main() {
   check_package_send_environment # 检查发送 SourceTree.command 库所需命令。
   send_package_to_user_directory # 先把 SourceTree.command 库发送到目标目录。
   announce_menu_install_phase # 明确库发送阶段结束，准备安装 SourceTree 自定义菜单。
-  check_menu_environment # 检查 fzf、plutil 和 cmp 等菜单同步依赖。
-  validate_local_actions_plist # 校验当前脚本包内 actions.plist 合法性。
-  run_sourcetree_menu_install_flow "$@" # 通过 fzf 选择方向并同步 Sourcetree 自定义菜单。
+  check_menu_environment # 检查 plutil 和 cmp 等菜单同步基础依赖。
+  run_sourcetree_menu_install_flow "$@" # 按本地 actions.plist 状态同步 Sourcetree 自定义菜单。
 }
 
 main "$@"
