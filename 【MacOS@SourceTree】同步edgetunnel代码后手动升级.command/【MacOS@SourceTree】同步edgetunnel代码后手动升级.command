@@ -51,9 +51,21 @@ WRANGLER_LABEL=""
 WRANGLER_CONFIG_FOR_DEPLOY=""
 PLAIN_OUTPUT=0
 # ============================== 输出模式 / 彩色日志 ==============================
+# 根据运行入口和终端能力预先切换纯文本输出，避免 SourceTree 显示 ANSI 转义码。
+prepare_plain_output_context() {
+  [[ -n "${TERM:-}" ]] || export TERM="dumb"
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" || "${JOBS_PLAIN_OUTPUT:-0}" == "1" ]]; then
+    SOURCETREE_PLAIN_OUTPUT=1
+    export NO_COLOR="${NO_COLOR:-1}"
+    export CLICOLOR="0"
+    export ANSI_COLORS_DISABLED="1"
+  fi
+}
+# 配置当前脚本日志和命令输出的彩色或纯文本模式。
 configure_output_mode() {
+  prepare_plain_output_context
   # SourceTree 自定义操作窗口不完整支持 ANSI 颜色，非 TTY 输出统一降级为纯文本。
-  if [[ "${JOBS_PLAIN_OUTPUT:-0}" == "1" || -n "${NO_COLOR:-}" ]]; then
+  if [[ "${JOBS_PLAIN_OUTPUT:-0}" == "1" || -n "${NO_COLOR:-}" || "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
     PLAIN_OUTPUT=1
   elif [[ -t 1 ]]; then
     PLAIN_OUTPUT=0
@@ -147,6 +159,7 @@ show_readme_and_wait() {
   if typeset -f is_sourcetree_runtime >/dev/null 2>&1 && is_sourcetree_runtime; then
     IS_SOURCETREE_RUNTIME=1
   fi
+  configure_output_mode
   if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
     clear
   fi
@@ -826,7 +839,7 @@ function tryJsonParse(text) {
   if (firstObj >= 0 && lastObj > firstObj) candidates.push(text.slice(firstObj, lastObj + 1));
 
   for (const candidate of candidates) {
-    # 封装 try 对应的独立处理逻辑。
+    // 兼容 Wrangler 输出中夹带说明文本时截取出的候选 JSON。
     try {
       const result = selectFromItems(collect(JSON.parse(candidate)));
       if (result) return result;
@@ -1081,13 +1094,6 @@ initialize_script_runtime() {
   set -o pipefail 2>/dev/null || true
   : > "$LOG_FILE"
   is_sourcetree_runtime && IS_SOURCETREE_RUNTIME=1
-  [[ -n "${TERM:-}" ]] || export TERM="dumb"
-  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" ]]; then
-    SOURCETREE_PLAIN_OUTPUT=1
-    export NO_COLOR="${NO_COLOR:-1}"
-    export CLICOLOR="0"
-    export ANSI_COLORS_DISABLED="1"
-  fi
   configure_output_mode
 }
 # 编排脚本的高层业务流程。

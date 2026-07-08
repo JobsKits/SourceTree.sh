@@ -55,14 +55,24 @@ initialize_script_runtime() {
   LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"
   : > "$LOG_FILE"
 
+  [[ -n "${TERM:-}" ]] || export TERM="dumb"
   if is_sourcetree_runtime; then
     IS_SOURCETREE_RUNTIME=1
-    SOURCETREE_PLAIN_OUTPUT=1
     RUN_PUB_GET=0
   else
     IS_SOURCETREE_RUNTIME=0
-    SOURCETREE_PLAIN_OUTPUT=0
     RUN_PUB_GET=1
+  fi
+
+  if [[ "" == "1" || ! -t 1 || "" == "dumb" || -n "${NO_COLOR:-}" || "${JOBS_PLAIN_OUTPUT:-0}" == "1" ]]; then
+    SOURCETREE_PLAIN_OUTPUT=1
+    export NO_COLOR="${NO_COLOR:-1}"
+    export FORCE_COLOR=0
+    export CLICOLOR="0"
+    export ANSI_COLORS_DISABLED="1"
+    export npm_config_color=false
+  else
+    SOURCETREE_PLAIN_OUTPUT=0
   fi
 }
 

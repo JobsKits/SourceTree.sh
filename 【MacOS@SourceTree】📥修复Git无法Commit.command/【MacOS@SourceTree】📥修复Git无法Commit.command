@@ -100,6 +100,11 @@ initialize_script_runtime() {
   fi
   if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || -z "${TERM:-}" || "${TERM:-}" == "dumb" || -n "${NO_COLOR:-}" ]]; then
     PLAIN_OUTPUT=1
+    export NO_COLOR="${NO_COLOR:-1}"
+    export FORCE_COLOR=0
+    export CLICOLOR="0"
+    export ANSI_COLORS_DISABLED="1"
+    export npm_config_color=false
   fi
 }
 

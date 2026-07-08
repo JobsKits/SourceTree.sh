@@ -26,10 +26,31 @@ SOURCETREE_PROCESS_NAME="Sourcetree"
 ACTION_SYNC_PACKAGE_TO_SOURCETREE="将脚本包 actions.plist 同步到 Sourcetree 当前用户配置"
 ACTION_SYNC_SOURCETREE_TO_PACKAGES="将 Sourcetree 当前用户配置同步回所有脚本包 actions.plist"
 ACTION_SYNC_CANCEL="取消同步"
+PLAIN_OUTPUT=0
 
+# 移除 ANSI 颜色码，避免 Sourcetree 输出窗口显示乱码。
+strip_ansi_text() {
+  perl -pe 's/\e\[[0-9;]*[[:alpha:]]//g'
+}
+# 配置当前输出模式，非完整终端或 Sourcetree 环境统一输出纯文本。
+configure_output_mode() {
+  [[ -n "${TERM:-}" ]] || export TERM="dumb"
+  if env | grep -Eqi '^SOURCETREE|^SOURCE_TREE' || [[ ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" || "${JOBS_PLAIN_OUTPUT:-0}" == "1" ]]; then
+    PLAIN_OUTPUT=1
+    export NO_COLOR="${NO_COLOR:-1}"
+    export FORCE_COLOR=0
+    export CLICOLOR="0"
+    export ANSI_COLORS_DISABLED="1"
+    export npm_config_color=false
+  fi
+}
 # 输出日志并同步写入日志文件。
 log() {
-  printf "%b\n" "$1" | tee -a "$LOG_FILE"
+  if [[ "$PLAIN_OUTPUT" == "1" ]]; then
+    printf "%b\n" "$1" | strip_ansi_text | tee -a "$LOG_FILE"
+  else
+    printf "%b\n" "$1" | tee -a "$LOG_FILE"
+  fi
 }
 # 输出绿色成功类信息。
 color_echo() {
@@ -118,6 +139,7 @@ initialize_script_runtime() {
   set -o pipefail
   setopt NO_NOMATCH
   : > "$LOG_FILE"
+  configure_output_mode
 }
 # 阻止 root 用户执行，避免把配置写入错误用户目录。
 ensure_not_root_home() {

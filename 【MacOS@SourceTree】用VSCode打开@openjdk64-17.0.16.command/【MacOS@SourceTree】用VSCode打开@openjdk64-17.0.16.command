@@ -57,6 +57,19 @@ SOURCETREE_PLAIN_OUTPUT=0
 strip_ansi_text() {
   perl -pe 's/\e\[[0-9;]*[[:alpha:]]//g'
 }
+# 根据运行入口和终端能力预先切换纯文本输出，避免 Sourcetree 显示 ANSI 转义码。
+prepare_plain_output_context() {
+  [[ -n "${TERM:-}" ]] || export TERM="dumb"
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" || "${JOBS_PLAIN_OUTPUT:-0}" == "1" ]]; then
+    SOURCETREE_PLAIN_OUTPUT=1
+    COLOR_ENABLED=0
+    export NO_COLOR="${NO_COLOR:-1}"
+    export FORCE_COLOR=0
+    export CLICOLOR="0"
+    export ANSI_COLORS_DISABLED="1"
+    export npm_config_color=false
+  fi
+}
 # 按当前输出级别记录终端信息，并同步写入脚本日志。
 log() {
   if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == "1" ]]; then
@@ -241,6 +254,7 @@ show_readme_and_wait() {
   if typeset -f is_sourcetree_runtime >/dev/null 2>&1 && is_sourcetree_runtime; then
     IS_SOURCETREE_RUNTIME=1
   fi
+  prepare_plain_output_context
   if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
     clear
   fi
@@ -379,12 +393,15 @@ run_original_logic() {
 initialize_script_runtime() {
   : > "$LOG_FILE"
   is_sourcetree_runtime && IS_SOURCETREE_RUNTIME=1
+  prepare_plain_output_context
   [[ -n "${TERM:-}" ]] || export TERM="dumb"
   if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" ]]; then
     SOURCETREE_PLAIN_OUTPUT=1
     export NO_COLOR="${NO_COLOR:-1}"
+    export FORCE_COLOR=0
     export CLICOLOR="0"
     export ANSI_COLORS_DISABLED="1"
+    export npm_config_color=false
   fi
 }
 # 编排脚本的高层业务流程。
