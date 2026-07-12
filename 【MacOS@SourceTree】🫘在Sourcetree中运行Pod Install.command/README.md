@@ -1,4 +1,4 @@
-# `【MacOS@SourceTree】Pod_Install.command`
+# `【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.command`
 
 ![Jobs出品，必属精品](https://picsum.photos/1500/400)
 
@@ -8,7 +8,7 @@
 
 - 采用 Shell 脚本的原因：Shell 来自 [**macOS**](https://www.apple.com/macos/) 原生系统底层，虽然写法相对繁琐冗杂，但执行效率高，并且不需要额外介入 [**Ruby**](https://www.ruby-lang.org)、[**Python**](https://www.python.org) 等第三方运行环境，因此具备更好的移植性。
 
-- 本自述文件对应脚本：`【MacOS@SourceTree】Pod_Install.command`。
+- 本自述文件对应脚本：`【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.command`。
 - 脚本原始位置：`JobsGenesis@JobsCommand.SourceTree`。
 - 脚本定位：用于 SourceTree 自定义操作入口。
 - 脚本运行策略：兼容系统终端双击运行和 Sourcetree 自定义动作运行，按实际环境决定是否启用完整终端交互。
@@ -23,7 +23,7 @@
 
 | 项目 | 说明 |
 |---|---|
-| 脚本名称 | `【MacOS@SourceTree】Pod_Install.command` |
+| 脚本名称 | `【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.command` |
 | 所属目录 | `JobsGenesis@JobsCommand.SourceTree` |
 | 主要标签 | `SourceTree` |
 | 是否涉及 Homebrew | `否` |
@@ -38,27 +38,27 @@
 推荐双击 `.command` 运行。终端方式如下：
 
 ```shell
-chmod +x './【MacOS@SourceTree】Pod_Install.command'
-'./【MacOS@SourceTree】Pod_Install.command'
+chmod +x './【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.command'
+'./【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.command'
 ```
 
 脚本启动后会先显示脚本内置自述，并等待回车继续，避免误触执行。
 脚本默认只处理当前目录；如果需要递归扫描子目录 `Podfile`，追加 `--recursive`：
 
 ```shell
-'./【MacOS@SourceTree】Pod_Install.command' /path/to/project --recursive
+'./【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.command' /path/to/project --recursive
 ```
 
 脚本默认启用纯净模式；如果需要执行 `Podfile` 中的可选外部增强脚本，追加 `--with-hooks`：
 
 ```shell
-'./【MacOS@SourceTree】Pod_Install.command' /path/to/project --with-hooks
+'./【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.command' /path/to/project --with-hooks
 ```
 
 Sourcetree 自定义动作方式如下：
 
 ```shell
-【MacOS@SourceTree】Pod_Install.command /path/to/project
+【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.command /path/to/project
 ```
 
 在 Sourcetree 环境下，脚本会自动跳过 `clear` 和回车等待，并关闭 ANSI 彩色码，避免日志里出现 ANSI 转义码。
@@ -93,8 +93,8 @@ Sourcetree 自定义动作方式如下：
 - 首次运行前建议先阅读本 README，再执行脚本。
 - 如果脚本涉及工程目录，请确认当前目录或拖入路径正确。
 - 如果脚本涉及 [**Git**](https://github.com) / [**CocoaPods**](https://cocoapods.org/) / [**Flutter**](https://flutter.dev/) 依赖更新，建议先提交或备份本地改动。
-- 运行日志默认写入：`/tmp/Pod_Install.log`。
-- 如果在 Sourcetree 中看到 `Completed with errors`，以脚本最后的失败统计和 `/tmp/Pod_Install.log` 为准继续排查。
+- 运行日志默认写入系统临时目录中的 `【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.log`。
+- 如果在 Sourcetree 中看到 `Completed with errors`，以脚本最后的失败统计和上述日志为准继续排查。
 
 ## 六、流程图 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
