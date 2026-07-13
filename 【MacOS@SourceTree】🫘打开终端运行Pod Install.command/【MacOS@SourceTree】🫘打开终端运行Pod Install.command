@@ -7,12 +7,13 @@
 # - 运行提示：Sourcetree 自定义动作请传入 $REPO；Sourcetree 模式无交互，终端独立运行时确认后继续。
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+export LANG="zh_CN.UTF-8"
+export LC_ALL="zh_CN.UTF-8"
 
 SCRIPT_PATH="${BASH_SOURCE[0]:-${(%):-%x}}"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd -P)"
-SCRIPT_BASENAME="$(basename "$SCRIPT_PATH" | sed 's/\.[^.]*$//')"
 LOG_DIR="${TMPDIR:-/tmp}"
-LOG_FILE="${LOG_DIR%/}/${SCRIPT_BASENAME}.log"
+LOG_FILE="${LOG_DIR%/}/sourcetree-pod-install-terminal.log"
 IS_SOURCETREE_RUNTIME=0
 TARGET_DIRECTORY=""
 
@@ -22,19 +23,19 @@ log() {
 }
 # 输出普通信息。
 info_echo() {
-  log "ℹ $1"
+  log "[INFO] $1"
 }
 # 输出成功信息。
 success_echo() {
-  log "✔ $1"
+  log "[OK] $1"
 }
 # 输出警告信息。
 warn_echo() {
-  log "⚠ $1"
+  log "[WARN] $1"
 }
 # 输出错误信息。
 error_echo() {
-  log "✖ $1"
+  log "[ERROR] $1"
 }
 # 识别脚本是否由 Sourcetree 自定义动作发起。
 is_sourcetree_runtime() {
@@ -55,14 +56,14 @@ is_sourcetree_runtime() {
 # 展示脚本用途，并在普通终端模式下等待确认。
 show_script_intro_and_wait() {
   is_sourcetree_runtime && IS_SOURCETREE_RUNTIME=1
-  log "============================== 脚本自述 =============================="
-  info_echo "核心用途：从当前项目打开 Terminal.app，并运行 pod install。"
-  warn_echo "影响范围：可能下载依赖，并更新 Pods、Podfile.lock 或工作区文件。"
-  info_echo "日志文件：${LOG_FILE}"
+  log "============================== SCRIPT INFO =============================="
+  info_echo "Open Terminal.app at the current repository and run pod install."
+  warn_echo "pod install may download dependencies and update project files."
+  info_echo "Log file: ${LOG_FILE}"
   log "======================================================================="
 
   [[ "$IS_SOURCETREE_RUNTIME" == "1" ]] && return 0
-  [[ -t 0 ]] || { error_echo "当前不是 Sourcetree 环境，也没有可交互终端。"; return 1; }
+  [[ -t 0 ]] || { error_echo "No interactive terminal is available."; return 1; }
   read -r "?👉 已了解脚本用途与影响，按回车继续；按 Ctrl+C 取消：" _
 }
 # 初始化 zsh 运行环境和日志文件。
@@ -72,7 +73,7 @@ initialize_script_runtime() {
 }
 # 检查打开 Terminal.app 所需的系统命令。
 check_environment() {
-  command -v osascript >/dev/null 2>&1 || { error_echo "未找到 osascript。"; return 1; }
+  command -v osascript >/dev/null 2>&1 || { error_echo "osascript is unavailable."; return 1; }
 }
 # 把文件或目录参数解析为项目目录。
 resolve_target_directory() {
@@ -84,12 +85,12 @@ resolve_target_directory() {
   target="${target%\'}"
 
   [[ -f "$target" ]] && target="${target:h}"
-  [[ -d "$target" ]] || { error_echo "项目目录不存在：${target}"; return 1; }
+  [[ -d "$target" ]] || { error_echo "Repository directory is unavailable."; return 1; }
   TARGET_DIRECTORY="$(cd "$target" && pwd -P)"
 }
 # 打开 Terminal.app，并在目标目录执行可见的 pod install 命令。
 open_terminal_and_run_pod_install() {
-  info_echo "准备在终端运行：cd ${TARGET_DIRECTORY} && pod install"
+  info_echo "Opening Terminal.app and submitting pod install."
   if ! osascript - "$TARGET_DIRECTORY" >> "$LOG_FILE" 2>&1 <<'APPLESCRIPT'
 on run argv
   set targetPath to item 1 of argv
@@ -101,16 +102,16 @@ on run argv
 end run
 APPLESCRIPT
   then
-    error_echo "Terminal.app 启动失败，AppleScript 详细错误请查看：${LOG_FILE}"
+    error_echo "Failed to open Terminal.app. See log: ${LOG_FILE}"
     return 1
   fi
-  success_echo "已打开 Terminal.app，并提交 pod install 命令。"
+  success_echo "Terminal.app opened and pod install was submitted."
 }
 # 输出启动结果和排查位置。
 print_result() {
-  success_echo "项目目录：${TARGET_DIRECTORY}"
-  info_echo "pod install 的实时输出请查看新打开的终端窗口。"
-  info_echo "启动日志：${LOG_FILE}"
+  success_echo "Repository directory resolved."
+  info_echo "See the new Terminal.app window for live pod install output."
+  info_echo "Launcher log: ${LOG_FILE}"
 }
 # 编排脚本说明、路径解析和终端启动流程。
 main() {
