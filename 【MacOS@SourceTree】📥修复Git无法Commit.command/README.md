@@ -8,12 +8,13 @@
 
 ## 🔥 <font id=前言>前言</font>
 
-> 这是一个挂载到 [**Sourcetree**](https://www.sourcetreeapp.com/) 的 Git Commit 修复动作。它会先处理 `.gitmodules` 的安全暂存，再检查子模块，并用一次完整索引刷新取代 Sourcetree 对单个路径的分步 `add` / `rm`。
+> 这是一个挂载到 [**Sourcetree**](https://www.sourcetreeapp.com/) 的 Git Commit 修复动作。它会安全归档无人占用的残留 `index.lock`，再处理 `.gitmodules`、检查子模块，并用一次完整索引刷新取代 Sourcetree 对单个路径的分步 `add` / `rm`。
 
 ## 一、适用场景 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 - 暂存已跟踪文件的内容修改或文件名修改。
 - 暂存新增文件、删除文件和 Git 识别到的重命名。
+- 处理 Git 异常退出后遗留 `.git/index.lock`，导致 `Unable to create '.git/index.lock': File exists`。
 - 处理“已跟踪文件变为同名目录”或“同名目录变为文件”。
 - 恢复“父仓登记了 gitlink，但子模块工作树缺失”的半初始化状态。
 - 处理子模块目录改名，例如 `SourceTree.sh` 迁移为 `SourceTree.command`。
@@ -32,7 +33,13 @@
 
 ## 二、执行行为 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-脚本会先检查 `.gitmodules` 是否有工作区变更；如果有，会优先执行：
+脚本识别仓库后会先检查 `.git/index.lock`：
+
+1. 没有锁文件：继续原流程。
+2. 锁仍被进程持有，或仓库内仍有可能写索引的 Git 进程：打印进程信息并立即停止，不终止进程、不移动锁。
+3. 锁无人占用且没有索引写进程：把它移动到 `.git/jobs-stale-lock-backups/` 留档，再验证现有索引可以读取。
+
+锁检查通过后，脚本检查 `.gitmodules` 是否有工作区变更；如果有，会优先执行：
 
 ```shell
 git add -A -- .gitmodules
@@ -84,6 +91,8 @@ git add -A -- .
 ## 四、风险说明 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 - 脚本会修改当前仓库的 Git 索引，将所有未忽略的工作区改动放入暂存区。
+- 脚本只会归档确认无人占用的 `index.lock`；锁仍被进程持有、检测期间发生变化或现有索引不可读时都会停止。
+- 残留锁不会直接删除，而是保存在目标仓库 `.git/jobs-stale-lock-backups/` 下，便于追溯和恢复。
 - 缺失子模块时，脚本会访问 `.gitmodules` 中的远端并初始化工作树。
 - 父仓锁定提交已从远端历史消失时，脚本可将父仓 gitlink 暂存为新克隆子模块的当前有效 `HEAD`；提交前必须核对这个版本变化。
 - `.gitmodules` 发生变化时，脚本会在全量暂存前先将它写入索引，避免 Git 拒绝删除或迁移旧 gitlink。
@@ -134,5 +143,9 @@ Git 要求子模块路径配置与 gitlink 删除保持一致。如果 Sourcetre
 ### 6.7、为什么 Sourcetree 列表显示 `HEAD`，窗口里面却显示 `main`？
 
 常见原因是当前 Sourcetree 书签指向了一个错位目录：该目录下的 `.git` 文件指向某个子模块的 gitdir，但 gitdir 里的 `core.worktree` 仍指向另一个真实目录。脚本会识别这种特征；如果这个错位目录就是当前传入路径，会将它转换成独立 Git 工作树，之后 Sourcetree 自己执行 `checkout main` 和 `submodule update --init` 也能正常通过。
+
+### 6.8、遇到 `index.lock` 为什么不能直接删除？
+
+锁文件可能代表 `git add`、`git commit` 或其它索引写操作仍在运行。脚本会先通过文件占用情况和仓库内 Git 写进程交叉确认；仍在使用时停止，无人占用时才移动留档，避免删除一个有效锁后让多个写操作同时破坏索引。
 
 <a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>

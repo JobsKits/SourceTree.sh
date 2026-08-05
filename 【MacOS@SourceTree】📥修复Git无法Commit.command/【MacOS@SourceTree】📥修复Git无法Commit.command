@@ -1,9 +1,9 @@
 #!/bin/zsh
 # 脚本自述：
 # - 脚本名称：【MacOS@SourceTree】📥修复Git无法Commit.command
-# - 核心用途：检查子模块后，统一暂存当前 Git 仓库中的新增、修改、删除和重命名，规避 Sourcetree 分步 add/rm 导致的 Commit 阻塞。
-# - 关键场景：处理文件与同名目录转换、旧 gitlink 删除前 .gitmodules 未暂存、子模块目录改名或复制后的 Git worktree 路径错位。
-# - 影响范围：修改 Git 索引；可初始化缺失子模块，但不清理已有子模块的真实修改。
+# - 核心用途：安全归档残留 index.lock，检查子模块后统一暂存当前 Git 仓库的全部变更，解除 Sourcetree Commit 阻塞。
+# - 关键场景：处理 Git 异常退出留下的索引锁、文件与同名目录转换、旧 gitlink 删除前 .gitmodules 未暂存，以及子模块路径错位。
+# - 影响范围：修改 Git 索引；可归档确认无进程占用的残留锁并初始化缺失子模块，但不清理已有子模块的真实修改。
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 export LANG="${LANG:-zh_CN.UTF-8}"
@@ -37,6 +37,7 @@ LOG_FILE="${LOG_DIR}/${SCRIPT_BASENAME}.log"
 IS_SOURCETREE_RUNTIME=0
 PLAIN_OUTPUT=0
 REPO_ROOT=""
+INDEX_LOCK_PATH=""
 typeset -ga GITLINK_PATHS
 GITLINK_PATHS=()
 
@@ -110,19 +111,21 @@ initialize_script_runtime() {
 
 # 展示内置自述，终端模式等待确认，Sourcetree 模式直接继续。
 show_script_intro_and_wait() {
+  initialize_script_runtime
   if [[ "$IS_SOURCETREE_RUNTIME" != "1" && -t 1 && -n "${TERM:-}" && "${TERM:-}" != "dumb" ]]; then
     clear
   fi
 
   highlight_echo "============================== 脚本内置自述 =============================="
   note_echo "脚本名称：${SCRIPT_BASENAME}.command"
-  note_echo "核心行为：优先暂存 .gitmodules，再检查 Git 子模块，最后执行 git add -A -- . 完整刷新索引。"
-  note_echo "适用场景：普通变更、文件与同名目录转换、缺失子模块工作树、旧 gitlink 删除，以及 .git/core.worktree 路径错位。"
+  note_echo "核心行为：安全处理残留 index.lock，优先暂存 .gitmodules，再检查 Git 子模块，最后执行 git add -A -- . 完整刷新索引。"
+  note_echo "适用场景：Git 异常退出遗留索引锁、普通变更、文件与同名目录转换、缺失子模块工作树、旧 gitlink 删除，以及 .git/core.worktree 路径错位。"
+  note_echo "锁处理策略：锁仍被进程持有时立即停止；只有确认无人占用时才移动到 Git 元数据备份目录。"
   note_echo "路径迁移：旧 gitlink 已登记但目录已改名时，会同步修复 .gitmodules、core.worktree 和父仓索引。"
   note_echo "副本修复：已登记到 .gitmodules 的同源子模块副本，会尝试创建独立 gitdir 后继续。"
   note_echo "子模块策略：缺失时尝试初始化；内部有修改时保持原状并警告，不阻断父仓索引刷新。"
   note_echo "典型报错：please stage your changes to .gitmodules or stash them to proceed。"
-  note_echo "安全边界：不提交、不推送、不暂存子模块内部内容、不主动删除文件、不强制添加已忽略文件。"
+  note_echo "安全边界：不终止 Git 进程、不直接删除索引锁、不提交、不推送、不暂存子模块内部内容、不主动删除工作区文件。"
   note_echo "文档关系：同目录 README.md 只作为静态说明，脚本运行时不依赖它。"
   gray_echo "日志文件：${LOG_FILE}"
   highlight_echo "============================================================================="
@@ -246,6 +249,92 @@ resolve_repo_root() {
   fi
 
   success_echo "已识别仓库：${REPO_ROOT}"
+}
+# 列出当前仓库内可能正在修改 Git 索引的进程。
+list_active_index_writers() {
+  local process_id=""
+  local process_cwd=""
+  local process_command=""
+  local repo_root_abs="${REPO_ROOT:A}"
+
+  command -v pgrep >/dev/null 2>&1 || return 0
+  command -v lsof >/dev/null 2>&1 || return 0
+  while IFS= read -r process_id; do
+    [[ -n "$process_id" && "$process_id" != "$$" ]] || continue
+    process_cwd="$(lsof -a -p "$process_id" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)"
+    [[ -n "$process_cwd" ]] || continue
+    process_cwd="${process_cwd:A}"
+    [[ "$process_cwd" == "$repo_root_abs" || "$process_cwd" == "${repo_root_abs}/"* ]] || continue
+    process_command="$(ps -p "$process_id" -o command= 2>/dev/null || true)"
+    [[ -n "$process_command" ]] || continue
+    if printf '%s\n' "$process_command" | grep -Eq '(^|[[:space:]])(add|commit|rm|mv|reset|restore|checkout|switch|merge|rebase|cherry-pick|revert|am|apply|stash|update-index|read-tree|write-tree)([[:space:]]|$)'; then
+      printf 'PID %s: %s\n' "$process_id" "$process_command"
+    fi
+  done < <(pgrep -x git 2>/dev/null || true)
+  return 0
+}
+# 仅在无人占用且没有索引写进程时归档残留 index.lock。
+repair_stale_index_lock() {
+  local git_dir=""
+  local lock_identity_before=""
+  local lock_identity_after=""
+  local lock_holders=""
+  local active_index_writers=""
+  local backup_dir=""
+  local backup_path=""
+  local timestamp=""
+  local suffix=0
+
+  git_dir="$(git -C "$REPO_ROOT" rev-parse --absolute-git-dir 2>/dev/null)" || return 1
+  INDEX_LOCK_PATH="${git_dir}/index.lock"
+  if [[ ! -e "$INDEX_LOCK_PATH" && ! -L "$INDEX_LOCK_PATH" ]]; then
+    info_echo "未检测到 Git 索引锁，继续处理。"
+    return 0
+  fi
+  if [[ -L "$INDEX_LOCK_PATH" || ! -f "$INDEX_LOCK_PATH" ]]; then
+    error_echo "索引锁不是普通文件，拒绝自动处理：${INDEX_LOCK_PATH}"
+    return 1
+  fi
+  if ! command -v lsof >/dev/null 2>&1; then
+    error_echo "未找到 lsof，无法确认索引锁是否被占用，拒绝自动处理。"
+    return 1
+  fi
+
+  lock_identity_before="$(stat -f '%d:%i' "$INDEX_LOCK_PATH" 2>/dev/null)" || return 1
+  lock_holders="$(lsof -nP -- "$INDEX_LOCK_PATH" 2>/dev/null || true)"
+  if [[ -n "$lock_holders" ]]; then
+    error_echo "index.lock 正被进程持有，拒绝移动：${INDEX_LOCK_PATH}"
+    printf '%s\n' "$lock_holders" | tee -a "$LOG_FILE"
+    return 1
+  fi
+  active_index_writers="$(list_active_index_writers)"
+  if [[ -n "$active_index_writers" ]]; then
+    error_echo "当前仓库仍有可能修改索引的 Git 进程，拒绝移动 index.lock。"
+    printf '%s\n' "$active_index_writers" | tee -a "$LOG_FILE"
+    return 1
+  fi
+  lock_identity_after="$(stat -f '%d:%i' "$INDEX_LOCK_PATH" 2>/dev/null)" || return 1
+  if [[ "$lock_identity_before" != "$lock_identity_after" ]]; then
+    error_echo "检测期间 index.lock 已发生变化，拒绝自动处理。"
+    return 1
+  fi
+
+  timestamp="$(date +%Y%m%d-%H%M%S)"
+  backup_dir="${git_dir}/jobs-stale-lock-backups"
+  backup_path="${backup_dir}/index.lock.${timestamp}.stale"
+  while [[ -e "$backup_path" ]]; do
+    suffix=$((suffix + 1))
+    backup_path="${backup_dir}/index.lock.${timestamp}.${suffix}.stale"
+  done
+  mkdir -p "$backup_dir"
+  mv "$INDEX_LOCK_PATH" "$backup_path"
+  if ! git -C "$REPO_ROOT" ls-files --stage >/dev/null 2>&1; then
+    mv "$backup_path" "$INDEX_LOCK_PATH" 2>/dev/null || true
+    error_echo "现有 Git 索引无法读取，已恢复 index.lock，拒绝继续暂存。"
+    return 1
+  fi
+
+  success_echo "已归档无人占用的残留 index.lock：${backup_path}"
 }
 
 # 收集父仓索引中真实登记的 gitlink 路径。
@@ -777,23 +866,22 @@ print_staged_summary() {
   printf '%s\n' "$summary" | tee -a "$LOG_FILE"
 }
 
-# 串联自述、仓库识别、.gitmodules 优先暂存、子模块预检、索引刷新与结果输出。
-run_main_flow() {
-  initialize_script_runtime
-  show_script_intro_and_wait
-  resolve_repo_root "${1:-$PWD}"
-  stage_gitmodules_first
-  preflight_gitdir_worktree_aliases
-  preflight_submodules
-  stage_all_changes
-  print_staged_summary
+# 输出完整流程的最终处理结果。
+print_completion_message() {
   success_echo "处理完成。请回到 Sourcetree 刷新后检查并提交。"
   gray_echo "日志文件：${LOG_FILE}"
 }
-
+# 编排脚本自述、残留锁修复、子模块检查、索引刷新与结果输出。
 main() {
-  # 主入口只委托完整业务流程，避免交互与 Git 操作散落。
-  run_main_flow "$@"
+  show_script_intro_and_wait # 初始化运行环境、打印内置自述，并按入口决定是否等待确认。
+  resolve_repo_root "${1:-$PWD}" # 从 Sourcetree 参数或当前目录识别需要修复的 Git 仓库。
+  repair_stale_index_lock # 仅在无人占用且没有索引写进程时归档残留 index.lock。
+  stage_gitmodules_first # 优先暂存 .gitmodules，满足 gitlink 删除与迁移的安全顺序。
+  preflight_gitdir_worktree_aliases # 检查并安全修复嵌套工作树的 gitdir 路径错位。
+  preflight_submodules # 初始化缺失子模块并保留子模块内部真实修改。
+  stage_all_changes # 使用一次 git add -A 完整刷新父仓库索引。
+  print_staged_summary # 输出已进入暂存区的文件，便于回到 Sourcetree 核对。
+  print_completion_message # 汇总处理结果与日志位置。
 }
 
 main "$@"
