@@ -1,9 +1,9 @@
 #!/bin/zsh
 # 脚本自述：
 # - 脚本名称：【MacOS@SourceTree】📥修复Git无法Fetch.command
-# - 核心用途：先正常 Fetch；仅当远端跟踪引用出现文件/目录冲突时，备份阻塞元数据并重试。
-# - 关键场景：上游分支在 foo 与 foo/bar 之间迁移，或远端大小写分支在 MacOS 上映射到同一路径。
-# - 影响范围：只更新远端跟踪引用及 .git 元数据；不修改工作区、索引、本地提交或分支。
+# - 核心用途：按 5 个独立场景逐项尝试 Fetch；每次修复后立即复试，成功即停止后续元数据处理。
+# - 关键场景：原生 prune、失效远端跟踪引用、foo 与 foo/bar 双向迁移，以及 MacOS 大小写路径碰撞。
+# - 影响范围：更新远端跟踪引用及 .git 引用存储；不修改工作区、索引、提交历史或本地分支指向。
 # - 运行提示：Sourcetree 模式无交互连续执行；终端独立运行需先按回车确认。
 
 SCRIPT_NAME="${0:t}"
@@ -21,9 +21,12 @@ REMOTE_REFS_ROOT=""
 REMOTE_LOGS_ROOT=""
 FETCH_OUTPUT=""
 FETCH_STATUS=0
+FETCH_UNLOCKED=0
 REMOTE_HEADS_OUTPUT=""
 BACKUP_ROOT=""
 BLOCKER_COUNT=0
+FETCH_SCENARIO_STEP=0
+FETCH_SCENARIO_TOTAL=5
 typeset -ga REMOTE_BRANCHES
 REMOTE_BRANCHES=()
 typeset -ga CONFLICT_BRANCHES
@@ -90,6 +93,26 @@ error_echo() { log "\033[1;31m✖ $1\033[0m"; }
 gray_echo() { log "\033[0;90m$1\033[0m"; }
 # 输出高亮分隔信息。
 highlight_echo() { log "\033[1;36m🔹 $1\033[0m"; }
+# 输出一个独立 Fetch 故障场景的开始标记和成因。
+begin_fetch_scenario() {
+  local scenario_id="$1"
+  local scenario_name="$2"
+  local scenario_cause="$3"
+  FETCH_SCENARIO_STEP=$((FETCH_SCENARIO_STEP + 1))
+  highlight_echo "[${FETCH_SCENARIO_STEP}/${FETCH_SCENARIO_TOTAL}] ${scenario_id} · ${scenario_name}"
+  gray_echo "出现原因：${scenario_cause}"
+}
+# 输出一个独立 Fetch 故障场景的通过标记。
+complete_fetch_scenario() {
+  local scenario_id="$1"
+  success_echo "${scenario_id} 已完成 Fetch 复试，远端跟踪流程已经解锁。"
+}
+# 输出一个未命中的 Fetch 故障场景并继续下一项。
+skip_fetch_scenario() {
+  local scenario_id="$1"
+  local reason="$2"
+  info_echo "${scenario_id} 未命中：${reason}"
+}
 # 原样输出 Git 命令结果，并在需要时移除 ANSI 控制字符。
 log_external_output() {
   local output="$1"
@@ -105,10 +128,10 @@ show_script_intro_and_wait() {
   configure_output_mode
   highlight_echo "============================== 脚本内置自述 =============================="
   note_echo "脚本名称：${SCRIPT_NAME}"
-  note_echo "核心行为：先执行正常 git fetch --prune；仅在命中远端跟踪引用的文件/目录冲突时进入修复。"
-  note_echo "修复策略：读取远端真实分支，清理失效的 remote-tracking refs，备份阻塞的 loose ref/reflog，然后重试 Fetch。"
+  note_echo "核心行为：把 Fetch 阻塞拆成 5 个独立场景；每修复一项立即重试，成功即停止后续元数据处理。"
+  note_echo "修复策略：先正常 Fetch，再依次尝试 prune、packed-refs 大小写收口、前缀文件阻塞和同名目录阻塞。"
   note_echo "适用场景：上游分支在 foo 与 foo/bar 之间迁移，或 SaaS 与 saas/... 在 MacOS 上发生大小写路径碰撞。"
-  note_echo "安全边界：不合并、不 Pull、不提交、不推送、不修改工作区/索引/本地分支。"
+  note_echo "安全边界：不合并、不 Pull、不提交、不推送、不修改工作区/索引/本地分支指向。"
   note_echo "运行策略：Sourcetree 内无交互连续执行；终端独立运行需按回车确认。"
   gray_echo "日志文件：${LOG_FILE}"
   highlight_echo "============================================================================="
@@ -280,8 +303,41 @@ validate_conflict_branches_against_remote() {
     fi
   done
 }
-# 诊断远端上只有大小写不同、但在 MacOS 默认文件系统会共用路径的分支前缀。
-report_case_fold_collisions() {
+# 判断错误分支是否命中远端真实存在的大小写前缀碰撞。
+detect_case_fold_collisions() {
+  local conflict_branch=""
+  local remote_branch=""
+  local -a segments
+  local prefix=""
+  local index=0
+  for conflict_branch in "${CONFLICT_BRANCHES[@]}"; do
+    segments=("${(@s:/:)conflict_branch}")
+    [[ "${#segments[@]}" -gt 1 ]] || continue
+    prefix="${segments[1]}"
+    for ((index = 1; index < ${#segments[@]}; index++)); do
+      [[ "$index" -gt 1 ]] && prefix="${prefix}/${segments[$index]}"
+      for remote_branch in "${REMOTE_BRANCHES[@]}"; do
+        if [[ "$remote_branch" != "$prefix" && "${remote_branch:l}" == "${prefix:l}" ]]; then
+          return 0
+        fi
+      done
+    done
+  done
+  return 1
+}
+# 将有效远端跟踪引用收进 packed-refs，避免大小写前缀继续占用 loose ref 文件路径。
+pack_refs_for_case_fold_collision() {
+  local pack_output=""
+  if ! pack_output="$(LC_ALL=C git --no-optional-locks -C "$REPO_ROOT" pack-refs --all 2>&1)"; then
+    error_echo "无法把有效引用安全收进 packed-refs，已停止大小写碰撞修复。"
+    log_external_output "$pack_output"
+    return 1
+  fi
+  log_external_output "$pack_output"
+  success_echo "已通过 git pack-refs 收口有效引用，释放大小写前缀的 loose ref 路径。"
+}
+# 仅备份远端大小写前缀碰撞所对应的 loose reflog，packed ref 继续保留有效引用。
+backup_case_fold_collision_blockers() {
   local conflict_branch=""
   local remote_branch=""
   local -a segments
@@ -296,7 +352,9 @@ report_case_fold_collisions() {
       for remote_branch in "${REMOTE_BRANCHES[@]}"; do
         if [[ "$remote_branch" != "$prefix" && "${remote_branch:l}" == "${prefix:l}" ]]; then
           warn_echo "远端存在 MacOS 大小写路径碰撞：${remote_branch} <-> ${conflict_branch}"
-          warn_echo "这不是本地代码修改造成的；本次仅备份阻塞 Fetch 的远端引用元数据。"
+          warn_echo "有效引用已收进 packed-refs；现在只备份仍占路径的 loose ref/reflog。"
+          backup_blocker_path "${REMOTE_REFS_ROOT}/${remote_branch}" "file"
+          backup_blocker_path "${REMOTE_LOGS_ROOT}/${remote_branch}" "file"
         fi
       done
     done
@@ -348,8 +406,8 @@ backup_blocker_path() {
   /bin/mv "$source_path" "$destination"
   BLOCKER_COUNT=$((BLOCKER_COUNT + 1))
 }
-# 根据单个远端分支名扫描会阻止其创建的前缀文件和同名目录。
-scan_branch_for_blockers() {
+# 根据单个远端分支名备份会阻止层级目录创建的前缀文件。
+backup_prefix_file_blockers_for_branch() {
   local branch_name="$1"
   local -a segments
   local prefix=""
@@ -364,66 +422,146 @@ scan_branch_for_blockers() {
       backup_blocker_path "${REMOTE_LOGS_ROOT}/${prefix}" "file"
     done
   fi
+}
+# 根据单个远端分支名备份会阻止单层引用创建的同名目录。
+backup_same_name_directory_blockers_for_branch() {
+  local branch_name="$1"
 
   backup_blocker_path "${REMOTE_REFS_ROOT}/${branch_name}" "directory"
   backup_blocker_path "${REMOTE_LOGS_ROOT}/${branch_name}" "directory"
 }
-# 仅扫描本次 Fetch 错误明确点名的分支，避免扩大 Git 元数据修复范围。
-scan_conflict_branches_for_blockers() {
+# 仅扫描错误明确点名分支的前缀文件阻塞，避免扩大修复范围。
+backup_conflict_prefix_files() {
   local branch_name=""
-  BACKUP_ROOT=""
-  BLOCKER_COUNT=0
   for branch_name in "${CONFLICT_BRANCHES[@]}"; do
-    scan_branch_for_blockers "$branch_name"
+    backup_prefix_file_blockers_for_branch "$branch_name"
   done
-
-  if [[ "$BLOCKER_COUNT" -eq 0 ]]; then
-    info_echo "未发现需要手动备份的 loose ref/reflog 阻塞项；将在 prune 后直接重试 Fetch。"
-  else
-    success_echo "已备份并移开 ${BLOCKER_COUNT} 个引用元数据阻塞项。"
-  fi
 }
-# 遇到已知文件/目录冲突时执行安全修复，然后重试 Fetch。
-repair_fetch_if_needed() {
-  if perform_fetch "首次尝试"; then
-    success_echo "Fetch 已正常完成，不需要修复 Git 元数据。"
-    gray_echo "日志文件：${LOG_FILE}"
-    return 0
+# 仅扫描错误明确点名分支的同名目录阻塞，避免扩大修复范围。
+backup_conflict_same_name_directories() {
+  local branch_name=""
+  for branch_name in "${CONFLICT_BRANCHES[@]}"; do
+    backup_same_name_directory_blockers_for_branch "$branch_name"
+  done
+}
+# 根据最近一次 Fetch 错误刷新受支持的冲突分支上下文。
+refresh_remote_ref_conflict_context() {
+  if ! is_remote_ref_namespace_conflict; then
+    error_echo "Fetch 失败，但不属于本脚本支持的远端引用文件/目录冲突。"
+    gray_echo "最近一次原始错误已写入日志：${LOG_FILE}"
+    return "$FETCH_STATUS"
   fi
-
+  extract_conflict_branches
+  validate_conflict_branches_against_remote
+}
+# 首次命中受支持错误后读取远端真值，并建立后续逐场景修复上下文。
+prepare_supported_fetch_context() {
+  [[ "$FETCH_UNLOCKED" == "1" ]] && return 0
   if ! is_remote_ref_namespace_conflict; then
     error_echo "Fetch 失败，但不属于本脚本支持的远端引用文件/目录冲突。"
     gray_echo "原始错误已写入日志：${LOG_FILE}"
     return "$FETCH_STATUS"
   fi
-
-  warn_echo "已命中远端跟踪引用文件/目录冲突，开始安全修复。"
+  warn_echo "已命中远端跟踪引用文件/目录冲突，开始逐场景修复。"
   load_remote_branches
-  extract_conflict_branches
-  validate_conflict_branches_against_remote
-  report_case_fold_collisions
+  refresh_remote_ref_conflict_context
+}
+# 在一个场景产生实际修复后立即重试 Fetch，并刷新下一场景所需错误上下文。
+retry_fetch_after_scenario() {
+  local scenario_id="$1"
+  local phase="$2"
+  if perform_fetch "$phase"; then
+    FETCH_UNLOCKED=1
+    complete_fetch_scenario "$scenario_id"
+    return 0
+  fi
+  warn_echo "${scenario_id} 复试仍失败，继续核对下一项受支持场景。"
+  refresh_remote_ref_conflict_context
+}
+# 场景 F01：先执行 Git 原生 fetch --prune，成功即停止所有额外修复。
+run_fetch_scenario_f01_normal_fetch() {
+  begin_fetch_scenario "F01" "常规 Fetch 与自动 prune" "普通远端更新，或 Git 自己即可清理的失效 remote-tracking refs。"
+  if perform_fetch "F01 常规尝试"; then
+    FETCH_UNLOCKED=1
+    complete_fetch_scenario "F01"
+    return 0
+  fi
+  warn_echo "F01 常规 Fetch 未解锁，准备判断是否属于安全可修复的引用路径冲突。"
+}
+# 场景 F02：单独执行 remote prune 后立即复试 Fetch。
+run_fetch_scenario_f02_stale_refs() {
+  [[ "$FETCH_UNLOCKED" == "1" ]] && return 0
+  begin_fetch_scenario "F02" "失效远端跟踪引用" "远端分支已经删除或改名，但本地 remote-tracking ref/reflog 尚未完整清理。"
   prune_stale_remote_refs
-  scan_conflict_branches_for_blockers
-
-  if ! perform_fetch "修复后重试"; then
-    error_echo "修复后 Fetch 仍失败；已备份的元数据不会自动删除。"
-    [[ -n "$BACKUP_ROOT" ]] && gray_echo "备份目录：${BACKUP_ROOT}"
-    gray_echo "日志文件：${LOG_FILE}"
+  retry_fetch_after_scenario "F02" "F02 prune 后复试"
+}
+# 场景 F03：只处理远端分支前缀的大小写映射碰撞，命中后立即复试。
+run_fetch_scenario_f03_case_fold_collision() {
+  [[ "$FETCH_UNLOCKED" == "1" ]] && return 0
+  begin_fetch_scenario "F03" "MacOS 大小写路径碰撞" "远端大小写敏感，而 MacOS 默认文件系统把 SaaS 与 saas/... 映射到同一路径。"
+  if ! detect_case_fold_collisions; then
+    skip_fetch_scenario "F03" "错误分支没有命中远端真实存在的大小写前缀分支。"
+    return 0
+  fi
+  pack_refs_for_case_fold_collision
+  backup_case_fold_collision_blockers
+  retry_fetch_after_scenario "F03" "F03 大小写碰撞修复后复试"
+  if [[ "$FETCH_UNLOCKED" != "1" ]] && detect_case_fold_collisions; then
+    error_echo "远端仍同时保留大小写碰撞分支，packed-refs 收口后 Fetch 依然失败；为避免反复搬移同一路径已停止。"
     return "$FETCH_STATUS"
   fi
-
-  success_echo "Fetch 修复完成，远端跟踪引用已刷新。"
-  [[ -n "$BACKUP_ROOT" ]] && gray_echo "冲突元数据备份：${BACKUP_ROOT}"
-  gray_echo "日志文件：${LOG_FILE}"
 }
-# 编排脚本自述、环境初始化、仓库识别和 Fetch 修复流程。
+# 场景 F04：只处理 foo 文件阻止创建 foo/bar 目录的前缀文件冲突。
+run_fetch_scenario_f04_prefix_file_blocker() {
+  [[ "$FETCH_UNLOCKED" == "1" ]] && return 0
+  begin_fetch_scenario "F04" "前缀文件阻塞层级分支" "远端从 foo 迁移到 foo/bar，本地旧 foo loose ref 或 reflog 文件挡住目录创建。"
+  local blockers_before="$BLOCKER_COUNT"
+  backup_conflict_prefix_files
+  if [[ "$BLOCKER_COUNT" -eq "$blockers_before" ]]; then
+    skip_fetch_scenario "F04" "错误点名分支的前缀位置没有 loose ref/reflog 文件。"
+    return 0
+  fi
+  retry_fetch_after_scenario "F04" "F04 前缀文件修复后复试"
+}
+# 场景 F05：只处理 foo/bar 目录阻止创建 foo 文件的反向路径冲突。
+run_fetch_scenario_f05_same_name_directory_blocker() {
+  [[ "$FETCH_UNLOCKED" == "1" ]] && return 0
+  begin_fetch_scenario "F05" "同名目录阻塞单层分支" "远端从 foo/bar 收口为 foo，本地旧 foo 目录及其 reflog 目录挡住文件创建。"
+  local blockers_before="$BLOCKER_COUNT"
+  backup_conflict_same_name_directories
+  if [[ "$BLOCKER_COUNT" -eq "$blockers_before" ]]; then
+    skip_fetch_scenario "F05" "错误点名分支的同名位置没有 loose ref/reflog 目录。"
+    return 0
+  fi
+  retry_fetch_after_scenario "F05" "F05 同名目录修复后复试"
+}
+# 汇总所有受支持场景的复试结果，并将未解锁状态明确返回给 Sourcetree。
+finalize_fetch_unlock_result() {
+  if [[ "$FETCH_UNLOCKED" == "1" ]]; then
+    success_echo "Fetch 流程已解锁，远端跟踪引用已刷新。"
+    [[ -n "$BACKUP_ROOT" ]] && gray_echo "冲突元数据备份：${BACKUP_ROOT}"
+    gray_echo "日志文件：${LOG_FILE}"
+    return 0
+  fi
+  error_echo "5 个受支持场景均已逐项检测，Fetch 仍未解锁；脚本不会继续扩大 Git 元数据修改范围。"
+  [[ -n "$BACKUP_ROOT" ]] && gray_echo "已备份元数据：${BACKUP_ROOT}"
+  gray_echo "日志文件：${LOG_FILE}"
+  return "${FETCH_STATUS:-1}"
+}
+# 编排脚本自述、环境初始化、仓库识别、五个独立场景和最终解锁判定。
 main() {
   show_script_intro_and_wait # 首先打印内置自述，并按真实运行入口决定是否等待确认。
   initialize_script_runtime # 确认后初始化 zsh、命令路径、日志和纯文本输出策略。
   resolve_repo_root "${1:-$PWD}" # 从 Sourcetree 的 $REPO 参数或当前目录识别工作仓。
   resolve_remote_name "${2:-}" # 优先使用显式远端参数，否则选择 origin 或唯一可用远端。
   resolve_git_metadata_paths # 解析 worktree 共用 Git 目录和远端引用元数据路径。
-  repair_fetch_if_needed # 先正常 Fetch，仅在命中引用文件/目录冲突时备份修复并重试。
+  run_fetch_scenario_f01_normal_fetch # F01：先用 Git 原生 fetch --prune 尝试直接解锁。
+  prepare_supported_fetch_context # F01 失败后仅为受支持的引用路径冲突建立远端真值上下文。
+  run_fetch_scenario_f02_stale_refs # F02：清理失效 remote-tracking refs 后立即复试。
+  run_fetch_scenario_f03_case_fold_collision # F03：处理 MacOS 大小写前缀碰撞后立即复试。
+  run_fetch_scenario_f04_prefix_file_blocker # F04：处理旧前缀文件挡住新层级目录后立即复试。
+  run_fetch_scenario_f05_same_name_directory_blocker # F05：处理旧层级目录挡住新单层引用后立即复试。
+  finalize_fetch_unlock_result # 汇总成功场景或明确返回未解锁错误，不扩大处理范围。
 }
 
 main "$@"

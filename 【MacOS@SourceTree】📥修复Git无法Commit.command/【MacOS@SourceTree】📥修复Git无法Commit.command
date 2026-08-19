@@ -1,18 +1,15 @@
 #!/bin/zsh
 # 脚本自述：
 # - 脚本名称：【MacOS@SourceTree】📥修复Git无法Commit.command
-# - 核心用途：安全归档残留 index.lock，检查子模块后统一暂存当前 Git 仓库的全部变更，解除 Sourcetree Commit 阻塞。
-# - 关键场景：处理 Git 异常退出留下的索引锁、文件与同名目录转换、旧 gitlink 删除前 .gitmodules 未暂存，以及子模块路径错位。
+# - 核心用途：按 7 个独立场景逐项检测/修复 Commit 的索引、gitdir、.gitmodules 与子模块阻塞，并复验暂存入口。
+# - 关键场景：工作树绑定错位、残留索引锁、gitlink 顺序错误、嵌套路径迁移、子模块异常，以及文件/目录形态互换。
 # - 影响范围：修改 Git 索引；可归档确认无进程占用的残留锁并初始化缺失子模块，但不清理已有子模块的真实修改。
-
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
-export LANG="${LANG:-zh_CN.UTF-8}"
-export LC_CTYPE="${LC_CTYPE:-UTF-8}"
+# - 运行提示：Sourcetree 模式无交互连续执行；终端独立运行需先按回车确认。
 
 # 解析脚本真实路径，兼容 Sourcetree 只传入脚本名的运行环境。
 resolve_script_path() {
   local script_source="${BASH_SOURCE[0]:-${(%):-%x}}"
-  local script_name="$(basename -- "$0")"
+  local script_name="${0:t}"
   local candidate=""
 
   for candidate in \
@@ -28,19 +25,29 @@ resolve_script_path() {
   printf '%s/%s\n' "$PWD" "$script_name"
 }
 
-SCRIPT_PATH="$(resolve_script_path)"
-SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd -P)"
-SCRIPT_BASENAME="$(basename "$SCRIPT_PATH" | sed 's/\.[^.]*$//')"
+SCRIPT_NAME="${0:t}"
+SCRIPT_BASENAME="${SCRIPT_NAME:r}"
+SCRIPT_PATH=""
+SCRIPT_DIR=""
 LOG_DIR="${TMPDIR:-/tmp}"
 LOG_DIR="${LOG_DIR%/}"
 LOG_FILE="${LOG_DIR}/${SCRIPT_BASENAME}.log"
 IS_SOURCETREE_RUNTIME=0
 PLAIN_OUTPUT=0
+LOG_READY=0
+TARGET_PATH=""
 REPO_ROOT=""
 INDEX_LOCK_PATH=""
+COMMIT_SCENARIO_STEP=0
+COMMIT_SCENARIO_TOTAL=7
 typeset -ga GITLINK_PATHS
 GITLINK_PATHS=()
 
+# 准备只用于自述和路径定位的脚本上下文，不写入文件或 Git 状态。
+prepare_script_context() {
+  SCRIPT_PATH="$(resolve_script_path)"
+  SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd -P)"
+}
 # 识别 Sourcetree 自定义动作的非交互运行环境。
 is_sourcetree_runtime() {
   env | grep -Eqi '^SOURCETREE|^SOURCE_TREE' && return 0
@@ -58,21 +65,37 @@ is_sourcetree_runtime() {
 
   return 1
 }
-
 # 移除 ANSI 颜色码，避免 Sourcetree 输出窗口显示乱码。
 strip_ansi_text() {
   perl -pe 's/\e\[[0-9;]*[[:alpha:]]//g'
 }
-
-# 同步输出终端日志和本地日志文件。
-log() {
-  if [[ "$PLAIN_OUTPUT" == "1" ]]; then
-    printf '%b\n' "$1" | strip_ansi_text | tee -a "$LOG_FILE"
-  else
-    printf '%b\n' "$1" | tee -a "$LOG_FILE"
+# 在首次输出前确定 Sourcetree 和纯文本输出模式。
+configure_output_mode() {
+  if is_sourcetree_runtime; then
+    IS_SOURCETREE_RUNTIME=1
+  fi
+  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || -z "${TERM:-}" || "${TERM:-}" == "dumb" || -n "${NO_COLOR:-}" ]]; then
+    PLAIN_OUTPUT=1
+    export NO_COLOR=1
+    export FORCE_COLOR=0
+    export CLICOLOR=0
+    export ANSI_COLORS_DISABLED=1
+    export npm_config_color=false
   fi
 }
-
+# 同步输出终端日志和本地日志文件。
+log() {
+  local message="$1"
+  if [[ "$LOG_READY" != "1" ]]; then
+    [[ "$PLAIN_OUTPUT" == "1" ]] && printf '%b\n' "$message" | strip_ansi_text || printf '%b\n' "$message"
+    return 0
+  fi
+  if [[ "$PLAIN_OUTPUT" == "1" ]]; then
+    printf '%b\n' "$message" | strip_ansi_text | tee -a "$LOG_FILE"
+  else
+    printf '%b\n' "$message" | tee -a "$LOG_FILE"
+  fi
+}
 # 输出信息级别日志。
 info_echo()    { log "\033[1;34mℹ $1\033[0m"; }
 # 输出成功级别日志。
@@ -87,38 +110,44 @@ error_echo()   { log "\033[1;31m✖ $1\033[0m"; }
 gray_echo()    { log "\033[0;90m$1\033[0m"; }
 # 输出高亮分隔信息。
 highlight_echo() { log "\033[1;36m🔹 $1\033[0m"; }
-
+# 输出一个独立 Commit 故障场景的开始标记和成因。
+begin_commit_scenario() {
+  local scenario_id="$1"
+  local scenario_name="$2"
+  local scenario_cause="$3"
+  COMMIT_SCENARIO_STEP=$((COMMIT_SCENARIO_STEP + 1))
+  highlight_echo "[${COMMIT_SCENARIO_STEP}/${COMMIT_SCENARIO_TOTAL}] ${scenario_id} · ${scenario_name}"
+  gray_echo "出现原因：${scenario_cause}"
+}
+# 输出一个独立 Commit 故障场景的通过标记。
+complete_commit_scenario() {
+  local scenario_id="$1"
+  success_echo "${scenario_id} 检测/处理通过，继续下一项。"
+}
 # 初始化 zsh 选项、日志与 Sourcetree 输出策略。
 initialize_script_runtime() {
   emulate -R zsh
   set -e
   set -o pipefail
   setopt NO_NOMATCH
+  export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+  export LANG="${LANG:-zh_CN.UTF-8}"
+  export LC_CTYPE="${LC_CTYPE:-UTF-8}"
   : > "$LOG_FILE"
-
-  if is_sourcetree_runtime; then
-    IS_SOURCETREE_RUNTIME=1
-  fi
-  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || -z "${TERM:-}" || "${TERM:-}" == "dumb" || -n "${NO_COLOR:-}" ]]; then
-    PLAIN_OUTPUT=1
-    export NO_COLOR="${NO_COLOR:-1}"
-    export FORCE_COLOR=0
-    export CLICOLOR="0"
-    export ANSI_COLORS_DISABLED="1"
-    export npm_config_color=false
-  fi
+  LOG_READY=1
+  configure_output_mode
 }
-
 # 展示内置自述，终端模式等待确认，Sourcetree 模式直接继续。
 show_script_intro_and_wait() {
-  initialize_script_runtime
+  prepare_script_context
+  configure_output_mode
   if [[ "$IS_SOURCETREE_RUNTIME" != "1" && -t 1 && -n "${TERM:-}" && "${TERM:-}" != "dumb" ]]; then
     clear
   fi
 
   highlight_echo "============================== 脚本内置自述 =============================="
   note_echo "脚本名称：${SCRIPT_BASENAME}.command"
-  note_echo "核心行为：安全处理残留 index.lock，优先暂存 .gitmodules，再检查 Git 子模块，最后执行 git add -A -- . 完整刷新索引。"
+  note_echo "核心行为：把 Commit 阻塞拆成 7 个独立场景，逐项检测/修复，最后验证索引入口已经解锁。"
   note_echo "适用场景：Git 异常退出遗留索引锁、普通变更、文件与同名目录转换、缺失子模块工作树、旧 gitlink 删除，以及 .git/core.worktree 路径错位。"
   note_echo "锁处理策略：锁仍被进程持有时立即停止；只有确认无人占用时才移动到 Git 元数据备份目录。"
   note_echo "路径迁移：旧 gitlink 已登记但目录已改名时，会同步修复 .gitmodules、core.worktree 和父仓索引。"
@@ -142,7 +171,6 @@ show_script_intro_and_wait() {
   echo ""
   read -r "?👉 已阅读说明，按回车继续执行；按 Ctrl+C 取消：" _
 }
-
 # 解析 .git 文件指向的真实 gitdir 路径。
 resolve_gitdir_from_git_file() {
   local worktree_root="$1"
@@ -231,8 +259,8 @@ repair_invoked_gitdir_worktree_if_safe() {
   git config --file "${gitdir_path}/config" core.worktree "$target_abs" || return 1
   success_echo "已修正 core.worktree：${target_abs}"
 }
-# 从 Sourcetree 参数或当前目录解析 Git 仓库根目录。
-resolve_repo_root() {
+# 从 Sourcetree 参数或当前目录解析待处理路径，但暂不修改 Git 状态。
+resolve_target_path() {
   local target="${1:-$PWD}"
 
   if [[ -f "$target" ]]; then
@@ -242,13 +270,21 @@ resolve_repo_root() {
     error_echo "目标路径不存在：${target}"
     return 1
   fi
-  repair_invoked_gitdir_worktree_if_safe "$target"
-  if ! REPO_ROOT="$(git -C "$target" rev-parse --show-toplevel 2>/dev/null)"; then
-    error_echo "目标路径不在 Git 工作树内：${target}"
+
+  TARGET_PATH="${target:A}"
+  info_echo "待处理路径：${TARGET_PATH}"
+}
+# 场景 C01：修复当前工作树自身的 .git/core.worktree 错位并识别仓库。
+run_commit_scenario_c01_worktree_binding() {
+  begin_commit_scenario "C01" "工作树定位与 gitdir 绑定" "目录改名、Sourcetree 书签指错目录，或 .git 指针仍绑定旧 core.worktree。"
+  repair_invoked_gitdir_worktree_if_safe "$TARGET_PATH"
+  if ! REPO_ROOT="$(git -C "$TARGET_PATH" rev-parse --show-toplevel 2>/dev/null)"; then
+    error_echo "目标路径不在 Git 工作树内：${TARGET_PATH}"
     return 1
   fi
 
   success_echo "已识别仓库：${REPO_ROOT}"
+  complete_commit_scenario "C01"
 }
 # 列出当前仓库内可能正在修改 Git 索引的进程。
 list_active_index_writers() {
@@ -336,7 +372,12 @@ repair_stale_index_lock() {
 
   success_echo "已归档无人占用的残留 index.lock：${backup_path}"
 }
-
+# 场景 C02：识别活锁与残留 index.lock，只归档已经确认无人占用的残留锁。
+run_commit_scenario_c02_index_lock() {
+  begin_commit_scenario "C02" "索引锁阻塞" "Git 索引写进程仍在运行，或异常退出后遗留 .git/index.lock。"
+  repair_stale_index_lock
+  complete_commit_scenario "C02"
+}
 # 收集父仓索引中真实登记的 gitlink 路径。
 collect_gitlink_paths() {
   GITLINK_PATHS=()
@@ -351,7 +392,6 @@ collect_gitlink_paths() {
     [[ -n "$submodule_path" ]] && GITLINK_PATHS+=("$submodule_path")
   done < <(git -C "$REPO_ROOT" ls-files -s -z)
 }
-
 # 判断 gitlink 是否在 .gitmodules 中有可用的路径和 URL 配置。
 submodule_has_valid_config() {
   local submodule_path="$1"
@@ -500,7 +540,6 @@ repair_unstaged_submodule_path_migration() {
 
   success_echo "已自动修复子模块目录迁移：${old_relative_path} -> ${relative_path}"
 }
-
 # 根据 HEAD 与当前 .gitmodules 的同一 section，识别子模块路径迁移。
 find_migrated_submodule_path() {
   local old_path="$1"
@@ -526,7 +565,6 @@ find_migrated_submodule_path() {
 
   return 1
 }
-
 # 修正直接移动子模块目录后仍指向旧路径的 core.worktree。
 repair_migrated_submodule_worktree() {
   local submodule_path="$1"
@@ -556,7 +594,6 @@ repair_migrated_submodule_worktree() {
 
   return 1
 }
-
 # 判断子模块路径是否已经是有效 Git 工作树。
 is_valid_submodule_worktree() {
   local submodule_path="$1"
@@ -681,7 +718,12 @@ preflight_gitdir_worktree_aliases() {
     return 1
   fi
 }
-
+# 场景 C04：扫描并收口嵌套工作树、子模块副本及未完成路径迁移。
+run_commit_scenario_c04_nested_worktrees() {
+  begin_commit_scenario "C04" "嵌套工作树与路径迁移" "子模块目录被移动/复制后，.git 指针、core.worktree、.gitmodules 与父仓 gitlink 没有同步。"
+  preflight_gitdir_worktree_aliases
+  complete_commit_scenario "C04"
+}
 # 判断子模块路径是否只是上次失败初始化留下的空目录。
 is_empty_submodule_directory() {
   local submodule_path="$1"
@@ -689,7 +731,6 @@ is_empty_submodule_directory() {
   [[ -d "$child_root" ]] || return 1
   [[ -z "$(find "$child_root" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]
 }
-
 # 输出子模块内部变更，并说明父仓索引刷新仍会继续。
 report_dirty_submodule() {
   local submodule_path="$1"
@@ -697,7 +738,6 @@ report_dirty_submodule() {
   git -C "${REPO_ROOT}/${submodule_path}" status --short --untracked-files=all 2>/dev/null | sed 's/^/  /' | tee -a "$LOG_FILE"
   gray_echo "父仓提交不会包含这些工作区内容；请在对应子模块中单独处理。"
 }
-
 # 对本轮初始化后留下的半成品工作树做安全收口。
 recover_new_submodule_worktree() {
   local submodule_path="$1"
@@ -725,12 +765,10 @@ recover_new_submodule_worktree() {
 
   success_echo "子模块工作树已收口为 clean：${submodule_path} @ ${current_sha}"
 }
-
 # 判断 .gitmodules 是否已经在索引中记录变更。
 gitmodules_has_staged_change() {
   ! git -C "$REPO_ROOT" diff --cached --quiet -- .gitmodules 2>/dev/null
 }
-
 # 判断旧 gitlink 是否已从当前 .gitmodules 移除，允许后续 git add -A 暂存删除。
 is_retired_gitlink_after_gitmodules_change() {
   local submodule_path="$1"
@@ -740,7 +778,6 @@ is_retired_gitlink_after_gitmodules_change() {
   submodule_has_valid_config "$submodule_path" && return 1
   [[ ! -e "$child_root" ]] || is_empty_submodule_directory "$submodule_path"
 }
-
 # 初始化缺失子模块，并防止缺失 gitlink 被误暂存为删除。
 ensure_submodule_worktree() {
   local submodule_path="$1"
@@ -771,7 +808,6 @@ ensure_submodule_worktree() {
   error_echo "子模块无法安全恢复，已中止：${submodule_path}"
   return 1
 }
-
 # 在全量暂存前检查所有 gitlink，子模块不安全时整体中止。
 preflight_submodules() {
   collect_gitlink_paths
@@ -823,7 +859,12 @@ preflight_submodules() {
     warn_echo "共有 ${dirty_submodules} 个子模块保留了内部修改，继续刷新父仓 Git 索引。"
   fi
 }
-
+# 场景 C05：检查缺失、迁移、退役或带内部修改的子模块工作树。
+run_commit_scenario_c05_submodules() {
+  begin_commit_scenario "C05" "子模块工作树与 gitlink 一致性" "父仓 gitlink、.gitmodules 和子模块工作树状态不一致，或父仓锁定提交已经不可用。"
+  preflight_submodules
+  complete_commit_scenario "C05"
+}
 # 在删除或迁移 gitlink 前优先暂存 .gitmodules，满足 Git 的子模块安全校验顺序。
 stage_gitmodules_first() {
   local gitmodules_status=""
@@ -844,14 +885,43 @@ stage_gitmodules_first() {
   git -C "$REPO_ROOT" add -A -- .gitmodules
   success_echo ".gitmodules 已优先暂存，可安全处理后续 gitlink 变更。"
 }
-
+# 场景 C03：先让 .gitmodules 与待删除或迁移的 gitlink 建立正确索引顺序。
+run_commit_scenario_c03_gitmodules_order() {
+  begin_commit_scenario "C03" ".gitmodules 暂存顺序" "Sourcetree 先删除/迁移 gitlink，但 .gitmodules 的对应路径变化尚未进入索引。"
+  stage_gitmodules_first
+  complete_commit_scenario "C03"
+}
 # 统一暂存工作区与索引中的全部改动。
 stage_all_changes() {
   info_echo "正在安全暂存全部改动 ..."
   git -C "$REPO_ROOT" -c advice.addEmbeddedRepo=false add -A -- .
   success_echo "Git 索引已刷新。"
 }
-
+# 场景 C06：用一次完整索引刷新处理普通变更及文件/目录形态互换。
+run_commit_scenario_c06_full_index_refresh() {
+  begin_commit_scenario "C06" "完整索引刷新" "Sourcetree 对新增、删除、重命名或文件/同名目录互换执行分步 add/rm，命令顺序互相阻塞。"
+  stage_all_changes
+  complete_commit_scenario "C06"
+}
+# 场景 C07：复验索引可读、暂存入口可用且没有遗留 index.lock。
+run_commit_scenario_c07_verify_unlock() {
+  begin_commit_scenario "C07" "索引解锁复验" "前序修复需要用只读索引检查和 dry-run 再确认，没有把故障隐藏到下一次 Commit。"
+  if [[ -e "$INDEX_LOCK_PATH" || -L "$INDEX_LOCK_PATH" ]]; then
+    error_echo "复验发现 index.lock 仍存在，Commit 索引入口尚未解锁：${INDEX_LOCK_PATH}"
+    return 1
+  fi
+  if ! git -C "$REPO_ROOT" ls-files --stage >/dev/null 2>&1; then
+    error_echo "复验失败：Git 索引仍不可读取。"
+    return 1
+  fi
+  if ! git -C "$REPO_ROOT" add --dry-run -A -- . >> "$LOG_FILE" 2>&1; then
+    error_echo "复验失败：git add --dry-run -A -- . 仍无法通过。"
+    return 1
+  fi
+  success_echo "索引可读，git add dry-run 通过；Commit 的暂存入口已解锁。"
+  warn_echo "Hook、签名、身份、未解决冲突及磁盘/权限错误不属于本脚本覆盖范围，实际 Commit 仍以 Sourcetree 返回结果为准。"
+  complete_commit_scenario "C07"
+}
 # 输出暂存结果，便于在 Sourcetree 日志窗口中直接核对。
 print_staged_summary() {
   local summary=""
@@ -865,21 +935,23 @@ print_staged_summary() {
   note_echo "已暂存变更："
   printf '%s\n' "$summary" | tee -a "$LOG_FILE"
 }
-
 # 输出完整流程的最终处理结果。
 print_completion_message() {
   success_echo "处理完成。请回到 Sourcetree 刷新后检查并提交。"
   gray_echo "日志文件：${LOG_FILE}"
 }
-# 编排脚本自述、残留锁修复、子模块检查、索引刷新与结果输出。
+# 编排脚本自述、七个独立故障场景、解锁复验与结果输出。
 main() {
-  show_script_intro_and_wait # 初始化运行环境、打印内置自述，并按入口决定是否等待确认。
-  resolve_repo_root "${1:-$PWD}" # 从 Sourcetree 参数或当前目录识别需要修复的 Git 仓库。
-  repair_stale_index_lock # 仅在无人占用且没有索引写进程时归档残留 index.lock。
-  stage_gitmodules_first # 优先暂存 .gitmodules，满足 gitlink 删除与迁移的安全顺序。
-  preflight_gitdir_worktree_aliases # 检查并安全修复嵌套工作树的 gitdir 路径错位。
-  preflight_submodules # 初始化缺失子模块并保留子模块内部真实修改。
-  stage_all_changes # 使用一次 git add -A 完整刷新父仓库索引。
+  show_script_intro_and_wait # 首先打印内置自述，并按真实运行入口决定是否等待确认。
+  initialize_script_runtime # 用户确认后初始化 zsh、命令路径、日志和纯文本输出策略。
+  resolve_target_path "${1:-$PWD}" # 规范化 Sourcetree 参数或当前目录，不提前修改 Git 状态。
+  run_commit_scenario_c01_worktree_binding # C01：修复当前工作树自身的 gitdir/core.worktree 错位并识别仓库。
+  run_commit_scenario_c02_index_lock # C02：区分活锁与残留锁，只归档可安全处理的 index.lock。
+  run_commit_scenario_c03_gitmodules_order # C03：优先暂存 .gitmodules，解除 gitlink 删除/迁移顺序阻塞。
+  run_commit_scenario_c04_nested_worktrees # C04：检查嵌套工作树、副本和未完成的子模块路径迁移。
+  run_commit_scenario_c05_submodules # C05：验证缺失、退役、迁移及脏子模块的安全边界。
+  run_commit_scenario_c06_full_index_refresh # C06：用一次 git add -A 统一刷新新增、修改、删除和形态互换。
+  run_commit_scenario_c07_verify_unlock # C07：复验索引可读、dry-run 可用且没有遗留锁。
   print_staged_summary # 输出已进入暂存区的文件，便于回到 Sourcetree 核对。
   print_completion_message # 汇总处理结果与日志位置。
 }
