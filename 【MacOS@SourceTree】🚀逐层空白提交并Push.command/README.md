@@ -32,7 +32,9 @@
 
 2、选择“🚀逐层空白提交并Push（识别父Git）”。
 
-3、Sourcetree 传入 `$REPO` 后，脚本以纯文本日志、无交互方式连续执行。
+3、Sourcetree 传入 `$REPO` 后，脚本打开新的 Terminal.app 窗口；在终端按回车确认后执行，实时查看每层提交、GitHub / 码云推送及核验日志。
+
+4、执行结束后终端保留日志和退出码；Sourcetree 输出只表示终端启动结果，不能用来判断推送是否成功。
 
 ### 3.2、终端独立运行
 
@@ -41,7 +43,7 @@ chmod +x './【MacOS@SourceTree】🚀逐层空白提交并Push.command'
 './【MacOS@SourceTree】🚀逐层空白提交并Push.command' '/path/to/repository'
 ```
 
-终端模式首先展示内置自述，并等待回车确认；检测到游离态时，还需输入完整 `YES` 才执行清理。Sourcetree 自定义动作已明确采用自动恢复策略，全程不再交互。
+终端模式首先展示内置自述，并等待回车确认；检测到游离态时，还需输入完整 `YES` 才执行清理。从 Sourcetree 打开的终端同样保留回车确认；检测到游离态时同样要求输入 `YES`。
 
 ## 四、执行前检查 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
@@ -83,7 +85,7 @@ flowchart TD
 
 ## 七、日志文件 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-终端输出与 Git 命令结果同步写入系统临时目录中的 `【MacOS@SourceTree】🚀逐层空白提交并Push.log`。
+终端窗口实时显示进度；输出与 Git 命令结果同步写入系统临时目录中的 `【MacOS@SourceTree】🚀逐层空白提交并Push.log`。
 
 ## 八、常见问题 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
@@ -142,5 +144,11 @@ git remote add gitee git@gitee.com:你的账号/你的仓库.git
 ```
 
 全部线路先获取、再整合，最后逐条推送相同 HEAD。远端分支不存在时首次创建；存在独立且无共同祖先的历史时停止，需人工处理。任一线路失败停止父仓，已经成功的推送保留，修复后重跑。不会强推，也不会把当前分支的 upstream 改成第二条线路。获取的历史保存在 `refs/jobs-push-sync/` 下，供本次合并使用。
+
+### 8.9、Sourcetree 为什么只显示终端启动结果？
+
+Sourcetree 动作现在只负责打开 Terminal.app；实际 Git 流程在独立终端中执行，避免等待 Sourcetree 输出窗口刷新。终端先展示影响范围并等待回车，执行时持续输出日志，结束后显示退出码（`0` 为成功），窗口保持打开。按 `Ctrl+C` 可中止正在执行的流程。
+
+首次打开可能出现 macOS 自动化授权，需允许启动进程控制 Terminal.app。启动失败会直接报错，不在 Sourcetree 后台继续提交或推送；可改用终端直接运行同一个脚本。
 
 <a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>

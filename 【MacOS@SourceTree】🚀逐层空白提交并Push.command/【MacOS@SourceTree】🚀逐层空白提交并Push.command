@@ -3,7 +3,7 @@
 # - 脚本名称：【MacOS@SourceTree】🚀逐层空白提交并Push.command
 # - 核心用途：递归提交并推送当前仓库管理的子仓，再处理当前仓库及上层父仓。
 # - 影响范围：游离态先丢弃临时内容并恢复远端版本；每层执行 git add -A、必要时提交并向已配置的 GitHub / 码云线路推送。
-# - 运行提示：Sourcetree 模式无交互连续执行；终端独立运行需先按回车确认。
+# - 运行提示：Sourcetree 动作打开 Terminal.app；在终端回车确认后执行并实时显示日志。
 
 RAW_SCRIPT_PATH="$0"
 SCRIPT_PATH=""
@@ -107,6 +107,35 @@ configure_output_mode() {
 strip_ansi_stream() {
   perl -pe 's/\e\[[0-9;]*[[:alpha:]]//g'
 }
+# 将 Sourcetree 仓库参数交给独立终端，启动进程只负责打开窗口。
+open_terminal_for_repository() {
+  local repository="${1:-$PWD}"
+  if [[ ! -d "$repository" && ! -f "$repository" ]]; then
+    print -u2 -r -- "目标路径不存在：${repository}"
+    return 1
+  fi
+  repository="${repository:A}"
+  if ! command -v osascript >/dev/null 2>&1; then
+    print -u2 -r -- "未找到 osascript，无法打开 Terminal.app。"
+    return 1
+  fi
+  if ! osascript - "$SCRIPT_PATH" "$repository" <<'APPLESCRIPT'
+on run argv
+  set scriptPath to item 1 of argv
+  set repositoryPath to item 2 of argv
+  set shellCommand to "/bin/zsh " & quoted form of scriptPath & " " & quoted form of repositoryPath & "; jobs_push_result=$?; printf '\n逐层推送结束，退出码：%s\n' \"$jobs_push_result\""
+  tell application "Terminal"
+    activate
+    do script shellCommand
+  end tell
+end run
+APPLESCRIPT
+  then
+    print -u2 -r -- "终端启动失败；请检查 Terminal.app 自动化权限，或在终端直接运行脚本。"
+    return 1
+  fi
+  print -r -- "已打开终端，请在新窗口回车确认；实时进度和最终结果均在终端查看。"
+}
 # 输出脚本内置自述，并按运行入口决定是否等待确认。
 show_script_intro_and_wait() {
   configure_utf8_locale
@@ -124,14 +153,14 @@ show_script_intro_and_wait() {
   print -r -- "正常分支：先获取主上游及 GitHub / 码云各推送线路，提交并整合后逐条 push、核验同一提交；冲突时停止。"
   print -r -- "游离态策略：fetch 后舍弃游离态独有提交、未提交改动及未跟踪文件，恢复远端最新分支；保留忽略文件。"
   print -r -- "停止边界：冲突、未完成操作、恢复目标不明确、fetch 或 push 失败时停止；正常分支的改动保留。"
-  print -r -- "运行策略：Sourcetree 内无交互连续执行；终端独立运行需回车确认，按 Ctrl+C 取消。"
+  print -r -- "运行策略：Sourcetree 打开独立终端；终端回车确认后执行，实时显示日志，按 Ctrl+C 取消。"
   print -r -- "日志文件：${LOG_FILE}"
   print -r -- "============================================================================"
   print ""
 
   if [[ "$IS_SOURCETREE_RUNTIME" == "1" ]]; then
-    print -r -- "已识别为 Sourcetree 自定义动作，将跳过交互并连续执行。"
-    return 0
+    open_terminal_for_repository "$@"
+    exit $?
   fi
   if [[ ! -t 0 ]]; then
     print -u2 -r -- "当前不是 Sourcetree，且没有可交互输入；请在终端中重新运行。"
@@ -714,7 +743,7 @@ show_completion_summary() {
 }
 # 编排自述、环境检查、父仓发现、预检与逐层推送。
 main() {
-  show_script_intro_and_wait # 首先展示脚本影响，并按真实运行入口决定是否等待确认。
+  show_script_intro_and_wait "$@" # Sourcetree 转交终端；终端展示影响并等待确认。
   initialize_script_runtime # 在确认后启用 zsh 选项并初始化本次日志。
   check_environment # 验证 Git 与基础命令真实可用。
   resolve_start_repository "$@" # 从 Sourcetree 参数或当前目录解析起始 Git 仓库。
