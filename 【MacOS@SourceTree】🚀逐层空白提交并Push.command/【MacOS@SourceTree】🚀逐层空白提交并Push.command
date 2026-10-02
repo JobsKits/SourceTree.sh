@@ -2,7 +2,7 @@
 # 脚本自述：
 # - 脚本名称：【MacOS@SourceTree】🚀逐层空白提交并Push.command
 # - 核心用途：递归提交并推送当前仓库管理的子仓，再处理当前仓库及上层父仓。
-# - 影响范围：游离态先丢弃临时内容并恢复远端版本；每层执行 git add -A、必要时提交并推送。
+# - 影响范围：游离态先丢弃临时内容并恢复远端版本；每层执行 git add -A、必要时提交并向已配置的 GitHub / 码云线路推送。
 # - 运行提示：Sourcetree 模式无交互连续执行；终端独立运行需先按回车确认。
 
 RAW_SCRIPT_PATH="$0"
@@ -33,6 +33,9 @@ typeset -gA DETACHED_TARGETS=()
 typeset -gA SYNC_REMOTES=()
 typeset -gA SYNC_REFS=()
 typeset -gA SYNC_UPSTREAMS=()
+typeset -gA PUSH_TARGETS=()
+typeset -ga RESOLVED_PUSH_TARGETS=()
+PUSHED_LINE_COUNT=0
 
 # 在解析中文路径和输出自述前统一当前进程的字符编码。
 configure_utf8_locale() {
@@ -118,7 +121,7 @@ show_script_intro_and_wait() {
   print -r -- "核心用途：递归处理当前仓库管理的子仓，先子仓 commit + push，再处理当前仓库及父仓。"
   print -r -- "扫描边界：按 Git 索引中的 gitlink 发现子仓；跳过依赖及构建目录，不扫描上层兄弟仓。"
   print -r -- "影响范围：每层会执行 git add -A；无改动时不制造空提交，但仍尝试推送已有提交。"
-  print -r -- "正常分支：先 fetch，提交本地改动后整合远端，再 push 并核对两端提交一致；冲突时停止。"
+  print -r -- "正常分支：先获取主上游及 GitHub / 码云各推送线路，提交并整合后逐条 push、核验同一提交；冲突时停止。"
   print -r -- "游离态策略：fetch 后舍弃游离态独有提交、未提交改动及未跟踪文件，恢复远端最新分支；保留忽略文件。"
   print -r -- "停止边界：冲突、未完成操作、恢复目标不明确、fetch 或 push 失败时停止；正常分支的改动保留。"
   print -r -- "运行策略：Sourcetree 内无交互连续执行；终端独立运行需回车确认，按 Ctrl+C 取消。"
@@ -521,6 +524,13 @@ preflight_repository() {
     return 1
   fi
   check_repository_operation "$repository" || return 1
+  local primary="$(git -C "$repository" config --get "branch.${branch_name}.remote" || true)"
+  [[ -n "$primary" ]] || primary="$(resolve_fallback_remote "$repository")" || return 1
+  resolve_push_targets "$repository" "$primary" || {
+    error_echo "无法解析推送线路：${repository}"
+    return 1
+  }
+  info_echo "已识别 ${#RESOLVED_PUSH_TARGETS[@]} 条推送线路：${repository}"
 
   upstream="$(git -C "$repository" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
   if [[ -z "$upstream" ]]; then
@@ -566,13 +576,39 @@ commit_repository_changes() {
   COMMITTED_COUNT=$((COMMITTED_COUNT + 1))
   success_echo "已完成空白说明提交：${repository}"
 }
-# 获取本仓的明确推送目标，并在提交前拉取远端当前分支。
+# 收集主上游及 GitHub / 码云远端的全部 push URL，按地址去重。
+resolve_push_targets() {
+  local repository="$1" primary="$2"
+  local remote="" target="" urls=""
+  local -a remotes=("$primary")
+  local -A seen=()
+  RESOLVED_PUSH_TARGETS=()
+  remotes+=("${(@f)$(git -C "$repository" remote)}")
+  for remote in "${remotes[@]}"; do
+    [[ -n "$remote" ]] || continue
+    urls="$(git -C "$repository" remote get-url --push --all "$remote")" || return 1
+    for target in "${(@f)urls}"; do
+      if [[ "$remote" != "$primary" ]]; then
+        case "${remote:l}:${target:l}" in
+          github:*|gitee:*|*://github.com/*|*://gitee.com/*|*@github.com:*|*@gitee.com:*|*://*@github.com/*|*://*@gitee.com/*) ;;
+          *) continue ;;
+        esac
+      fi
+      [[ -n "$target" && -z "${seen[$target]:-}" ]] || continue
+      seen[$target]=1
+      RESOLVED_PUSH_TARGETS+=("$target")
+    done
+  done
+  [[ "${#RESOLVED_PUSH_TARGETS[@]}" -gt 0 ]]
+}
+# 在提交前获取每条推送线路的目标分支，空远端留待首次推送。
 synchronize_repository_upstream() {
   local repository="$1"
   local branch="$(git -C "$repository" symbolic-ref --quiet --short HEAD)" || return 1
   local remote="$(git -C "$repository" config --get "branch.${branch}.remote" || true)"
   local remote_ref="$(git -C "$repository" config --get "branch.${branch}.merge" || true)"
-  local advertised="" upstream=""
+  local advertised="" upstream="" target="" index=0
+  local -a upstreams=()
   if [[ -z "$remote" || -z "$remote_ref" ]]; then
     remote="$(resolve_fallback_remote "$repository")" || return 1
     remote_ref="refs/heads/${branch}"
@@ -581,62 +617,76 @@ synchronize_repository_upstream() {
     error_echo "无法确定可推送的远端上游：${repository}"
     return 1
   fi
+  resolve_push_targets "$repository" "$remote" || return 1
   SYNC_REMOTES[$repository]="$remote"
   SYNC_REFS[$repository]="$remote_ref"
+  PUSH_TARGETS[$repository]="${(F)RESOLVED_PUSH_TARGETS}"
   SYNC_UPSTREAMS[$repository]=""
-  read_remote_refs "$repository" --heads "$remote" "$remote_ref" || {
-    error_echo "无法读取远端分支：${repository} [${remote}/${remote_ref}]"
-    return 1
-  }
-  advertised="$REMOTE_REFS_OUTPUT"
-  if [[ -z "$advertised" ]]; then
-    info_echo "远端分支尚不存在，将首次推送：${repository} [${remote_ref}]"
-    return 0
-  fi
-  upstream="refs/remotes/${remote}/${remote_ref#refs/heads/}"
-  info_echo "拉取远端最新提交：${repository} [${remote}/${remote_ref#refs/heads/}]"
-  run_git "$repository" fetch --no-recurse-submodules --no-tags "$remote" "+${remote_ref}:${upstream}" || return 1
-  SYNC_UPSTREAMS[$repository]="$upstream"
+  for target in "${RESOLVED_PUSH_TARGETS[@]}"; do
+    index=$((index + 1))
+    info_echo "读取第 ${index}/${#RESOLVED_PUSH_TARGETS[@]} 条推送线路：${repository}"
+    read_remote_refs "$repository" --heads "$target" "$remote_ref" || {
+      error_echo "无法读取第 ${index} 条线路的远端分支：${repository}"
+      return 1
+    }
+    advertised="$REMOTE_REFS_OUTPUT"
+    if [[ -z "$advertised" ]]; then
+      info_echo "该线路分支尚不存在，将首次推送：${remote_ref}"
+      continue
+    fi
+    upstream="refs/jobs-push-sync/${index}/${remote_ref#refs/heads/}"
+    run_git "$repository" fetch --no-recurse-submodules --no-tags "$target" "+${remote_ref}:${upstream}" || return 1
+    upstreams+=("$upstream")
+  done
+  SYNC_UPSTREAMS[$repository]="${(F)upstreams}"
 }
-# 本地改动提交后整合远端：可快进时快进，分叉时合并，冲突时停止推送。
+# 整合全部线路后才推送，确保所有远端收到同一个最终提交。
 integrate_repository_upstream() {
-  local repository="$1"
-  local upstream="${SYNC_UPSTREAMS[$repository]:-}"
-  [[ -n "$upstream" ]] || return 0
-  if git -C "$repository" merge-base --is-ancestor "$upstream" HEAD; then
-    return 0
-  fi
-  check_detached_restore_paths "$repository" "$upstream" || return 1
-  info_echo "整合远端提交：${repository}"
-  if ! run_git "$repository" -c submodule.recurse=false merge --ff --no-edit --no-autostash "$upstream"; then
-    error_echo "远端整合失败，保留本地提交和现场；如有冲突请解决后重新运行：${repository}"
-    return 1
-  fi
+  local repository="$1" upstream=""
+  local -a upstreams=("${(@f)SYNC_UPSTREAMS[$repository]}")
+  for upstream in "${upstreams[@]}"; do
+    [[ -n "$upstream" ]] || continue
+    if git -C "$repository" merge-base --is-ancestor "$upstream" HEAD; then
+      continue
+    fi
+    check_detached_restore_paths "$repository" "$upstream" || return 1
+    info_echo "整合远端提交：${repository} [${upstream}]"
+    if ! run_git "$repository" -c submodule.recurse=false merge --ff --no-edit --no-autostash "$upstream"; then
+      error_echo "远端整合失败，保留本地提交和现场；如有冲突请解决后重新运行：${repository}"
+      return 1
+    fi
+  done
 }
-# 推送明确的目标分支，并从远端读取提交号核对同步结果。
+# 逐条推送并核验实际 push 地址，全部成功后才标记本仓完成。
 push_repository() {
   local repository="$1"
-  local remote="${SYNC_REMOTES[$repository]}"
-  local remote_ref="${SYNC_REFS[$repository]}"
-  local remote_tip="" local_tip="" advertised=""
-  info_echo "正在推送：${repository} [${remote}/${remote_ref#refs/heads/}]"
-  if ! run_git "$repository" push --set-upstream "$remote" "HEAD:${remote_ref}"; then
-    error_echo "git push 失败，已停止处理上层；若远端在本次 fetch 后更新，请重新运行：${repository}"
-    return 1
-  fi
-  read_remote_refs "$repository" --heads "$remote" "$remote_ref" || {
-    error_echo "推送后无法核对远端提交：${repository}"
-    return 1
-  }
-  advertised="$REMOTE_REFS_OUTPUT"
-  remote_tip="${advertised%%$'\t'*}"
+  local remote="${SYNC_REMOTES[$repository]}" remote_ref="${SYNC_REFS[$repository]}"
+  local remote_tip="" local_tip="" advertised="" target="" index=0
+  local branch="$(git -C "$repository" symbolic-ref --quiet --short HEAD)" || return 1
+  local -a targets=("${(@f)PUSH_TARGETS[$repository]}")
   local_tip="$(git -C "$repository" rev-parse HEAD)" || return 1
-  if [[ "$local_tip" != "$remote_tip" ]]; then
-    error_echo "推送后两端提交不一致，可能有并发更新或 fetch/push 地址不同：${repository}"
-    return 1
-  fi
+  for target in "${targets[@]}"; do
+    index=$((index + 1))
+    info_echo "正在推送第 ${index}/${#targets[@]} 条线路：${repository} [${remote_ref#refs/heads/}]"
+    if ! run_git "$repository" push "$target" "HEAD:${remote_ref}"; then
+      error_echo "第 ${index} 条线路 push 失败，已成功线路保留，停止处理上层：${repository}"
+      return 1
+    fi
+    read_remote_refs "$repository" --heads "$target" "$remote_ref" || return 1
+    advertised="$REMOTE_REFS_OUTPUT"
+    remote_tip="${advertised%%$'\t'*}"
+    if [[ "$local_tip" != "$remote_tip" ]]; then
+      error_echo "第 ${index} 条线路提交核验失败，停止处理上层：${repository}"
+      return 1
+    fi
+    PUSHED_LINE_COUNT=$((PUSHED_LINE_COUNT + 1))
+    success_echo "第 ${index} 条线路已核验一致：${local_tip}"
+  done
+  # 地址推送不改变 upstream，首次推送后仍只关联原来的主远端。
+  run_git "$repository" config "branch.${branch}.remote" "$remote" || return 1
+  run_git "$repository" config "branch.${branch}.merge" "$remote_ref" || return 1
   PUSHED_COUNT=$((PUSHED_COUNT + 1))
-  success_echo "已同步并核对本地与远端提交一致：${repository} [${local_tip}]"
+  success_echo "全部 ${#targets[@]} 条线路已同步：${repository}"
 }
 # 严格按内到外顺序提交并推送整条仓库链。
 process_repository_chain() {
@@ -658,7 +708,7 @@ process_repository_chain() {
 show_completion_summary() {
   highlight_echo "============================== 处理完成 =============================="
   success_echo "已由内到外处理 ${PROCESSED_COUNT} 个 Git 仓库。"
-  success_echo "新建空白说明提交：${COMMITTED_COUNT} 个；成功执行 push：${PUSHED_COUNT} 个仓库；失败 0。"
+  success_echo "新建空白说明提交：${COMMITTED_COUNT} 个；完整推送：${PUSHED_COUNT} 个仓库、${PUSHED_LINE_COUNT} 条线路；失败 0。"
   info_echo "日志文件：${LOG_FILE}"
   highlight_echo "======================================================================="
 }

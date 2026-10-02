@@ -364,30 +364,30 @@ EOF
   # ===============================================================
   choose_project_path() {
     local root="$1"
-    local path="$PROJECT_PATH"
+    local target_path="$PROJECT_PATH"
 
-    if [[ -z "$path" ]]; then
+    if [[ -z "$target_path" ]]; then
       set +e
       local WORKSPACES=($(find "$root" -maxdepth 2 -name "*.xcworkspace" -print 2>/dev/null))
       local PROJECTS=($(find "$root" -maxdepth 2 -name "*.xcodeproj"   -print 2>/dev/null))
       set -e
 
       if [[ ${#WORKSPACES[@]} -gt 0 ]]; then
-        path="${WORKSPACES[1]}"
+        target_path="${WORKSPACES[1]}"
       elif [[ ${#PROJECTS[@]} -gt 0 ]]; then
-        path="${PROJECTS[1]}"
+        target_path="${PROJECTS[1]}"
       else
         error_echo "未在 $root 找到 .xcworkspace / .xcodeproj"
         exit 1
       fi
     fi
 
-    if [[ ! -e "$path" ]]; then
-      error_echo "--project 指定的路径不存在：$path"
+    if [[ ! -e "$target_path" ]]; then
+      error_echo "--project 指定的路径不存在：$target_path"
       exit 1
     fi
 
-    echo "$path"
+    echo "$target_path"
   }
   # ===============================================================
   # 查找最新 .app（优先 CONFIG，再回退 Debug）
@@ -508,14 +508,10 @@ initialize_script_runtime() {
 }
 # 编排脚本的高层业务流程。
 main() {
-  # 展示脚本内置自述，并按运行入口完成防误触确认。
-  show_readme_and_wait
-  # 初始化 Shell 选项、日志、依赖和入口运行状态。
-  initialize_script_runtime
-  # 执行 run_original_logic 对应的核心业务步骤。
-  run_original_logic "$@"
-  # 输出脚本执行结果、摘要和日志位置。
-  success_echo "脚本执行结束。日志：$LOG_FILE"
+  show_readme_and_wait # 展示脚本内置自述，并按运行入口完成防误触确认。
+  initialize_script_runtime # 初始化 Shell 选项、日志、依赖和入口运行状态。
+  run_original_logic "$@" # 执行 run_original_logic 对应的核心业务步骤。
+  success_echo "脚本执行结束。日志：$LOG_FILE" # 输出脚本执行结果、摘要和日志位置。
 }
 
 main "$@"
