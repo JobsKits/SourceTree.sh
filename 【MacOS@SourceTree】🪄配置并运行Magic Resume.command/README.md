@@ -18,9 +18,9 @@
 
 - 希望运行 `pnpm dev` 后立即关闭终端：脚本通过 `nohup`、断开标准输入并脱离 zsh 作业控制启动后台服务。
 
-## 二、行为边界
+## 二、行为边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-### 2.1、仓库识别
+### 2.1、仓库识别 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 - 支持 `https://github.com/JOYCEQL/magic-resume.git`、`git@github.com:JOYCEQL/magic-resume.git` 等常见 HTTPS / SSH remote 写法。
 
@@ -32,7 +32,7 @@
 
 - 只会复用 remote 正确的 Git 仓库或完全空的文件夹；不会覆盖、清空或改写已有非空目录。
 
-### 2.2、环境和依赖
+### 2.2、环境和依赖 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 - 需要 macOS 自带的 `git`、`curl`、`lsof`、`nohup` 和 `open`。
 
@@ -42,7 +42,7 @@
 
 - 按官方快速开始执行 `pnpm install` 和 `pnpm dev`，不自动执行 `git pull`、依赖升级、构建或部署。
 
-### 2.3、后台服务
+### 2.3、后台服务 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 - `pnpm dev` 的标准输入会断开，输出写入系统临时目录中的 `【MacOS@SourceTree】🪄配置并运行Magic Resume-dev.log`。
 
@@ -56,9 +56,9 @@
 
 - 服务就绪后调用系统默认浏览器打开 `http://localhost:3000`，随后脚本退出，后台服务继续运行。
 
-## 三、运行方式
+## 三、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-### 3.1、Sourcetree 自定义动作
+### 3.1、Sourcetree 自定义动作 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 1、打开 Sourcetree 的“偏好设置 → 自定义操作”。
 
@@ -68,7 +68,7 @@
 
 4、在任意仓库中执行该自定义动作。Sourcetree 模式会打印内置自述，但不会等待键盘输入。
 
-### 3.2、系统终端
+### 3.2、系统终端 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 - 传入当前 Git 仓库：
 
@@ -78,7 +78,7 @@
 
 - 不传参数时，脚本优先识别当前目录；无法识别时提示拖入 Git 仓库目录。终端模式会先等待回车确认。
 
-## 四、执行流程
+## 四、执行流程 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 ```mermaid
 flowchart TD
@@ -104,7 +104,7 @@ flowchart TD
   N --> O[默认浏览器打开 localhost:3000]
 ```
 
-## 五、日志与停止服务
+## 五、日志与停止服务 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 - 业务日志位于系统临时目录中的 `【MacOS@SourceTree】🪄配置并运行Magic Resume.log`。
 
@@ -124,7 +124,7 @@ flowchart TD
 
   执行 `kill` 前先使用 `ps -p PID -o command=` 核对进程，避免临时 PID 文件过期后误停其它进程。
 
-## 六、风险说明
+## 六、风险说明 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 - `git clone` 只写入新建或已确认完全为空的同级目录；克隆失败时保留现场，不自动删除非空残留。
 
@@ -134,21 +134,21 @@ flowchart TD
 
 - 为满足“终端可关闭”，当前仓库已有但未被 PID 文件标记为脚本托管的 Vite dev 会先收到 `TERM`，再由脚本后台重启；其它类型进程不会被自动停止。
 
-## 七、常见问题
+## 七、常见问题 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-### 7.1、为什么没有创建新的同级目录？
+### 7.1、为什么没有创建新的同级目录？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 当前仓库已经是官方仓库，或父目录第一层的任意名称文件夹中已经存在 remote 正确的官方仓库时，不重复创建和克隆。
 
-### 7.2、为什么没有再次启动 `pnpm dev`？
+### 7.2、为什么没有再次启动 `pnpm dev`？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 只有 3000 端口监听 PID 与脚本 PID 文件一致时才直接复用。当前仓库手工前台启动的 Vite 会被安全停止并转为后台运行，确保关闭终端后仍可访问。
 
-### 7.3、为什么提示 3000 端口被其它目录占用？
+### 7.3、为什么提示 3000 端口被其它目录占用？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 脚本不会结束未知进程，也不会让 Vite 自动漂移到其它端口。先核对并处理占用者，再重新运行脚本。
 
-### 7.4、关闭终端后页面是否还能访问？
+### 7.4、关闭终端后页面是否还能访问？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 能。由该脚本新启动的服务已经通过 `nohup` 脱离终端；只要后台进程没有被主动停止，`http://localhost:3000` 就会继续提供服务。
 

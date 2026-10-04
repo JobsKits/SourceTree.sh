@@ -30,7 +30,7 @@
 
 ## 二、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-### 2.1、SourceTree 自定义动作
+### 2.1、SourceTree 自定义动作 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 - 推荐配置如下：
 
@@ -47,7 +47,7 @@
   | 输出窗口 | 目标绝对地址、来源、日志位置 |
   | macOS 剪贴板 | 目标绝对地址 |
 
-### 2.2、终端独立运行
+### 2.2、终端独立运行 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 - 进入脚本目录后执行：
 

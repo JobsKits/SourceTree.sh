@@ -26,7 +26,7 @@
 
 ## 三、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-### 3.1、Sourcetree 自定义动作
+### 3.1、Sourcetree 自定义动作 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 1、在要处理的大仓或小仓上打开“自定义操作”。
 
@@ -36,7 +36,7 @@
 
 4、执行结束后终端保留日志和退出码；Sourcetree 输出只表示终端启动结果，不能用来判断推送是否成功。
 
-### 3.2、终端独立运行
+### 3.2、终端独立运行 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 ```shell
 chmod +x './【MacOS@SourceTree】🚀逐层空白提交并Push.command'
@@ -89,7 +89,7 @@ flowchart TD
 
 ## 八、常见问题 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-### 8.1、在大仓运行，能提交子仓的改动吗？
+### 8.1、在大仓运行，能提交子仓的改动吗？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 可以。脚本递归读取 Git 索引中模式为 `160000` 的 gitlink，兼容 `.git` 文件形式的子模块和 `.git` 目录形式的受管理嵌套仓。最深子仓先提交并推送，父仓随后暂存新 gitlink，直到当前大仓及其上层父仓处理完成。例如从 `JobsGenesis` 发起，会先处理 `SourceTree.command` 的文件改动，再提交大仓中的子仓指针。
 
@@ -97,15 +97,15 @@ flowchart TD
 
 从大仓发起会处理它管理的全部非排除子仓，不限于当前有改动的子仓；干净子仓仍尝试 push。任何仓库预检失败都会在暂存前停止；执行中某仓拉取、提交、整合、推送或核验失败会停止剩余队列，已完成的提交和推送保留。
 
-### 8.2、为什么某层没有新 commit？
+### 8.2、为什么某层没有新 commit？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 该层在 `git add -A` 后没有已暂存差异。脚本仍会执行 push，用于上传本地已有的未推送提交。
 
-### 8.3、为什么 push 后不继续外层？
+### 8.3、为什么 push 后不继续外层？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 该层拉取、整合、push 或远端提交号核验失败。查看日志中的冲突、鉴权、网络或 hook 信息后处理。fetch 后若远端再次被其他进程推进，push 仍可能被拒绝；重新运行会再次拉取并整合。同步成功指核验时两端分支提交一致，不意味着禁止远端以后继续产生提交。
 
-### 8.4、为什么打印自述后立即退出，文件名还出现乱码？
+### 8.4、为什么打印自述后立即退出，文件名还出现乱码？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 旧版使用 zsh 的提示符展开 `%x` 获取脚本路径。在 `LC_ALL=C` 等非 UTF-8 环境中，中文和 Emoji 文件名会被转换成含 `\\M-` 的显示文本，创建日志文件时可能触发 `illegal byte sequence`，尚未执行 Git 操作便退出。
 
@@ -113,7 +113,7 @@ flowchart TD
 
 若日志文件中文正常、只有 Sourcetree 输出窗口乱码，说明还需检查窗口的解码设置；子进程的 locale 不能强制改变宿主窗口的解码方式。
 
-### 8.5、游离 HEAD 如何恢复？
+### 8.5、游离 HEAD 如何恢复？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 优先使用父仓 `.gitmodules` 声明的子模块分支；分支为 `.` 时使用父仓当前分支。未声明时查询远端公布的默认分支，不猜测 `main` 或 `master`。远端优先选择 `origin`，不存在时要求只有一个远端；目标不明确则停止。
 
@@ -123,17 +123,17 @@ flowchart TD
 
 目标本地分支含远端没有的提交、被其它工作树占用、忽略文件与目标路径冲突，或目标版本改变子仓目录结构时都会停止，避免覆盖正常分支历史或破坏已发现的子仓。执行中失败不自动回滚已完成的恢复；日志会保留已经恢复的仓库。
 
-### 8.6、出现未解决冲突后怎样继续？
+### 8.6、出现未解决冲突后怎样继续？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 脚本会打印冲突文件清单，并停止暂存和推送。先按文件内容解决冲突，再用 `git add` 标记解决；重新运行即可完成待提交的合并，再继续拉取、整合和推送。脚本不自动选择本地或远端整份覆盖。仍有冲突、处于 rebase 等其它操作，或游离状态下存在未完成合并时继续停止。
 
-### 8.7、为什么提示“无法读取远端分支”？
+### 8.7、为什么提示“无法读取远端分支”？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 这是 `git ls-remote` 查询失败，不等于仓库没有分支，也不等于存在文件冲突。脚本将 Git 的标准错误、退出码和失败次数同步写入日志，最多尝试 3 次，重试前分别等待 1 秒、2 秒。查询成功但返回空列表才视为远端分支尚不存在。
 
 默认分支查询、提交前查询和推送后核验共用这套逻辑；标准错误与引用数据分开，不会把提示文字误当提交号。连续失败仍停止，保留已完成的仓库状态；认证、权限或持续网络问题需要根据日志修复，重试不会绕过它们。此重试仅作用于只读引用查询，不会重复执行提交、合并或清理。
 
-### 8.8、GitHub 和码云如何同时推送？
+### 8.8、GitHub 和码云如何同时推送？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 每个仓库按自己的 remote 配置识别线路，支持 [**GitHub**](https://github.com) 与 [**码云 Gitee**](https://gitee.com)：主上游的全部 push URL 始终纳入；其它远端的地址指向 `github.com` / `gitee.com`，或远端名为 `github` / `gitee` 时也纳入。相同地址去重，无关远端不会自动推送。也支持一个 remote 配置多个 push URL。
 
@@ -145,7 +145,7 @@ git remote add gitee git@gitee.com:你的账号/你的仓库.git
 
 全部线路先获取、再整合，最后逐条推送相同 HEAD。远端分支不存在时首次创建；存在独立且无共同祖先的历史时停止，需人工处理。任一线路失败停止父仓，已经成功的推送保留，修复后重跑。不会强推，也不会把当前分支的 upstream 改成第二条线路。获取的历史保存在 `refs/jobs-push-sync/` 下，供本次合并使用。
 
-### 8.9、Sourcetree 为什么只显示终端启动结果？
+### 8.9、Sourcetree 为什么只显示终端启动结果？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 Sourcetree 动作现在只负责打开 Terminal.app；实际 Git 流程在独立终端中执行，避免等待 Sourcetree 输出窗口刷新。终端先展示影响范围并等待回车，执行时持续输出日志，结束后显示退出码（`0` 为成功），窗口保持打开。按 `Ctrl+C` 可中止正在执行的流程。
 

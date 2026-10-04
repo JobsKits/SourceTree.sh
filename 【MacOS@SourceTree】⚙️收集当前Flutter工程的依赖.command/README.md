@@ -27,7 +27,7 @@
 
 ## 二、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-### 2.1、Sourcetree 菜单运行
+### 2.1、Sourcetree 菜单运行 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 在 Sourcetree 自定义操作里选择：
 
@@ -47,7 +47,7 @@ $REPO
 ~/Desktop/工程名_flutter_deps_时间戳.zip
 ```
 
-### 2.2、终端运行
+### 2.2、终端运行 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 ```shell
 zsh "./【MacOS@SourceTree】⚙️收集当前Flutter工程的依赖.command" "<flutter-root>_app"
