@@ -31,7 +31,7 @@
 
 ## 二、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-### 2.1、SourceTree 自定义动作
+### 2.1、SourceTree 自定义动作 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 - 推荐配置如下：
 
@@ -43,7 +43,7 @@
 
 - 运行后脚本会把 `$REPO` 解析为物理目录路径，并打开 `Terminal.app` 新窗口执行 `cd` 到该目录。
 
-### 2.2、终端独立运行
+### 2.2、终端独立运行 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 - 进入脚本目录后执行：
 

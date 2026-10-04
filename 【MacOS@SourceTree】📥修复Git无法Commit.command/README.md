@@ -22,12 +22,12 @@
 | C06 | 新增、删除、重命名、文件与同名目录互换时，Sourcetree 的分步 `add` / `rm` 互相阻塞；典型报错为 `not removing ... recursively without -r` | GUI 针对新旧路径分别执行命令，执行顺序无法表达工作树的最终整体状态 | 在前置安全检查通过后统一执行 `git add -A -- .` | 新增、修改和删除被一次性刷新到父仓索引 |
 | C07 | 前面看似修好，但下一次 Commit 仍可能再次卡在索引入口 | 修复动作如果不复验，可能只移动了表面阻塞，索引本身仍不可读或暂存入口仍失败 | 检查没有遗留 `index.lock`，执行 `git ls-files --stage` 与 `git add --dry-run -A -- .` | 两项验证均成功，判定“Commit 的索引/暂存入口已解锁” |
 
-### 1.1、C01：工作树绑定错位为什么分两种处理
+### 1.1、C01：工作树绑定错位为什么分两种处理 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 - 旧 `core.worktree` 路径已经不存在：通常是目录改名后元数据没有同步，脚本可以把 `core.worktree` 改为当前路径。
 - 旧 `core.worktree` 路径仍真实存在：说明当前目录可能是复制品或误绑定副本。脚本不会抢占原工作树，而是复制 Git 元数据，让当前目录成为独立工作树，并保留原 `.git` 指针作为备份。
 
-### 1.2、C02：为什么不能直接删除 `index.lock`
+### 1.2、C02：为什么不能直接删除 `index.lock` <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 `index.lock` 可能代表 `git add`、`git commit`、`git checkout` 等索引写操作仍在进行。直接删除活锁会让两个写进程同时操作索引。脚本只在以下条件全部满足时归档残留锁：
 
@@ -37,7 +37,7 @@
 4. 检查前后锁的设备号与 inode 没有变化。
 5. 移动锁后 `git ls-files --stage` 仍能读取索引；失败时恢复原锁。
 
-### 1.3、C04 与 C05：脚本怎样保护子模块真实修改
+### 1.3、C04 与 C05：脚本怎样保护子模块真实修改 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 - 父仓只提交 gitlink 指向的子模块提交，不会直接提交子模块工作区里的文件内容。
 - 已存在子模块有内部修改时，脚本列出状态并保持原样；它不会执行 `reset`、`clean` 或替用户提交子模块。
@@ -46,7 +46,7 @@
 
 ## 二、先分清“无法暂存”与“无法创建提交” <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-### 2.1、Commit 界面背后有两段流程
+### 2.1、Commit 界面背后有两段流程 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 Git 的提交链路不是一个动作：
 
@@ -57,7 +57,7 @@ Sourcetree 的 Commit 界面会编排这两段流程，所以界面显示“Comm
 
 `git add -A -- .` 会在当前仓库范围内统一记录新增、修改和删除；`--` 用于结束选项解析，避免以 `-` 开头的路径被当作命令参数。
 
-### 2.2、错误分流表
+### 2.2、错误分流表 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 | 报错或现象 | 根因方向 | 本脚本是否处理 | 先做什么 |
 | --- | --- | --- | --- |
@@ -71,7 +71,7 @@ Sourcetree 的 Commit 界面会编排这两段流程，所以界面显示“Comm
 | `not removing ... recursively without -r` | GUI 对文件/目录互换或目录删除做了分步 `git rm` | 是，C06 | 通过完整索引刷新表达工作树的最终整体状态。 |
 | `No space left on device` / 只读错误 | 磁盘、配额、挂载或权限问题 | 否 | 先处理系统资源，不要反复重建索引。 |
 
-### 2.3、运行脚本前的只读诊断
+### 2.3、运行脚本前的只读诊断 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 先在目标仓库运行：
 
@@ -104,7 +104,7 @@ pgrep -alf git
 
 发现锁仍被持有，或存在可能写索引的 Git 进程时，应完成或退出对应操作后再试；不要杀进程，也不要手工删除锁。
 
-### 2.4、身份、Hook 与签名的诊断边界
+### 2.4、身份、Hook 与签名的诊断边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 ```shell
 git config --show-origin --get-regexp '^user\.(name|email)$'
@@ -119,7 +119,7 @@ find "$(git rev-parse --git-path hooks)" -maxdepth 1 -type f -perm -u+x -print
 - `git commit --no-verify` 可能绕过团队质量门禁，只能用于已获允许的定位过程，不是长期修复方案。
 - `git commit --no-gpg-sign` 可以辅助判断签名链路，但不能用于绕过仓库的强制签名规则。
 
-### 2.5、脚本明确不处理的 Commit 故障
+### 2.5、脚本明确不处理的 Commit 故障 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 以下问题会保留原始错误并返回失败：
 
@@ -158,14 +158,14 @@ flowchart TD
 
 ## 四、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-### 4.1、Sourcetree 自定义动作
+### 4.1、Sourcetree 自定义动作 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 1. 在 Sourcetree 中选中目标仓库。
 2. 运行自定义动作 `📥修复Git无法Commit`。
 3. 脚本接收 `$REPO` 后无交互连续执行；场景编号、原因、处理结果和停止点会显示在输出窗口。
 4. 回到“文件状态”刷新，逐项核对暂存变更后再提交。
 
-### 4.2、终端独立运行
+### 4.2、终端独立运行 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 在当前 README 所在目录执行：
 
@@ -223,23 +223,23 @@ fi
 
 ## 八、常见问题 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-### 8.1、脚本会直接 Commit 吗？
+### 8.1、脚本会直接 Commit 吗？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 不会。脚本只处理 Commit 之前的工作树、Git 元数据和暂存区；提交仍由用户在 Sourcetree 中确认后执行。
 
-### 8.2、为什么不是发现一个错误就直接执行所有修复？
+### 8.2、为什么不是发现一个错误就直接执行所有修复？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 不同场景影响的对象不同：`index.lock` 属于并发保护，`.gitmodules` 属于配置与索引顺序，`core.worktree` 属于工作树绑定，gitlink 属于父仓对子模块提交的记录。逐项处理可以在第一个不安全点停止，并明确知道改了什么。
 
-### 8.3、为什么文件与同名目录互换要用 `git add -A -- .`？
+### 8.3、为什么文件与同名目录互换要用 `git add -A -- .`？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 Sourcetree 可能针对旧文件、新目录和目录内容分别执行 `add` / `rm`，中间状态会触发递归删除或路径类型冲突。完整索引刷新让 Git 直接观察最终工作树状态，统一记录新增、修改和删除。
 
-### 8.4、为什么 C07 通过后 Sourcetree 仍可能 Commit 失败？
+### 8.4、为什么 C07 通过后 Sourcetree 仍可能 Commit 失败？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 C07 只验证索引和暂存入口。Commit 后半段还可能被 Hook、作者身份、签名、冲突状态、磁盘或权限问题阻断；这些错误会保留原始输出，不由本脚本自动绕过。
 
-### 8.5、为什么还要刷新 Sourcetree？
+### 8.5、为什么还要刷新 Sourcetree？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 Git 索引由外部脚本修改后，Sourcetree 界面可能仍缓存旧文件列表。刷新后才能看到真实暂存状态。
 

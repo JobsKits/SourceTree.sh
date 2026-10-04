@@ -6,7 +6,7 @@
 
 ---
 
-## 🔥 <font id=前言>前言</font> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## 🔥 <font id=前言>前言</font>
 
 这个脚本用于在 [**SourceTree**](https://www.sourcetreeapp.com/) 自定义操作中，对 `cmliu/edgetunnel` 仓库执行手动部署。
 
@@ -59,7 +59,7 @@ npx wrangler deploy --config .wrangler.jobs.local.toml
 
 ## 二、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-### 2.1、第一次初始化：独立双击或终端运行
+### 2.1、第一次初始化：独立双击或终端运行 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 第一次先在普通终端里跑，不要先从 SourceTree 跑。
 
@@ -102,7 +102,7 @@ npx wrangler deploy --config .wrangler.jobs.local.toml
 
 `brew update`、`brew upgrade node`、`npm install -g npm@latest`、`npm install -g wrangler@latest` 都按这个规则处理，避免一启动脚本就进入耗时升级。
 
-### 2.2、SourceTree 自定义操作运行
+### 2.2、SourceTree 自定义操作运行 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 在 SourceTree 自定义操作中，保持下面配置：
 
@@ -156,7 +156,7 @@ xattr -dr com.apple.quarantine "~/SourceTree.command/【MacOS@SourceTree】同�
 
 ## 四、脚本执行命令 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-### 4.1、独立双击 / 终端模式
+### 4.1、独立双击 / 终端模式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 终端模式会按需执行：
 
@@ -180,7 +180,7 @@ wrangler deploy --config .wrangler.jobs.local.toml
 
 提示中的交互规则统一是：直接回车跳过；输入任意字符后回车执行。
 
-### 4.2、SourceTree 模式
+### 4.2、SourceTree 模式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 SourceTree 模式只执行检查和部署：
 
@@ -266,7 +266,7 @@ tail -f "$TMPDIR/【MacOS@SourceTree】同步edgetunnel代码后手动升级.log
 
 ## 七、常见问题 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-### 7.1、SourceTree 里为什么不再安装/升级 `wrangler`？
+### 7.1、SourceTree 里为什么不再安装/升级 `wrangler`？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 因为 `npm install -g wrangler@latest` 会触发 `esbuild`、`workerd`、`sharp` 等依赖的安装脚本。SourceTree 自定义操作窗口不是完整终端环境，遇到 macOS Gatekeeper 弹窗时容易卡住或直接失败。
 
@@ -277,7 +277,7 @@ tail -f "$TMPDIR/【MacOS@SourceTree】同步edgetunnel代码后手动升级.log
 SourceTree 模式：只检查、只部署
 ```
 
-### 7.2、为什么 `brew update` 需要手动确认？
+### 7.2、为什么 `brew update` 需要手动确认？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 `brew update` 是耗时操作，而且可能受网络、Homebrew 源、tap 数量影响。脚本现在不会在检测到 Homebrew 后自动刷新索引。
 
@@ -290,7 +290,7 @@ SourceTree 模式：只检查、只部署
 
 跳过后，脚本会继续使用当前本机已有的 Homebrew 索引和工具链。
 
-### 7.3、SourceTree 里出现 `[0m`、`[1;32m` 这类乱码怎么办？
+### 7.3、SourceTree 里出现 `[0m`、`[1;32m` 这类乱码怎么办？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 这是 ANSI 颜色控制符没有被 SourceTree 自定义操作窗口识别。终端能正确显示颜色，但 SourceTree 只按普通文本输出，就会把控制符原样打印出来。
 
@@ -303,7 +303,7 @@ SourceTree 模式：自动降级为纯文本日志
 
 如果某次仍然看到控制符，优先确认 SourceTree 调用的是新版脚本，不是旧路径里的旧脚本。
 
-### 7.4、出现“Apple 无法验证 esbuild”怎么办？
+### 7.4、出现“Apple 无法验证 esbuild”怎么办？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 这是 macOS Gatekeeper 对 `esbuild` 二进制的拦截。新版脚本会在终端初始化阶段，对 `wrangler` / `esbuild` 相关目录清理 `com.apple.quarantine` 标记。
 
@@ -316,7 +316,7 @@ xattr -dr com.apple.quarantine "$(npm root -g)/@esbuild" 2>/dev/null || true
 xattr -dr com.apple.quarantine "../../../edgetunnel/node_modules" 2>/dev/null || true
 ```
 
-### 7.5、SourceTree 报 `launch path not accessible`
+### 7.5、SourceTree 报 `launch path not accessible` <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 这不是 `wrangler` 报错，通常是 SourceTree 在启动脚本之前就找不到或不能执行脚本。
 
@@ -333,7 +333,7 @@ xattr -dr com.apple.quarantine "../../../edgetunnel/node_modules" 2>/dev/null ||
 chmod +x "~/SourceTree.command/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command/【MacOS@SourceTree】同步edgetunnel代码后手动升级.command"
 ```
 
-### 7.6、SourceTree 里提示未登录怎么办？
+### 7.6、SourceTree 里提示未登录怎么办？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 不要在 SourceTree 里登录。
 
@@ -347,7 +347,7 @@ chmod +x "~/SourceTree.command/【MacOS@SourceTree】同步edgetunnel代码后�
 完成 `wrangler login` 后，再回到 SourceTree 点自定义菜单。
 
 
-### 7.7、为什么不直接改 `wrangler.toml`？
+### 7.7、为什么不直接改 `wrangler.toml`？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 `wrangler.toml` 是上游仓库里的跟踪文件。直接把 KV id 写进去虽然能解决部署问题，但后续同步 `cmliu/edgetunnel` 时，如果上游也改了这个文件，容易出现本地改动阻塞拉取或产生冲突。
 

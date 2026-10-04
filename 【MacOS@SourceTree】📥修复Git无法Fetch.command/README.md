@@ -20,18 +20,18 @@
 | F04 | `refs/remotes/...` 或 `logs/refs/remotes/...` 报 `Not a directory`、`exists; cannot create` | 远端从单层分支 `foo` 迁移到层级分支 `foo/bar`；本地旧 `foo` 是文件，新引用却要求它成为目录 | 只针对错误明确点名的 `foo/bar`，备份其前缀位置上的 loose ref/reflog 文件，再立即 Fetch | 前缀文件移开后的 Fetch 返回 0 |
 | F05 | Fetch 需要创建单层引用文件，但同名位置仍是目录 | 远端从层级分支 `foo/bar` 收口为单层分支 `foo`；本地旧 `foo/` 引用目录或 reflog 目录仍存在 | 只针对错误明确点名的 `foo`，备份同名 loose ref/reflog 目录，再立即 Fetch | 同名目录移开后的 Fetch 返回 0 |
 
-### 1.1、为什么 `refs/remotes` 与 `logs/refs/remotes` 要分开检查
+### 1.1、为什么 `refs/remotes` 与 `logs/refs/remotes` 要分开检查 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 - `refs/remotes/<remote>/...` 保存远端跟踪引用的当前指向。
 - `logs/refs/remotes/<remote>/...` 保存这些引用的本地 reflog。
 - 其中任意一侧残留文件或目录，都可能单独造成文件/目录冲突。脚本只移动本次错误分支路径上的实际阻塞项，不删除整个远端引用目录。
 - F03 使用 Git 原生 `pack-refs` 把有效引用从 loose 文件收进 `packed-refs`；引用 OID 不变，但文件系统上的大小写前缀被释放，之后才能创建另一个大小写层级目录。
 
-### 1.2、为什么每个场景修复后立刻 Fetch
+### 1.2、为什么每个场景修复后立刻 Fetch <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 每次 `git fetch --prune` 都是真实“解锁试验”。如果 F02 已经解决问题，就没有理由继续进入大小写或文件/目录元数据处理；只有最近一次 Fetch 仍返回同类受支持错误，脚本才刷新冲突分支并进入下一项。
 
-### 1.3、什么叫 D/F conflict
+### 1.3、什么叫 D/F conflict <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 D/F 是 Directory/File 的缩写。Git 引用名会映射为层级路径：
 
@@ -42,7 +42,7 @@ D/F 是 Directory/File 的缩写。Git 引用名会映射为层级路径：
 
 ## 二、Fetch 原理、最小诊断与错误分流 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-### 2.1、Fetch 与 Pull 不是一回事
+### 2.1、Fetch 与 Pull 不是一回事 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 `git fetch` 下载远端对象，并按照 refspec 更新本地引用；常见映射是：
 
@@ -55,7 +55,7 @@ D/F 是 Directory/File 的缩写。Git 引用名会映射为层级路径：
 
 本脚本只处理 Fetch 阶段的远端跟踪引用与 reflog 路径阻塞，不处理 Pull 后半段的分支分叉、工作区覆盖或 merge/rebase 冲突。
 
-### 2.2、运行脚本前的最小诊断
+### 2.2、运行脚本前的最小诊断 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 以 `origin` 为例：
 
@@ -72,7 +72,7 @@ git for-each-ref --format='%(refname) %(objectname)' refs/remotes/origin/
 - `git fetch --prune` 是基线复现，也是 F01 的真实解锁试验；它会更新远端跟踪状态，不是只读命令。
 - `git for-each-ref` 用 Git 自己的引用接口查看本地状态，比直接假设所有引用都存在于 `.git/refs` 更可靠，因为引用也可能保存在 `packed-refs`。
 
-### 2.3、错误分流表
+### 2.3、错误分流表 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 | 报错或现象 | 根因方向 | 本脚本是否处理 | 先做什么 |
 | --- | --- | --- | --- |
@@ -87,7 +87,7 @@ git for-each-ref --format='%(refname) %(objectname)' refs/remotes/origin/
 | `bad object` / `missing blob` | 对象库或引用损坏 | 否 | 先备份并用 `git fsck --full` 诊断，必要时重新克隆对比。 |
 | `No space left on device` / 只读错误 | 磁盘空间、配额、挂载或权限问题 | 否 | 先修复系统资源，不要继续移动引用。 |
 
-### 2.4、脚本明确不处理的 Fetch 故障
+### 2.4、脚本明确不处理的 Fetch 故障 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 以下问题会保留原始错误并返回失败，不自动尝试旁路：
 
@@ -136,14 +136,14 @@ flowchart TD
 
 ## 四、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-### 4.1、Sourcetree 自定义动作
+### 4.1、Sourcetree 自定义动作 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 1. 在 Sourcetree 中选中目标仓库。
 2. 运行自定义动作 `📥修复Git无法Fetch`。
 3. 脚本使用 `$REPO` 识别仓库，默认处理 `origin`。
 4. Sourcetree 模式不等待回车；输出窗口会显示 F01–F05 的原因、是否命中、每次 Fetch 复试和最终结果。
 
-### 4.2、终端独立运行
+### 4.2、终端独立运行 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 默认使用仓库的 `origin`：
 
@@ -202,23 +202,23 @@ git status --short --branch
 
 ## 八、常见问题 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-### 8.1、没有冲突时运行会怎样？
+### 8.1、没有冲突时运行会怎样？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 只执行 F01 的正常 `git fetch --prune`。成功后 F02–F05 自动跳过，不创建元数据备份目录。
 
-### 8.2、脚本会自动恢复备份吗？
+### 8.2、脚本会自动恢复备份吗？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 不会。分支层级迁移时，备份对象通常已经失效；大小写碰撞时，它也可能仍对应有效远端分支。脚本保留现场，避免自动恢复后重新制造相同路径阻塞。
 
-### 8.3、为什么不删除整个 `refs/remotes/origin`？
+### 8.3、为什么不删除整个 `refs/remotes/origin`？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 远端跟踪引用可以重新 Fetch，但 reflog 可能承载排错证据；多 worktree、packed refs、自定义 refspec 和多个远端也可能让整目录删除扩大影响。脚本只处理错误点名分支的实际阻塞路径。
 
-### 8.4、大小写碰撞修复后还可能再出现吗？
+### 8.4、大小写碰撞修复后还可能再出现吗？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 可能。远端同时保留 `SaaS` 和 `saas/...` 本身就与 MacOS 默认大小写不敏感文件系统存在映射冲突。脚本只能解开当前 Fetch；上游再次更新碰撞分支时仍可能重现。
 
-### 8.5、为什么 Commit 和 Fetch 要保留为两个脚本？
+### 8.5、为什么 Commit 和 Fetch 要保留为两个脚本？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 Commit 修复处理工作树、索引、`.gitmodules`、gitlink 和子模块；Fetch 修复处理远端跟踪引用与 reflog。两者影响边界和验收命令不同，分开更容易停止、追溯和验证。
 

@@ -31,7 +31,7 @@
 
 ## 二、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-### 2.1、Sourcetree 自定义动作
+### 2.1、Sourcetree 自定义动作 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 - 推荐配置如下：
 
@@ -48,7 +48,7 @@
   | 输出窗口 | 仓库根目录、远程名称、远程地址和日志位置 |
   | macOS 剪贴板 | Git 配置中的原始远程地址 |
 
-### 2.2、终端独立运行
+### 2.2、终端独立运行 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 - 进入脚本目录后执行：
 

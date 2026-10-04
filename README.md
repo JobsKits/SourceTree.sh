@@ -1,18 +1,18 @@
-# 配置[**SourceTree**](https://www.sourcetreeapp.com/)自定义脚本
+# <span id="前言">配置[**SourceTree**](https://www.sourcetreeapp.com/)自定义脚本</span>
 
 ![Jobs出品，必属精品](https://picsum.photos/1500/400)
 
 [toc]
 
-## 一、配置方式
+## 一、配置方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-### 1、手动配置
+### 1、手动配置 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 <img src="./assets/image-20250726230655312.png" alt="image-20250726230655312" style="zoom:50%;" />
 
 <img src="./assets/image-20250814100342111.png" alt="image-20250814100342111" style="zoom:50%;" />
 
-### 2、自动（脚本）配置
+### 2、自动（脚本）配置 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 - 实际是替换`~/Library/Application Support/SourceTree/actions.plist  `
 
@@ -26,7 +26,7 @@
   ./install/【MacOS】安装SourceTree自定义菜单.command
   ```
 
-## 二、温馨提示
+## 二、温馨提示 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 - ⚠️ [**SourceTree**](https://www.sourcetreeapp.com/) 运行脚本的时候，**Shell**不会继承外部系统的**Shell**，从而丢失一些自定义配置。例：
 
@@ -147,3 +147,4 @@
     main "$@"
     ```
 
+<a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>
