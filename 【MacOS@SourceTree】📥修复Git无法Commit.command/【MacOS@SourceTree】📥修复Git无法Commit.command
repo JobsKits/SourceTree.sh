@@ -7,6 +7,29 @@
 # - 运行提示：Sourcetree 模式无交互连续执行；终端独立运行需先按回车确认。
 
 # 解析脚本真实路径，兼容 Sourcetree 只传入脚本名的运行环境。
+# 仅渲染自述：标题红色加粗，编号正文蓝色常规字重；非彩色终端输出纯文本。
+jobs_intro_style() {
+  local intro_color=0
+  if [ -t 1 ] && [ -n "${TERM:-}" ] && [ "${TERM:-}" != dumb ] &&
+     [ -z "${NO_COLOR+x}" ] && [ "${PLAIN_OUTPUT:-0}" != 1 ] &&
+     [ "${IS_SOURCETREE_RUNTIME:-0}" != 1 ]; then
+    intro_color=1
+  fi
+  /usr/bin/awk -v color="$intro_color" -v role="${1:-body}" '
+    BEGIN { esc = sprintf("%c", 27) }
+    {
+      gsub(esc "\\[[0-9;]*m", "")
+      gsub(/\\(033|e|x1[bB])\[[0-9;]*m/, "")
+      if (!color || $0 ~ /^[[:space:]]*$/) { print; next }
+      numbered = ($0 ~ /^[[:space:]➤ℹ🔹✔⚠]*([0-9]+[、.)）]|[0-9]+️⃣|[-•])/)
+      heading = ($0 ~ /^[[:space:]]*#{1,6}[[:space:]]/ || $0 ~ /[：:][[:space:]]*$/ || $0 ~ /^[[:space:]]*[=━─-]{3}/)
+      title = (!numbered && (role == "title" || heading))
+      if (role == "auto" && !seen && !numbered) title = 1
+      if ($0 !~ /^[[:space:]]*[=━─-]+[[:space:]]*$/) seen = 1
+      printf "%s%s%s\n", esc (title ? "[1;31m" : "[0;34m"), $0, esc "[0m"
+    }
+  '
+}
 resolve_script_path() {
   local script_source="${BASH_SOURCE[0]:-${(%):-%x}}"
   local script_name="${0:t}"
@@ -145,22 +168,22 @@ show_script_intro_and_wait() {
     clear
   fi
 
-  highlight_echo "============================== 脚本内置自述 =============================="
-  note_echo "脚本名称：${SCRIPT_BASENAME}.command"
-  note_echo "核心行为：把 Commit 阻塞拆成 7 个独立场景，逐项检测/修复，最后验证索引入口已经解锁。"
-  note_echo "适用场景：Git 异常退出遗留索引锁、普通变更、文件与同名目录转换、缺失子模块工作树、旧 gitlink 删除，以及 .git/core.worktree 路径错位。"
-  note_echo "锁处理策略：锁仍被进程持有时立即停止；只有确认无人占用时才移动到 Git 元数据备份目录。"
-  note_echo "路径迁移：旧 gitlink 已登记但目录已改名时，会同步修复 .gitmodules、core.worktree 和父仓索引。"
-  note_echo "副本修复：已登记到 .gitmodules 的同源子模块副本，会尝试创建独立 gitdir 后继续。"
-  note_echo "子模块策略：缺失时尝试初始化；内部有修改时保持原状并警告，不阻断父仓索引刷新。"
-  note_echo "典型报错：please stage your changes to .gitmodules or stash them to proceed。"
-  note_echo "安全边界：不终止 Git 进程、不直接删除索引锁、不提交、不推送、不暂存子模块内部内容、不主动删除工作区文件。"
-  note_echo "文档关系：同目录 README.md 只作为静态说明，脚本运行时不依赖它。"
-  gray_echo "日志文件：${LOG_FILE}"
-  highlight_echo "============================================================================="
+  highlight_echo "============================== 脚本内置自述 ==============================" | jobs_intro_style title
+  note_echo "脚本名称：${SCRIPT_BASENAME}.command" | jobs_intro_style title
+  note_echo "核心行为：把 Commit 阻塞拆成 7 个独立场景，逐项检测/修复，最后验证索引入口已经解锁。" | jobs_intro_style body
+  note_echo "适用场景：Git 异常退出遗留索引锁、普通变更、文件与同名目录转换、缺失子模块工作树、旧 gitlink 删除，以及 .git/core.worktree 路径错位。" | jobs_intro_style body
+  note_echo "锁处理策略：锁仍被进程持有时立即停止；只有确认无人占用时才移动到 Git 元数据备份目录。" | jobs_intro_style body
+  note_echo "路径迁移：旧 gitlink 已登记但目录已改名时，会同步修复 .gitmodules、core.worktree 和父仓索引。" | jobs_intro_style body
+  note_echo "副本修复：已登记到 .gitmodules 的同源子模块副本，会尝试创建独立 gitdir 后继续。" | jobs_intro_style body
+  note_echo "子模块策略：缺失时尝试初始化；内部有修改时保持原状并警告，不阻断父仓索引刷新。" | jobs_intro_style body
+  note_echo "典型报错：please stage your changes to .gitmodules or stash them to proceed。" | jobs_intro_style body
+  note_echo "安全边界：不终止 Git 进程、不直接删除索引锁、不提交、不推送、不暂存子模块内部内容、不主动删除工作区文件。" | jobs_intro_style body
+  note_echo "文档关系：同目录 README.md 只作为静态说明，脚本运行时不依赖它。" | jobs_intro_style body
+  gray_echo "日志文件：${LOG_FILE}" | jobs_intro_style body
+  highlight_echo "=============================================================================" | jobs_intro_style title
 
   if [[ "$IS_SOURCETREE_RUNTIME" == "1" ]]; then
-    gray_echo "已识别 Sourcetree 自定义动作，跳过回车等待。"
+    gray_echo "已识别 Sourcetree 自定义动作，跳过回车等待。" | jobs_intro_style body
     return 0
   fi
   if [[ ! -t 0 ]]; then
@@ -168,7 +191,7 @@ show_script_intro_and_wait() {
     return 1
   fi
 
-  echo ""
+  echo "" | jobs_intro_style body
   read -r "?👉 已阅读说明，按回车继续执行；按 Ctrl+C 取消：" _
 }
 # 解析 .git 文件指向的真实 gitdir 路径。

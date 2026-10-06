@@ -5,6 +5,29 @@
 # - 影响范围：读取工程依赖、复制依赖源码到临时目录、在桌面生成压缩包；默认不修改工程依赖。
 # - 运行提示：Sourcetree 模式无交互连续执行；终端模式会先确认，可按参数启用 fzf 多选或 flutter pub get。
 
+# 仅渲染自述：标题红色加粗，编号正文蓝色常规字重；非彩色终端输出纯文本。
+jobs_intro_style() {
+  local intro_color=0
+  if [ -t 1 ] && [ -n "${TERM:-}" ] && [ "${TERM:-}" != dumb ] &&
+     [ -z "${NO_COLOR+x}" ] && [ "${PLAIN_OUTPUT:-0}" != 1 ] &&
+     [ "${IS_SOURCETREE_RUNTIME:-0}" != 1 ]; then
+    intro_color=1
+  fi
+  /usr/bin/awk -v color="$intro_color" -v role="${1:-body}" '
+    BEGIN { esc = sprintf("%c", 27) }
+    {
+      gsub(esc "\\[[0-9;]*m", "")
+      gsub(/\\(033|e|x1[bB])\[[0-9;]*m/, "")
+      if (!color || $0 ~ /^[[:space:]]*$/) { print; next }
+      numbered = ($0 ~ /^[[:space:]➤ℹ🔹✔⚠]*([0-9]+[、.)）]|[0-9]+️⃣|[-•])/)
+      heading = ($0 ~ /^[[:space:]]*#{1,6}[[:space:]]/ || $0 ~ /[：:][[:space:]]*$/ || $0 ~ /^[[:space:]]*[=━─-]{3}/)
+      title = (!numbered && (role == "title" || heading))
+      if (role == "auto" && !seen && !numbered) title = 1
+      if ($0 !~ /^[[:space:]]*[=━─-]+[[:space:]]*$/) seen = 1
+      printf "%s%s%s\n", esc (title ? "[1;31m" : "[0;34m"), $0, esc "[0m"
+    }
+  '
+}
 SCRIPT_PATH=""
 SCRIPT_DIR=""
 SCRIPT_BASENAME=""
@@ -129,18 +152,18 @@ show_script_intro_and_wait() {
     clear
   fi
 
-  highlight_echo "============================== 脚本内置自述 =============================="
-  note_echo "脚本名称：${SCRIPT_BASENAME}.command"
-  note_echo "脚本路径：${SCRIPT_PATH}"
-  note_echo "核心用途：收集当前 Flutter / Dart 工程依赖源码、原生依赖和关键清单，并在桌面生成 Zip。"
-  warn_echo "影响范围：默认只读取工程和复制文件到临时目录、桌面压缩包；终端模式使用 --pub-get 才会执行 flutter pub get。"
-  note_echo "SourceTree：读取传入的 \$REPO 参数，无交互连续执行，默认不启用 fzf 多选。"
-  gray_echo "日志文件：${LOG_FILE}"
-  highlight_echo "======================================================================="
-  echo ""
+  highlight_echo "============================== 脚本内置自述 ==============================" | jobs_intro_style title
+  note_echo "脚本名称：${SCRIPT_BASENAME}.command" | jobs_intro_style title
+  note_echo "脚本路径：${SCRIPT_PATH}" | jobs_intro_style body
+  note_echo "核心用途：收集当前 Flutter / Dart 工程依赖源码、原生依赖和关键清单，并在桌面生成 Zip。" | jobs_intro_style body
+  warn_echo "影响范围：默认只读取工程和复制文件到临时目录、桌面压缩包；终端模式使用 --pub-get 才会执行 flutter pub get。" | jobs_intro_style body
+  note_echo "SourceTree：读取传入的 \$REPO 参数，无交互连续执行，默认不启用 fzf 多选。" | jobs_intro_style body
+  gray_echo "日志文件：${LOG_FILE}" | jobs_intro_style body
+  highlight_echo "=======================================================================" | jobs_intro_style title
+  echo "" | jobs_intro_style body
 
   if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
-    gray_echo "已识别为 Sourcetree 自定义动作，将跳过交互并连续执行。"
+    gray_echo "已识别为 Sourcetree 自定义动作，将跳过交互并连续执行。" | jobs_intro_style body
     return 0
   fi
   if [[ ! -t 0 ]]; then

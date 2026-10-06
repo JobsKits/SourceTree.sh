@@ -5,6 +5,29 @@
 # - 影响范围：游离态先丢弃临时内容并恢复远端版本；每层执行 git add -A、必要时提交并向已配置的 GitHub / 码云线路推送。
 # - 运行提示：Sourcetree 动作打开 Terminal.app；在终端回车确认后执行并实时显示日志。
 
+# 仅渲染自述：标题红色加粗，编号正文蓝色常规字重；非彩色终端输出纯文本。
+jobs_intro_style() {
+  local intro_color=0
+  if [ -t 1 ] && [ -n "${TERM:-}" ] && [ "${TERM:-}" != dumb ] &&
+     [ -z "${NO_COLOR+x}" ] && [ "${PLAIN_OUTPUT:-0}" != 1 ] &&
+     [ "${IS_SOURCETREE_RUNTIME:-0}" != 1 ]; then
+    intro_color=1
+  fi
+  /usr/bin/awk -v color="$intro_color" -v role="${1:-body}" '
+    BEGIN { esc = sprintf("%c", 27) }
+    {
+      gsub(esc "\\[[0-9;]*m", "")
+      gsub(/\\(033|e|x1[bB])\[[0-9;]*m/, "")
+      if (!color || $0 ~ /^[[:space:]]*$/) { print; next }
+      numbered = ($0 ~ /^[[:space:]➤ℹ🔹✔⚠]*([0-9]+[、.)）]|[0-9]+️⃣|[-•])/)
+      heading = ($0 ~ /^[[:space:]]*#{1,6}[[:space:]]/ || $0 ~ /[：:][[:space:]]*$/ || $0 ~ /^[[:space:]]*[=━─-]{3}/)
+      title = (!numbered && (role == "title" || heading))
+      if (role == "auto" && !seen && !numbered) title = 1
+      if ($0 !~ /^[[:space:]]*[=━─-]+[[:space:]]*$/) seen = 1
+      printf "%s%s%s\n", esc (title ? "[1;31m" : "[0;34m"), $0, esc "[0m"
+    }
+  '
+}
 RAW_SCRIPT_PATH="$0"
 SCRIPT_PATH=""
 SCRIPT_DIR=""
@@ -145,18 +168,18 @@ show_script_intro_and_wait() {
     clear
   fi
 
-  print -r -- "============================== 脚本内置自述 =============================="
-  print -r -- "脚本名称：${SCRIPT_FILENAME}"
-  print -r -- "核心用途：递归处理当前仓库管理的子仓，先子仓 commit + push，再处理当前仓库及父仓。"
-  print -r -- "扫描边界：按 Git 索引中的 gitlink 发现子仓；跳过依赖及构建目录，不扫描上层兄弟仓。"
-  print -r -- "影响范围：每层会执行 git add -A；无改动时不制造空提交，但仍尝试推送已有提交。"
-  print -r -- "正常分支：先获取主上游及 GitHub / 码云各推送线路，提交并整合后逐条 push、核验同一提交；冲突时停止。"
-  print -r -- "游离态策略：fetch 后舍弃游离态独有提交、未提交改动及未跟踪文件，恢复远端最新分支；保留忽略文件。"
-  print -r -- "停止边界：冲突、未完成操作、恢复目标不明确、fetch 或 push 失败时停止；正常分支的改动保留。"
-  print -r -- "运行策略：Sourcetree 打开独立终端；终端回车确认后执行，实时显示日志，按 Ctrl+C 取消。"
-  print -r -- "日志文件：${LOG_FILE}"
-  print -r -- "============================================================================"
-  print ""
+  print -r -- "============================== 脚本内置自述 ==============================" | jobs_intro_style title
+  print -r -- "脚本名称：${SCRIPT_FILENAME}" | jobs_intro_style title
+  print -r -- "核心用途：递归处理当前仓库管理的子仓，先子仓 commit + push，再处理当前仓库及父仓。" | jobs_intro_style body
+  print -r -- "扫描边界：按 Git 索引中的 gitlink 发现子仓；跳过依赖及构建目录，不扫描上层兄弟仓。" | jobs_intro_style body
+  print -r -- "影响范围：每层会执行 git add -A；无改动时不制造空提交，但仍尝试推送已有提交。" | jobs_intro_style body
+  print -r -- "正常分支：先获取主上游及 GitHub / 码云各推送线路，提交并整合后逐条 push、核验同一提交；冲突时停止。" | jobs_intro_style body
+  print -r -- "游离态策略：fetch 后舍弃游离态独有提交、未提交改动及未跟踪文件，恢复远端最新分支；保留忽略文件。" | jobs_intro_style body
+  print -r -- "停止边界：冲突、未完成操作、恢复目标不明确、fetch 或 push 失败时停止；正常分支的改动保留。" | jobs_intro_style body
+  print -r -- "运行策略：Sourcetree 打开独立终端；终端回车确认后执行，实时显示日志，按 Ctrl+C 取消。" | jobs_intro_style body
+  print -r -- "日志文件：${LOG_FILE}" | jobs_intro_style body
+  print -r -- "============================================================================" | jobs_intro_style title
+  print "" | jobs_intro_style body
 
   if [[ "$IS_SOURCETREE_RUNTIME" == "1" ]]; then
     open_terminal_for_repository "$@"
