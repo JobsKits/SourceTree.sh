@@ -5,6 +5,29 @@
 # - 影响范围：可能替换目标目录下的 SourceTree.command；选择同步方向时可能覆盖 Sourcetree 当前用户 actions.plist。
 # - 运行提示：运行后会先打印内置自述；脚本包缺少 actions.plist 时会从 Sourcetree 默认路径自动回收。
 
+# 仅渲染自述：标题红色加粗，编号正文蓝色常规字重；非彩色终端输出纯文本。
+jobs_intro_style() {
+  local intro_color=0
+  if [ -t 1 ] && [ -n "${TERM:-}" ] && [ "${TERM:-}" != dumb ] &&
+     [ -z "${NO_COLOR+x}" ] && [ "${PLAIN_OUTPUT:-0}" != 1 ] &&
+     [ "${IS_SOURCETREE_RUNTIME:-0}" != 1 ]; then
+    intro_color=1
+  fi
+  /usr/bin/awk -v color="$intro_color" -v role="${1:-body}" '
+    BEGIN { esc = sprintf("%c", 27) }
+    {
+      gsub(esc "\\[[0-9;]*m", "")
+      gsub(/\\(033|e|x1[bB])\[[0-9;]*m/, "")
+      if (!color || $0 ~ /^[[:space:]]*$/) { print; next }
+      numbered = ($0 ~ /^[[:space:]➤ℹ🔹✔⚠]*([0-9]+[、.)）]|[0-9]+️⃣|[-•])/)
+      heading = ($0 ~ /^[[:space:]]*#{1,6}[[:space:]]/ || $0 ~ /[：:][[:space:]]*$/ || $0 ~ /^[[:space:]]*[=━─-]{3}/)
+      title = (!numbered && (role == "title" || heading))
+      if (role == "auto" && !seen && !numbered) title = 1
+      if ($0 !~ /^[[:space:]]*[=━─-]+[[:space:]]*$/) seen = 1
+      printf "%s%s%s\n", esc (title ? "[1;31m" : "[0;34m"), $0, esc "[0m"
+    }
+  '
+}
 SCRIPT_PATH="${0:A}"
 SCRIPT_DIR="${SCRIPT_PATH:h}"
 SCRIPT_BASENAME="${SCRIPT_PATH:t:r}"
@@ -115,17 +138,17 @@ show_script_intro_and_wait() {
     clear
   fi
 
-  print -r -- "============================== 脚本内置自述 =============================="
-  print -r -- "脚本名称：${SCRIPT_BASENAME}.command"
-  print -r -- "脚本路径：${SCRIPT_PATH}"
-  print -r -- "第一阶段：发送 ${SOURCE_PACKAGE_NAME} 库到目标目录，默认目标父目录为当前用户家目录。"
-  print -r -- "第二阶段：脚本包有 actions.plist 时通过 fzf 选择同步方向；没有时从 Sourcetree 默认路径自动回收。"
-  print -r -- "影响范围：可能替换目标 ${SOURCE_PACKAGE_NAME} 目录；选择同步方向时可能覆盖 Sourcetree 的 actions.plist。"
-  print -r -- "安全策略：目标库已存在时直接回车保留并继续；输入 YES 才会备份替换；actions.plist 覆盖前自动备份。"
-  print -r -- "日志文件：${LOG_FILE}"
-  print -r -- "取消方式：确认前按 Ctrl+C 终止，不会继续执行后续业务。"
-  print -r -- "============================================================================"
-  echo ""
+  print -r -- "============================== 脚本内置自述 ==============================" | jobs_intro_style title
+  print -r -- "脚本名称：${SCRIPT_BASENAME}.command" | jobs_intro_style title
+  print -r -- "脚本路径：${SCRIPT_PATH}" | jobs_intro_style body
+  print -r -- "第一阶段：发送 ${SOURCE_PACKAGE_NAME} 库到目标目录，默认目标父目录为当前用户家目录。" | jobs_intro_style body
+  print -r -- "第二阶段：脚本包有 actions.plist 时通过 fzf 选择同步方向；没有时从 Sourcetree 默认路径自动回收。" | jobs_intro_style body
+  print -r -- "影响范围：可能替换目标 ${SOURCE_PACKAGE_NAME} 目录；选择同步方向时可能覆盖 Sourcetree 的 actions.plist。" | jobs_intro_style body
+  print -r -- "安全策略：目标库已存在时直接回车保留并继续；输入 YES 才会备份替换；actions.plist 覆盖前自动备份。" | jobs_intro_style body
+  print -r -- "日志文件：${LOG_FILE}" | jobs_intro_style body
+  print -r -- "取消方式：确认前按 Ctrl+C 终止，不会继续执行后续业务。" | jobs_intro_style body
+  print -r -- "============================================================================" | jobs_intro_style title
+  echo "" | jobs_intro_style body
 
   if [[ ! -t 0 ]]; then
     print -u2 -r -- "当前没有可交互输入，请在终端中重新运行。"

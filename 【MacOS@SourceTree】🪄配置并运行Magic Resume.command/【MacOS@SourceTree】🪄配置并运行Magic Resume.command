@@ -5,6 +5,29 @@
 # - 影响范围：可能新建同级仓库目录、安装 Node.js / pnpm、写入 node_modules，并启动本地 3000 端口服务。
 # - 运行提示：运行后会先打印内置自述；Sourcetree 模式无交互连续执行，终端模式确认后继续。
 
+# 仅渲染自述：标题红色加粗，编号正文蓝色常规字重；非彩色终端输出纯文本。
+jobs_intro_style() {
+  local intro_color=0
+  if [ -t 1 ] && [ -n "${TERM:-}" ] && [ "${TERM:-}" != dumb ] &&
+     [ -z "${NO_COLOR+x}" ] && [ "${PLAIN_OUTPUT:-0}" != 1 ] &&
+     [ "${IS_SOURCETREE_RUNTIME:-0}" != 1 ]; then
+    intro_color=1
+  fi
+  /usr/bin/awk -v color="$intro_color" -v role="${1:-body}" '
+    BEGIN { esc = sprintf("%c", 27) }
+    {
+      gsub(esc "\\[[0-9;]*m", "")
+      gsub(/\\(033|e|x1[bB])\[[0-9;]*m/, "")
+      if (!color || $0 ~ /^[[:space:]]*$/) { print; next }
+      numbered = ($0 ~ /^[[:space:]➤ℹ🔹✔⚠]*([0-9]+[、.)）]|[0-9]+️⃣|[-•])/)
+      heading = ($0 ~ /^[[:space:]]*#{1,6}[[:space:]]/ || $0 ~ /[：:][[:space:]]*$/ || $0 ~ /^[[:space:]]*[=━─-]{3}/)
+      title = (!numbered && (role == "title" || heading))
+      if (role == "auto" && !seen && !numbered) title = 1
+      if ($0 !~ /^[[:space:]]*[=━─-]+[[:space:]]*$/) seen = 1
+      printf "%s%s%s\n", esc (title ? "[1;31m" : "[0;34m"), $0, esc "[0m"
+    }
+  '
+}
 EXPECTED_DISPLAY_SLUG="JOYCEQL/magic-resume"
 EXPECTED_SLUG="joyceql/magic-resume"
 EXPECTED_HTTPS_URL="https://github.com/JOYCEQL/magic-resume"
@@ -157,20 +180,20 @@ show_script_intro_and_wait() {
     clear
   fi
 
-  highlight_echo "============================== 脚本内置自述 =============================="
-  note_echo "脚本名称：${SCRIPT_BASENAME}.command"
-  note_echo "核心用途：校验当前仓库；不匹配时先扫描全部同级仓库，确实不存在 ${EXPECTED_DISPLAY_SLUG} 才创建目录并克隆。"
-  note_echo "运行策略：开发服务器使用 nohup 脱离终端后台运行；3000 端口就绪后自动打开浏览器，脚本随即结束。"
-  warn_echo "影响范围：可能创建同级目录、安装 Node.js / pnpm、写入 node_modules，并将当前仓库已有的前台 Vite 服务重启为后台服务。"
-  gray_echo "仓库地址：${EXPECTED_HTTPS_URL}"
-  gray_echo "业务日志：${LOG_FILE}"
-  gray_echo "服务日志：${DEV_SERVER_LOG}"
-  gray_echo "取消方式：终端模式可在确认前按 Ctrl+C；Sourcetree 模式按自定义动作约定无交互连续执行。"
-  highlight_echo "============================================================================"
-  log ""
+  highlight_echo "============================== 脚本内置自述 ==============================" | jobs_intro_style title
+  note_echo "脚本名称：${SCRIPT_BASENAME}.command" | jobs_intro_style title
+  note_echo "核心用途：校验当前仓库；不匹配时先扫描全部同级仓库，确实不存在 ${EXPECTED_DISPLAY_SLUG} 才创建目录并克隆。" | jobs_intro_style body
+  note_echo "运行策略：开发服务器使用 nohup 脱离终端后台运行；3000 端口就绪后自动打开浏览器，脚本随即结束。" | jobs_intro_style body
+  warn_echo "影响范围：可能创建同级目录、安装 Node.js / pnpm、写入 node_modules，并将当前仓库已有的前台 Vite 服务重启为后台服务。" | jobs_intro_style body
+  gray_echo "仓库地址：${EXPECTED_HTTPS_URL}" | jobs_intro_style body
+  gray_echo "业务日志：${LOG_FILE}" | jobs_intro_style body
+  gray_echo "服务日志：${DEV_SERVER_LOG}" | jobs_intro_style body
+  gray_echo "取消方式：终端模式可在确认前按 Ctrl+C；Sourcetree 模式按自定义动作约定无交互连续执行。" | jobs_intro_style body
+  highlight_echo "============================================================================" | jobs_intro_style title
+  log "" | jobs_intro_style body
 
   if [[ "$IS_SOURCETREE_RUNTIME" == "1" ]]; then
-    gray_echo "已识别为 Sourcetree 自定义动作，将跳过交互并连续执行。"
+    gray_echo "已识别为 Sourcetree 自定义动作，将跳过交互并连续执行。" | jobs_intro_style body
     return 0
   fi
   if [[ ! -t 0 ]]; then

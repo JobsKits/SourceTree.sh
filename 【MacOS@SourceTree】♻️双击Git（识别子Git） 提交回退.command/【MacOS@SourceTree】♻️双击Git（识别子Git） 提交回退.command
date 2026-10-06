@@ -9,6 +9,29 @@
 # 说明：保留原脚本业务逻辑，补齐 README 防误触、彩色日志、zsh 入口、Homebrew 健康自检标准。
 # =====================================================================
 # Sourcetree 自定义动作可能只传脚本名，不传绝对路径；这里兜底找回真实脚本位置。
+# 仅渲染自述：标题红色加粗，编号正文蓝色常规字重；非彩色终端输出纯文本。
+jobs_intro_style() {
+  local intro_color=0
+  if [ -t 1 ] && [ -n "${TERM:-}" ] && [ "${TERM:-}" != dumb ] &&
+     [ -z "${NO_COLOR+x}" ] && [ "${PLAIN_OUTPUT:-0}" != 1 ] &&
+     [ "${IS_SOURCETREE_RUNTIME:-0}" != 1 ]; then
+    intro_color=1
+  fi
+  /usr/bin/awk -v color="$intro_color" -v role="${1:-body}" '
+    BEGIN { esc = sprintf("%c", 27) }
+    {
+      gsub(esc "\\[[0-9;]*m", "")
+      gsub(/\\(033|e|x1[bB])\[[0-9;]*m/, "")
+      if (!color || $0 ~ /^[[:space:]]*$/) { print; next }
+      numbered = ($0 ~ /^[[:space:]➤ℹ🔹✔⚠]*([0-9]+[、.)）]|[0-9]+️⃣|[-•])/)
+      heading = ($0 ~ /^[[:space:]]*#{1,6}[[:space:]]/ || $0 ~ /[：:][[:space:]]*$/ || $0 ~ /^[[:space:]]*[=━─-]{3}/)
+      title = (!numbered && (role == "title" || heading))
+      if (role == "auto" && !seen && !numbered) title = 1
+      if ($0 !~ /^[[:space:]]*[=━─-]+[[:space:]]*$/) seen = 1
+      printf "%s%s%s\n", esc (title ? "[1;31m" : "[0;34m"), $0, esc "[0m"
+    }
+  '
+}
 resolve_script_path() {
   local script_source="${BASH_SOURCE[0]:-${(%):-%x}}"
   local script_name="$(basename -- "$0")"
@@ -259,20 +282,20 @@ show_readme_and_wait() {
     clear
   fi
 
-  highlight_echo "============================== 脚本内置自述 =============================="
-  note_echo "脚本名称：${SCRIPT_BASENAME}.command"
-  note_echo "脚本路径：${SCRIPT_PATH}"
-  note_echo "运行入口：兼容系统终端双击运行和 Sourcetree 自定义动作运行。"
-  note_echo "核心行为：按脚本名称执行对应的 SourceTree 效率动作，运行前会先展示这段内置自述，避免误触。"
-  note_echo "环境策略：系统终端保留清屏、彩色输出和回车确认；Sourcetree 瘦身环境自动跳过清屏和等待，并输出纯文本日志。"
-  note_echo "文档关系：同目录 README.md 只作为外部说明文档保留，运行时自述不读取、不拼接、不依赖 README.md。"
-  warn_echo "继续前请确认 SourceTree 传入路径、当前仓库或拖入路径正确；按 Ctrl+C 可以取消。"
-  gray_echo "日志文件：${LOG_FILE}"
-  highlight_echo "======================================================================="
-  echo ""
+  highlight_echo "============================== 脚本内置自述 ==============================" | jobs_intro_style title
+  note_echo "脚本名称：${SCRIPT_BASENAME}.command" | jobs_intro_style title
+  note_echo "脚本路径：${SCRIPT_PATH}" | jobs_intro_style body
+  note_echo "运行入口：兼容系统终端双击运行和 Sourcetree 自定义动作运行。" | jobs_intro_style body
+  note_echo "核心行为：按脚本名称执行对应的 SourceTree 效率动作，运行前会先展示这段内置自述，避免误触。" | jobs_intro_style title
+  note_echo "环境策略：系统终端保留清屏、彩色输出和回车确认；Sourcetree 瘦身环境自动跳过清屏和等待，并输出纯文本日志。" | jobs_intro_style body
+  note_echo "文档关系：同目录 README.md 只作为外部说明文档保留，运行时自述不读取、不拼接、不依赖 README.md。" | jobs_intro_style body
+  warn_echo "继续前请确认 SourceTree 传入路径、当前仓库或拖入路径正确；按 Ctrl+C 可以取消。" | jobs_intro_style body
+  gray_echo "日志文件：${LOG_FILE}" | jobs_intro_style body
+  highlight_echo "=======================================================================" | jobs_intro_style title
+  echo "" | jobs_intro_style body
 
   if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
-    gray_echo "已识别为 Sourcetree 自定义动作，将跳过交互并连续执行。"
+    gray_echo "已识别为 Sourcetree 自定义动作，将跳过交互并连续执行。" | jobs_intro_style body
     return 0
   fi
   if [[ ! -t 0 ]]; then
@@ -331,18 +354,18 @@ run_original_logic() {
   bold_echo()      { log "\033[1m$1\033[0m"; }
   # =============== 自述 ===============
   print_git_reset_intro() {
-    echo ""
-    bold_echo "==============================================="
-    bold_echo "  🧰 Git 提交回退助手（支持多种模式 & 子 Git）"
-    bold_echo "==============================================="
-    echo ""
-    info_echo "本工具支持："
-    echo "  1️⃣ soft 回退到远端（提交打回到“待提交”，已暂存）"
-    echo "  2️⃣ hard 回退到远端（丢弃本地提交 + 修改）"
-    echo "  3️⃣ 通过 fzf 选择任意提交回退"
-    echo "  4️⃣ 通过 tag 回退"
-    echo "  5️⃣ 通过 reflog 回退到任意历史状态"
-    echo ""
+    echo "" | jobs_intro_style body
+    bold_echo "===============================================" | jobs_intro_style title
+    bold_echo "  🧰 Git 提交回退助手（支持多种模式 & 子 Git）" | jobs_intro_style title
+    bold_echo "===============================================" | jobs_intro_style title
+    echo "" | jobs_intro_style body
+    info_echo "本工具支持：" | jobs_intro_style title
+    echo "  1️⃣ soft 回退到远端（提交打回到“待提交”，已暂存）" | jobs_intro_style body
+    echo "  2️⃣ hard 回退到远端（丢弃本地提交 + 修改）" | jobs_intro_style body
+    echo "  3️⃣ 通过 fzf 选择任意提交回退" | jobs_intro_style body
+    echo "  4️⃣ 通过 tag 回退" | jobs_intro_style body
+    echo "  5️⃣ 通过 reflog 回退到任意历史状态" | jobs_intro_style body
+    echo "" | jobs_intro_style body
   }
   # =============== 基础工具 ===============
   get_cpu_arch() {

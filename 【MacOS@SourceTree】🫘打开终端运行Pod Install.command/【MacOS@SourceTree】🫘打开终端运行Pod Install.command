@@ -6,6 +6,29 @@
 # - 影响范围：pod install 可能下载依赖并更新 Pods、Podfile.lock 或工作区文件。
 # - 运行提示：Sourcetree 自定义动作请传入 $REPO；Sourcetree 模式无交互，终端独立运行时确认后继续。
 
+# 仅渲染自述：标题红色加粗，编号正文蓝色常规字重；非彩色终端输出纯文本。
+jobs_intro_style() {
+  local intro_color=0
+  if [ -t 1 ] && [ -n "${TERM:-}" ] && [ "${TERM:-}" != dumb ] &&
+     [ -z "${NO_COLOR+x}" ] && [ "${PLAIN_OUTPUT:-0}" != 1 ] &&
+     [ "${IS_SOURCETREE_RUNTIME:-0}" != 1 ]; then
+    intro_color=1
+  fi
+  /usr/bin/awk -v color="$intro_color" -v role="${1:-body}" '
+    BEGIN { esc = sprintf("%c", 27) }
+    {
+      gsub(esc "\\[[0-9;]*m", "")
+      gsub(/\\(033|e|x1[bB])\[[0-9;]*m/, "")
+      if (!color || $0 ~ /^[[:space:]]*$/) { print; next }
+      numbered = ($0 ~ /^[[:space:]➤ℹ🔹✔⚠]*([0-9]+[、.)）]|[0-9]+️⃣|[-•])/)
+      heading = ($0 ~ /^[[:space:]]*#{1,6}[[:space:]]/ || $0 ~ /[：:][[:space:]]*$/ || $0 ~ /^[[:space:]]*[=━─-]{3}/)
+      title = (!numbered && (role == "title" || heading))
+      if (role == "auto" && !seen && !numbered) title = 1
+      if ($0 !~ /^[[:space:]]*[=━─-]+[[:space:]]*$/) seen = 1
+      printf "%s%s%s\n", esc (title ? "[1;31m" : "[0;34m"), $0, esc "[0m"
+    }
+  '
+}
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 export LANG="zh_CN.UTF-8"
 export LC_ALL="zh_CN.UTF-8"
@@ -56,11 +79,11 @@ is_sourcetree_runtime() {
 # 展示脚本用途，并在普通终端模式下等待确认。
 show_script_intro_and_wait() {
   is_sourcetree_runtime && IS_SOURCETREE_RUNTIME=1
-  log "============================== SCRIPT INFO =============================="
-  info_echo "Open Terminal.app at the current repository and run pod install."
-  warn_echo "pod install may download dependencies and update project files."
-  info_echo "Log file: ${LOG_FILE}"
-  log "======================================================================="
+  log "============================== SCRIPT INFO ==============================" | jobs_intro_style title
+  info_echo "Open Terminal.app at the current repository and run pod install." | jobs_intro_style body
+  warn_echo "pod install may download dependencies and update project files." | jobs_intro_style body
+  info_echo "Log file: ${LOG_FILE}" | jobs_intro_style body
+  log "=======================================================================" | jobs_intro_style title
 
   [[ "$IS_SOURCETREE_RUNTIME" == "1" ]] && return 0
   [[ -t 0 ]] || { error_echo "No interactive terminal is available."; return 1; }

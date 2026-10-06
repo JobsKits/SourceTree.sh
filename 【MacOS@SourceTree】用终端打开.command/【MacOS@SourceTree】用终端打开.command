@@ -6,6 +6,29 @@
 # - 影响范围：不修改 Git 状态，不改写业务文件；只启动 Terminal.app 并写入脚本日志。
 # - 运行提示：Sourcetree 自定义动作请把参数设置为 $REPO；Sourcetree 模式无交互连续执行，终端模式确认后继续。
 
+# 仅渲染自述：标题红色加粗，编号正文蓝色常规字重；非彩色终端输出纯文本。
+jobs_intro_style() {
+  local intro_color=0
+  if [ -t 1 ] && [ -n "${TERM:-}" ] && [ "${TERM:-}" != dumb ] &&
+     [ -z "${NO_COLOR+x}" ] && [ "${PLAIN_OUTPUT:-0}" != 1 ] &&
+     [ "${IS_SOURCETREE_RUNTIME:-0}" != 1 ]; then
+    intro_color=1
+  fi
+  /usr/bin/awk -v color="$intro_color" -v role="${1:-body}" '
+    BEGIN { esc = sprintf("%c", 27) }
+    {
+      gsub(esc "\\[[0-9;]*m", "")
+      gsub(/\\(033|e|x1[bB])\[[0-9;]*m/, "")
+      if (!color || $0 ~ /^[[:space:]]*$/) { print; next }
+      numbered = ($0 ~ /^[[:space:]➤ℹ🔹✔⚠]*([0-9]+[、.)）]|[0-9]+️⃣|[-•])/)
+      heading = ($0 ~ /^[[:space:]]*#{1,6}[[:space:]]/ || $0 ~ /[：:][[:space:]]*$/ || $0 ~ /^[[:space:]]*[=━─-]{3}/)
+      title = (!numbered && (role == "title" || heading))
+      if (role == "auto" && !seen && !numbered) title = 1
+      if ($0 !~ /^[[:space:]]*[=━─-]+[[:space:]]*$/) seen = 1
+      printf "%s%s%s\n", esc (title ? "[1;31m" : "[0;34m"), $0, esc "[0m"
+    }
+  '
+}
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 export LANG="${LANG:-zh_CN.UTF-8}"
 export LC_CTYPE="${LC_CTYPE:-UTF-8}"
@@ -124,26 +147,26 @@ show_script_intro_and_wait() {
     clear
   fi
 
-  highlight_echo "============================== 脚本内置自述 =============================="
-  note_echo "脚本名称：${SCRIPT_BASENAME}.command"
-  note_echo "脚本路径：${SCRIPT_PATH}"
-  note_echo "核心用途：解析 Sourcetree 传入目标，打开 macOS 终端，并让新窗口命令行进入该目录。"
-  note_echo "参数建议：Sourcetree 自定义动作参数填写 \$REPO；也支持命令行直接传入文件或目录路径。"
-  note_echo "文件策略：如果传入的是文件，脚本会打开文件所在目录。"
-  note_echo "安全边界：不提交、不推送、不删除、不修改 Git 索引或业务文件。"
-  note_echo "运行策略：Sourcetree 内无交互连续执行；终端独立运行需回车确认。"
-  gray_echo "日志文件：${LOG_FILE}"
-  highlight_echo "============================================================================="
+  highlight_echo "============================== 脚本内置自述 ==============================" | jobs_intro_style title
+  note_echo "脚本名称：${SCRIPT_BASENAME}.command" | jobs_intro_style title
+  note_echo "脚本路径：${SCRIPT_PATH}" | jobs_intro_style body
+  note_echo "核心用途：解析 Sourcetree 传入目标，打开 macOS 终端，并让新窗口命令行进入该目录。" | jobs_intro_style body
+  note_echo "参数建议：Sourcetree 自定义动作参数填写 \$REPO；也支持命令行直接传入文件或目录路径。" | jobs_intro_style body
+  note_echo "文件策略：如果传入的是文件，脚本会打开文件所在目录。" | jobs_intro_style body
+  note_echo "安全边界：不提交、不推送、不删除、不修改 Git 索引或业务文件。" | jobs_intro_style body
+  note_echo "运行策略：Sourcetree 内无交互连续执行；终端独立运行需回车确认。" | jobs_intro_style body
+  gray_echo "日志文件：${LOG_FILE}" | jobs_intro_style body
+  highlight_echo "=============================================================================" | jobs_intro_style title
 
   if [[ "$IS_SOURCETREE_RUNTIME" == "1" ]]; then
-    gray_echo "已识别 Sourcetree 自定义动作，跳过回车等待。"
+    gray_echo "已识别 Sourcetree 自定义动作，跳过回车等待。" | jobs_intro_style body
     return 0
   fi
   if [[ ! -t 0 ]]; then
     exit_with_error "当前不是 Sourcetree，且没有可交互输入；请在终端中重新运行。"
   fi
 
-  echo ""
+  echo "" | jobs_intro_style body
   read -r "?已阅读说明，按回车继续执行；按 Ctrl+C 取消：" _ || exit_with_error "读取确认失败，已取消执行。"
 }
 # 初始化 zsh 选项，确保后续路径处理行为稳定。

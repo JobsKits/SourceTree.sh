@@ -6,6 +6,29 @@
 # - 影响范围：更新远端跟踪引用及 .git 引用存储；不修改工作区、索引、提交历史或本地分支指向。
 # - 运行提示：Sourcetree 模式无交互连续执行；终端独立运行需先按回车确认。
 
+# 仅渲染自述：标题红色加粗，编号正文蓝色常规字重；非彩色终端输出纯文本。
+jobs_intro_style() {
+  local intro_color=0
+  if [ -t 1 ] && [ -n "${TERM:-}" ] && [ "${TERM:-}" != dumb ] &&
+     [ -z "${NO_COLOR+x}" ] && [ "${PLAIN_OUTPUT:-0}" != 1 ] &&
+     [ "${IS_SOURCETREE_RUNTIME:-0}" != 1 ]; then
+    intro_color=1
+  fi
+  /usr/bin/awk -v color="$intro_color" -v role="${1:-body}" '
+    BEGIN { esc = sprintf("%c", 27) }
+    {
+      gsub(esc "\\[[0-9;]*m", "")
+      gsub(/\\(033|e|x1[bB])\[[0-9;]*m/, "")
+      if (!color || $0 ~ /^[[:space:]]*$/) { print; next }
+      numbered = ($0 ~ /^[[:space:]➤ℹ🔹✔⚠]*([0-9]+[、.)）]|[0-9]+️⃣|[-•])/)
+      heading = ($0 ~ /^[[:space:]]*#{1,6}[[:space:]]/ || $0 ~ /[：:][[:space:]]*$/ || $0 ~ /^[[:space:]]*[=━─-]{3}/)
+      title = (!numbered && (role == "title" || heading))
+      if (role == "auto" && !seen && !numbered) title = 1
+      if ($0 !~ /^[[:space:]]*[=━─-]+[[:space:]]*$/) seen = 1
+      printf "%s%s%s\n", esc (title ? "[1;31m" : "[0;34m"), $0, esc "[0m"
+    }
+  '
+}
 SCRIPT_NAME="${0:t}"
 SCRIPT_BASENAME="${SCRIPT_NAME:r}"
 LOG_DIR="${TMPDIR:-/tmp}"
@@ -126,25 +149,25 @@ log_external_output() {
 # 展示脚本内置自述，终端模式等待确认，Sourcetree 模式直接继续。
 show_script_intro_and_wait() {
   configure_output_mode
-  highlight_echo "============================== 脚本内置自述 =============================="
-  note_echo "脚本名称：${SCRIPT_NAME}"
-  note_echo "核心行为：把 Fetch 阻塞拆成 5 个独立场景；每修复一项立即重试，成功即停止后续元数据处理。"
-  note_echo "修复策略：先正常 Fetch，再依次尝试 prune、packed-refs 大小写收口、前缀文件阻塞和同名目录阻塞。"
-  note_echo "适用场景：上游分支在 foo 与 foo/bar 之间迁移，或 SaaS 与 saas/... 在 MacOS 上发生大小写路径碰撞。"
-  note_echo "安全边界：不合并、不 Pull、不提交、不推送、不修改工作区/索引/本地分支指向。"
-  note_echo "运行策略：Sourcetree 内无交互连续执行；终端独立运行需按回车确认。"
-  gray_echo "日志文件：${LOG_FILE}"
-  highlight_echo "============================================================================="
+  highlight_echo "============================== 脚本内置自述 ==============================" | jobs_intro_style title
+  note_echo "脚本名称：${SCRIPT_NAME}" | jobs_intro_style title
+  note_echo "核心行为：把 Fetch 阻塞拆成 5 个独立场景；每修复一项立即重试，成功即停止后续元数据处理。" | jobs_intro_style body
+  note_echo "修复策略：先正常 Fetch，再依次尝试 prune、packed-refs 大小写收口、前缀文件阻塞和同名目录阻塞。" | jobs_intro_style body
+  note_echo "适用场景：上游分支在 foo 与 foo/bar 之间迁移，或 SaaS 与 saas/... 在 MacOS 上发生大小写路径碰撞。" | jobs_intro_style body
+  note_echo "安全边界：不合并、不 Pull、不提交、不推送、不修改工作区/索引/本地分支指向。" | jobs_intro_style body
+  note_echo "运行策略：Sourcetree 内无交互连续执行；终端独立运行需按回车确认。" | jobs_intro_style body
+  gray_echo "日志文件：${LOG_FILE}" | jobs_intro_style body
+  highlight_echo "=============================================================================" | jobs_intro_style title
 
   if [[ "$IS_SOURCETREE_RUNTIME" == "1" ]]; then
-    gray_echo "已识别 Sourcetree 自定义动作，跳过回车等待。"
+    gray_echo "已识别 Sourcetree 自定义动作，跳过回车等待。" | jobs_intro_style body
     return 0
   fi
   if [[ ! -t 0 ]]; then
     error_echo "当前不是 Sourcetree，且没有可交互输入；请在终端中重新运行。"
     return 1
   fi
-  print ""
+  print "" | jobs_intro_style body
   read -r "?👉 已了解脚本用途与影响，按回车继续；按 Ctrl+C 取消：" _
 }
 # 初始化 zsh 选项、命令路径、日志和输出策略。
