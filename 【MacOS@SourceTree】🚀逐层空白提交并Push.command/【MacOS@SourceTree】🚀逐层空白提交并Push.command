@@ -3,7 +3,7 @@
 # - 脚本名称：【MacOS@SourceTree】🚀逐层空白提交并Push.command
 # - 核心用途：递归提交并推送当前仓库管理的子仓，再处理当前仓库及上层父仓。
 # - 影响范围：游离态先丢弃临时内容并恢复远端版本；每层执行 git add -A、必要时提交并向已配置的 GitHub / 码云线路推送。
-# - 运行提示：Sourcetree 动作打开 Terminal.app；在终端回车确认后执行并实时显示日志。
+# - 运行提示：Sourcetree 动作打开 Terminal.app；终端回车确认后执行，游离态舍弃前列出仓库和恢复目标并要求 YES。
 
 # 仅渲染自述：标题红色加粗，编号正文蓝色常规字重；非彩色终端输出纯文本。
 jobs_intro_style() {
@@ -175,6 +175,7 @@ show_script_intro_and_wait() {
   print -r -- "影响范围：每层会执行 git add -A；无改动时不制造空提交，但仍尝试推送已有提交。" | jobs_intro_style body
   print -r -- "正常分支：先获取主上游及 GitHub / 码云各推送线路，提交并整合后逐条 push、核验同一提交；冲突时停止。" | jobs_intro_style body
   print -r -- "游离态策略：fetch 后舍弃游离态独有提交、未提交改动及未跟踪文件，恢复远端最新分支；保留忽略文件。" | jobs_intro_style body
+  print -r -- "舍弃确认：输入 YES 前逐项列出游离仓库完整路径、恢复分支和目标提交号。" | jobs_intro_style body
   print -r -- "停止边界：冲突、未完成操作、恢复目标不明确、fetch 或 push 失败时停止；正常分支的改动保留。" | jobs_intro_style body
   print -r -- "运行策略：Sourcetree 打开独立终端；终端回车确认后执行，实时显示日志，按 Ctrl+C 取消。" | jobs_intro_style body
   print -r -- "日志文件：${LOG_FILE}" | jobs_intro_style body
@@ -530,12 +531,24 @@ prepare_detached_repositories() {
     DETACHED_TARGETS[$repository]="$target"
   done
 }
+# 在舍弃确认前按执行顺序列出每个游离仓库及已获取的恢复目标。
+show_detached_restore_plan() {
+  local repository="" target="" index=0
+  warn_echo "将舍弃 ${#DETACHED_TARGETS} 个游离仓库的独有提交、未提交改动和未跟踪文件："
+  for repository in "${REPOSITORY_CHAIN[@]}"; do
+    target="${DETACHED_TARGETS[$repository]:-}"
+    [[ -n "$target" ]] || continue
+    index=$((index + 1))
+    warn_echo "${index}、仓库：${repository}"
+    info_echo "   恢复目标：${DETACHED_REMOTES[$repository]}/${DETACHED_BRANCHES[$repository]} [${target}]"
+  done
+}
 # 清理已完成预检的游离工作区，禁止递归重置子模块和删除忽略文件。
 restore_detached_repositories() {
   local repository="" branch="" remote="" target="" confirmation=""
   [[ ${#DETACHED_TARGETS} -gt 0 ]] || return 0
+  show_detached_restore_plan
   if [[ "$IS_SOURCETREE_RUNTIME" != 1 ]]; then
-    warn_echo "将舍弃 ${#DETACHED_TARGETS} 个游离仓库的独有提交、未提交改动和未跟踪文件。"
     read -r 'confirmation?输入 YES 执行恢复，其它输入取消：'
     [[ "$confirmation" == YES ]] || { error_echo "已取消游离态恢复。"; return 1; }
   fi
