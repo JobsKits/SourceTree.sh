@@ -10,7 +10,7 @@
 
 - 本自述文件对应脚本：`【MacOS@SourceTree】获取目标绝对地址.command`。
 - 脚本定位：用于 [**SourceTree**](https://www.sourcetreeapp.com/) 自定义动作入口，快速拿到当前仓库、文件或目录的物理绝对地址。
-- 推荐参数：在 [**SourceTree**](https://www.sourcetreeapp.com/) 自定义动作的参数栏填写 `$REPO`。
+- 推荐参数：在 [**SourceTree**](https://www.sourcetreeapp.com/) 自定义动作的参数栏填写 `"$REPO"`。
 - 核心结果：脚本会在输出窗口打印绝对地址，并同步复制到 macOS 剪贴板。
 - 安全边界：不提交、不推送、不删除、不修改 Git 索引或业务文件。
 - 日志位置：系统临时目录中的 `【MacOS@SourceTree】获取目标绝对地址.log`。
@@ -21,7 +21,7 @@
 |---|---|
 | 脚本名称 | `【MacOS@SourceTree】获取目标绝对地址.command` |
 | 主要入口 | [**SourceTree**](https://www.sourcetreeapp.com/) 自定义动作 |
-| 推荐参数 | `$REPO` |
+| 推荐参数 | `"$REPO"` |
 | 输出内容 | 目标物理绝对地址 |
 | 剪贴板 | 自动复制解析结果 |
 | 是否修改项目文件 | `否` |
@@ -37,7 +37,7 @@
   | 配置项 | 建议值 |
   |---|---|
   | 脚本 | `./【MacOS@SourceTree】获取目标绝对地址.command` |
-  | 参数 | `$REPO` |
+  | 参数 | `"$REPO"` |
   | 输出 | 建议开启完整输出，方便直接看到绝对地址 |
 
 - 运行后会得到两份结果：
@@ -62,20 +62,22 @@
 
 | 优先级 | 来源 | 说明 |
 |---|---|---|
-| 1 | 命令行参数 | [**SourceTree**](https://www.sourcetreeapp.com/) 配置 `$REPO` 后会走这里 |
+| 1 | 命令行参数 | [**SourceTree**](https://www.sourcetreeapp.com/) 配置 `"$REPO"` 后会走这里 |
 | 2 | 环境变量 `REPO` | 兼容其它脚本入口 |
 | 3 | 终端输入 | 独立运行且没有参数时使用 |
 
 - 输入可以是文件，也可以是目录。
 - 相对路径会按当前工作目录转换。
-- `~/xxx` 会展开为当前用户家目录。
-- 如果目标不存在但父目录存在，脚本仍会给出可定位的绝对地址。
+- `~/xxx` 会展开为当前用户家目录；拖入路径的 Shell 转义安全解码，不执行输入内容。
+- 每次只接受一个路径参数，多个参数会停止；包含空格的路径请整体加引号。
+- 日志保留路径原文，不把反斜杠解释为换行或制表符。
+- 已存在的符号链接文件会解析到真实目标；如果目标不存在但父目录存在，脚本仍会给出可定位的绝对地址。
 
 ## 四、风险说明 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 - 脚本不会执行 `git add`、`git commit`、`git push`、`rm`、`sudo` 等动作。
 - 脚本会写入系统临时目录日志，用于排查 SourceTree 输出窗口关闭后的历史结果。
-- 脚本会调用 `pbcopy` 写入 macOS 剪贴板；如果系统缺少 `pbcopy`，只打印结果并跳过复制。
+- 脚本会调用 `pbcopy` 写入 macOS 剪贴板；如果系统缺少 `pbcopy`，只打印结果并跳过复制。剪贴板仅包含路径原文，不附加换行。
 
 ## 五、流程图 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
@@ -92,5 +94,10 @@ graph TD
     H --> I[输出结果和日志位置]
     I --> J([结束])
 ```
+
+## 六、验证边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+
+- 已执行 macOS `zsh -n` 与隔离假命令回归，覆盖中文 / 空格 / 引号 / 反斜杠、家目录展开、参数唯一性、Sourcetree 无交互和终端确认拒绝。
+- 未打开真实 Terminal.app 或写入真实系统剪贴板；AppleScript / pbcopy 在回归中由假命令接收并检查参数。
 
 <a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>

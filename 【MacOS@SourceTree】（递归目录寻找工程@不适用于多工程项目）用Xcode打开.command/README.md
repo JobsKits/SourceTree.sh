@@ -4,85 +4,57 @@
 
 [toc]
 
+---
+
 ## 🔥 <font id=前言>前言</font>
 
-- 采用 Shell 脚本的原因：Shell 来自 [**macOS**](https://www.apple.com/macos/) 原生系统底层，虽然写法相对繁琐冗杂，但执行效率高，并且不需要额外介入 [**Ruby**](https://www.ruby-lang.org)、[**Python**](https://www.python.org) 等第三方运行环境，因此具备更好的移植性。
+为 [**Sourcetree**](https://www.sourcetreeapp.com/) 自定义动作选择明确的现有工程或工作区，用 [**Xcode**](https://developer.apple.com/xcode) 打开。默认仅执行打开；依赖安装使用独立 Pod Install 动作。
 
-- 本自述文件对应脚本：`【MacOS@SourceTree】（递归目录寻找工程@不适用于多工程项目）用Xcode打开.command`。
-- 脚本原始位置：`JobsGenesis@JobsCommand.SourceTree`。
-- 脚本定位：用于 SourceTree 自定义操作入口。
-- 脚本运行策略：兼容系统终端双击运行和 Sourcetree 自定义动作运行，按实际环境决定是否启用完整终端交互。
-- 普通安装 / 更新 / 升级交互统一为：**回车跳过，输入任意字符后回车执行**。
-- 危险操作不应该靠回车默认执行；涉及破坏性修改时，应单独输入 `YES` 确认。
+## 一、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-## 一、脚本用途 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+- Sourcetree 参数为 `"$REPO"`；也可以在终端传入唯一目录、`.xcodeproj` 或 `.xcworkspace`：
 
-| 项目 | 说明 |
-|---|---|
-| 脚本名称 | `【MacOS@SourceTree】（递归目录寻找工程@不适用于多工程项目）用Xcode打开.command` |
-| 所属目录 | `JobsGenesis@JobsCommand.SourceTree` |
-| 主要标签 | `SourceTree` |
-| 是否涉及 Homebrew | `是` |
-| 是否可能联网 | `否` |
-| 是否含高风险命令 | `是` |
-| zsh 静态检查 | `当前生成环境未执行，请在 macOS 上复核` |
+  ```shell
+  './【MacOS@SourceTree】（递归目录寻找工程@不适用于多工程项目）用Xcode打开.command' '/path/to/project'
+  ```
 
-## 二、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+- 终端先展示源码内置自述，按回车继续，`Ctrl+C` 取消；Sourcetree 实际发起时无交互，输出纯文本。
+- 参数优先于 `REPO`。终端无参数默认当前目录，Sourcetree 缺目标时停止。多个参数会停止，请把含空格路径整体加引号。
+- 不以相对脚本路径或无 TTY 判断 Sourcetree；非 Sourcetree 且没有可交互输入时停止。
 
-推荐双击 `.command` 运行。终端方式如下：
+## 二、扫描与选择 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-```shell
-chmod +x './【MacOS@SourceTree】（递归目录寻找工程@不适用于多工程项目）用Xcode打开.command'
-'./【MacOS@SourceTree】（递归目录寻找工程@不适用于多工程项目）用Xcode打开.command'
-```
+递归扫描目标目录；剪枝 `.git`、`Pods`、`.build`、`.dart_tool`、`build`、`DerivedData`、`node_modules`、`vendor`、`third_party`、`ManualBy*Pods@Pods`、`PodsManual`，不进入工程包和 workspace 包。
 
-脚本启动后会先显示本 README，并等待回车继续，避免误触执行。
+1、明确传入 `.xcodeproj` / `.xcworkspace` 时直接使用；扫描工程时排除 `Pods.xcodeproj`。NUL 分隔保留中文、空格及路径中的换行。
 
-## 三、脚本运行策略 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+2、默认优先目标目录中与目录同名的 workspace，其次唯一顶层 workspace；同名 workspace 可汇集多个工程，无须单独猜测工程。
 
-- 脚本使用 `# shell: zsh` 和 `main "$@"` 统一收口，先展示自述说明，再进入真实业务逻辑。
-- 系统终端双击运行时，脚本保持完整终端体验：可清屏、可彩色输出、可等待用户回车确认。
-- Sourcetree 自定义动作运行时，脚本会识别瘦身环境，自动跳过 `clear` 和回车等待，并关闭 ANSI 彩色码，避免日志里出现 ANSI 转义码。
-- Xcode 打开逻辑优先打开选中工程同目录下与 `.xcodeproj` 同名的 `.xcworkspace`；默认不在打开前执行 `xcodebuild` SwiftPM 解析，避免 Swift 工程在 SourceTree 调用时被阻塞。
-- 递归查找只跳过通用缓存、依赖和构建目录，例如 `.git`、`Pods`、`.build`、`.dart_tool`、`build`、`DerivedData`、`node_modules`、`vendor`、`third_party`；不把某个具体项目的私有目录名写死进脚本。
-- 脚本会兜底解析真实脚本目录，确保 Sourcetree 只传脚本名时仍能读取同目录 `README.md`。
-- 终端输出和日志同步落盘；排查时优先查看 README 中声明的 `$TMPDIR/脚本名.log`。
+3、没有顶层 workspace 时，工程必须唯一。唯一工程旁有同名 workspace 时使用它；否则只接受唯一邻接 workspace。多个工程或多个可选 workspace 时列出候选并返回 `2`，请传入明确目标。
 
-## 四、Homebrew 标准 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+4、存在 `Podfile` 但没有 workspace 时直接打开 `.xcodeproj` 并提示依赖入口；不会为了打开工程运行 `pod install`。
 
-若脚本涉及 Homebrew，统一遵循下面的健康标准：
+## 三、可选配置 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-- 自动识别 `arm64` / `x86_64`。
-- Apple Silicon 优先使用 `$(brew --prefix)/bin/brew`。
-- Intel 优先使用 `$(brew --prefix)/bin/brew`。
-- 自动把 `brew shellenv` 写入当前 shell 对应配置文件。
-- 当前会话立即 `eval "$({brew_bin} shellenv)"` 生效。
-- 已安装时不强制升级，而是询问：**回车跳过，输入任意字符后回车升级**。
-- 健康更新顺序为：`brew update` → `brew upgrade` → `brew cleanup` → `brew doctor` → `brew -v`。
+| 变量 | 默认 | 行为 |
+|---|---|---|
+| `FORCE_XCODEPROJ` | `0` | `1` 时扫描阶段只选择唯一工程；明确传入目标仍按该目标打开 |
+| `RESOLVE_SWIFTPM_BEFORE_OPEN` | `0` | `1` 才在打开前显式解析 [**SwiftPM**](https://www.swift.org/documentation/package-manager/) 依赖 |
+| `XCODE_SCHEME` | 未设置 | 显式解析时可传入 Scheme；未设置时交给 xcodebuild |
 
-## 五、注意事项 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+- 默认只要求 macOS `open`，无需 CocoaPods、Python 或命令行构建环境。
+- 启用 SwiftPM 解析时，先验证 `xcodebuild -version`，解析命令失败则停止；解析可能联网并修改项目依赖解析结果。
+- 不移除全局隔离属性，不扫描或改写其它项目的 SwiftPM / DerivedData 缓存。
 
-- 我没有在生成阶段执行脚本里的 macOS 专属命令，例如 `brew`、`pod`、`flutter`、`xcodebuild`、`osascript`、`sudo`、模拟器控制等。
-- 首次运行前建议先阅读本 README，再执行脚本。
-- 如果脚本涉及工程目录，请确认当前目录或拖入路径正确。
-- 如果脚本涉及 Git / CocoaPods / Flutter 依赖更新，建议先提交或备份本地改动。
-- 运行日志默认写入：`$TMPDIR/【MacOS@SourceTree】（递归目录寻找工程@不适用于多工程项目）用Xcode打开.log`。
+## 四、日志与退出码 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-## 六、流程图 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+- 系统临时目录中的 `【MacOS@SourceTree】（递归目录寻找工程@不适用于多工程项目）用Xcode打开.log` 确认后保存自述摘要、候选、选中目标和外部命令输出；取消前不清空旧日志。
+- 无目标或候选歧义返回 `2`；打开或显式解析失败保留实际命令退出码，不显示操作成功。
+- Sourcetree / 非彩色环境输出纯文本；参数中的引号、反斜杠与空格按原文传递，不拼接为 Shell 命令。
 
-```mermaid
-graph TD
-    A([开始]) --> B[显示 README 并等待回车]
-    B --> C[初始化脚本路径与日志]
-    C --> D{是否涉及 Homebrew 或依赖工具}
-    D --> |是| E[执行标准自检 / 可选升级]
-    D --> |否| F[进入业务逻辑]
-    E --> F[进入业务逻辑]
-    F --> G{是否存在危险操作}
-    G --> |是| H[要求明确确认]
-    G --> |否| I[执行任务]
-    H --> I[执行任务]
-    I --> J([结束])
-```
+## 五、验证边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+
+- 已执行真实 macOS `zsh -n` 与临时目录隔离回归，覆盖唯一目标、同名 workspace、工作区独立存在、多工程拒绝、路径特殊字符、依赖目录剪枝及打开失败。
+- 未启动真实 Xcode，未运行真实 `pod install` 或 `xcodebuild`；GUI 加载和显式解析的真实结果需在实际工程中确认。
 
 <a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>

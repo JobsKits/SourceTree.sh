@@ -98,14 +98,18 @@ git for-each-ref --format='%(refname) %(objectname)' refs/remotes/origin/
 - 自定义 refspec、服务器拒绝、远端服务故障。
 - Pull 的 merge / rebase 冲突、本地分支分叉或工作区冲突。
 
-只有 Fetch 输出同时明确指向 `refs/remotes/...` 或 `logs/refs/remotes/...`，并命中 `Not a directory`、`Is a directory`、`exists; cannot create`、`cannot create ... directory` 等路径冲突特征时，F02–F05 才会启动。
+F01 会照常使用仓库既有 Fetch 配置；只有标准 `refs/heads/* → refs/remotes/<remote>/*` 映射才允许进入额外元数据修复。包含单分支映射、负向规则或其它自定义 refspec 时，保留原始错误并停止。
+
+Fetch 输出明确指向 `refs/remotes/...` 或 `logs/refs/remotes/...`，并命中 `Not a directory`、`Is a directory`、`exists; cannot create` 等路径冲突特征时，脚本提取错误目标分支。Git 仅输出 `! ... -> <remote>/<branch> (unable to update local ref)` 时也会严格解析该目标；每个目标必须仍存在于远端，并在其 loose ref/reflog 上找到真实的前缀文件或同名目录阻塞，才允许启动 F02–F05。一般权限、锁或其它更新失败不会仅凭这条简略错误进入元数据修复。
 
 ## 三、逐项试验并解锁的执行流程 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 ```mermaid
 flowchart TD
   A["F01 git fetch --prune"] -->|成功| Z["Fetch 已解锁，停止"]
-  A -->|受支持的引用路径冲突| B["读取远端真实分支并提取错误分支"]
+  A -->|受支持的引用路径冲突| V["验证标准 fetch 映射"]
+  V -->|通过| B["读取远端真实分支并提取错误分支"]
+  V -->|自定义映射| X
   A -->|其它错误| X["保留原始错误并停止"]
   B --> C["F02 remote prune"]
   C -->|复试成功| Z
@@ -120,11 +124,11 @@ flowchart TD
 
 安全顺序：
 
-1. F01 永远先运行；普通 Fetch 能成功时不创建备份目录。
-2. F01 失败后，通过 `git ls-remote --heads` 读取远端真实分支，不能只相信本地缓存。
-3. 每次只使用最近一次 Fetch 错误明确点名的目标分支。
-4. F02–F05 每产生一次实际修复就立即 Fetch；成功后剩余场景函数只返回，不再扫描或移动元数据。
-5. 5 个场景全部未解锁时返回非零状态，已经移动的对象仍保留在备份区，不自动删除。
+1、F01 永远先运行；普通 Fetch 能成功时不创建备份目录。
+2、F01 失败后，通过 `git ls-remote --heads` 读取远端真实分支，不能只相信本地缓存。
+3、每次只使用最近一次 Fetch 错误明确点名的目标分支。
+4、F02–F05 每产生一次实际修复就立即 Fetch；成功后剩余场景函数只返回，不再扫描或移动元数据。
+5、5 个场景全部未解锁时返回非零状态，已经移动的对象仍保留在备份区，不自动删除。
 
 备份目录位于目标仓库的 Git 元数据内：
 
@@ -138,10 +142,10 @@ flowchart TD
 
 ### 4.1、Sourcetree 自定义动作 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-1. 在 Sourcetree 中选中目标仓库。
-2. 运行自定义动作 `📥修复Git无法Fetch`。
-3. 脚本使用 `$REPO` 识别仓库，默认处理 `origin`。
-4. Sourcetree 模式不等待回车；输出窗口会显示 F01–F05 的原因、是否命中、每次 Fetch 复试和最终结果。
+1、在 Sourcetree 中选中目标仓库。
+2、运行自定义动作 `📥修复Git无法Fetch`。
+3、脚本使用 `$REPO` 识别仓库，默认处理 `origin`。
+4、Sourcetree 模式不等待回车；输出窗口会显示 F01–F05 的原因、是否命中、每次 Fetch 复试和最终结果。
 
 ### 4.2、终端独立运行 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
@@ -157,7 +161,7 @@ flowchart TD
 './【MacOS@SourceTree】📥修复Git无法Fetch.command' '/path/to/repository' 'upstream'
 ```
 
-终端模式会先打印内置自述；按回车确认后才初始化日志并执行 Fetch，按 `Ctrl+C` 可取消。
+终端模式会先打印内置自述；按回车确认后才初始化日志并执行 Fetch，按 `Ctrl+C` 可取消。参数或相对脚本路径不代表 Sourcetree 身份；无法交互或确认读取失败时直接停止。
 
 ## 五、执行后核对与手工恢复边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
@@ -171,11 +175,11 @@ git status --short --branch
 
 验收重点：
 
-1. 最后一次 `git fetch --prune <remote>` 返回 0；这是脚本的真正解锁判据。
-2. `git for-each-ref` 能同时读取 packed 与 loose 的远端跟踪引用。
-3. `git remote show <remote>` 不再报告本次已处理的 stale 路径。
-4. 当前本地分支、索引和工作区没有被脚本改写；`git status` 仅用于复核，不要求仓库必须干净。
-5. 日志记录的备份位于真实 gitdir 下的 `jobs-ref-conflict-backups`，不是固定假设的仓库根目录 `.git`。
+1、最后一次 `git fetch --prune <remote>` 返回 0；这是脚本的真正解锁判据。
+2、`git for-each-ref` 能同时读取 packed 与 loose 的远端跟踪引用。
+3、`git remote show <remote>` 不再报告本次已处理的 stale 路径。
+4、当前本地分支、索引和工作区没有被脚本改写；`git status` 仅用于复核，不要求仓库必须干净。
+5、日志记录的备份位于真实 gitdir 下的 `jobs-ref-conflict-backups`，不是固定假设的仓库根目录 `.git`。
 
 脚本不会自动恢复备份。分支层级迁移时，备份项通常已经失效；大小写碰撞时，备份项也可能仍对应有效远端分支。若必须手工恢复，应先确认远端当前真值和 `packed-refs` 状态，再只处理日志记录的精确路径。不要删除整个 `refs/remotes/<remote>` 或 `logs/refs/remotes/<remote>` 来碰运气。
 
@@ -191,6 +195,8 @@ git status --short --branch
 - 最近一次 Fetch 如果转为网络、认证、并发锁等其它错误，脚本立即停止，不继续尝试下一种元数据修复。
 
 ## 七、日志文件 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+
+确认前只展示内置自述，不清空或写入旧日志；确认后才初始化本次日志。业务正文和路径按原文记录，反斜杠不会被解释为转义。
 
 运行日志写入系统临时目录中的：
 
@@ -221,5 +227,9 @@ git status --short --branch
 ### 8.5、为什么 Commit 和 Fetch 要保留为两个脚本？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 Commit 修复处理工作树、索引、`.gitmodules`、gitlink 和子模块；Fetch 修复处理远端跟踪引用与 reflog。两者影响边界和验收命令不同，分开更容易停止、追溯和验证。
+
+### 8.6、验证范围 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+
+脚本通过 `zsh -n`；隔离临时仓库验证旧 orphan reflog 导致的 `foo → foo/bar` 与 `foo/bar → foo` 双向阻塞、精确备份后 Fetch 成功、纯文本输出和自定义 refspec 拒绝搬移元数据。未访问用户远端或修改用户仓库。已在本机大小写不敏感卷的隔离仓库实际复现 `SaaS` 文件挡住 `saas/team`，验证 F03 收口有效引用、备份 reflog 后 Fetch 成功，并保留两条远端跟踪引用；一般 `unable to update local ref` 没有物理阻塞时停止。
 
 <a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>

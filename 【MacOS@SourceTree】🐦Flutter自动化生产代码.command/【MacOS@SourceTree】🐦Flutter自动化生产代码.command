@@ -1,8 +1,8 @@
 #!/bin/zsh
 # 脚本自述：
 # - 脚本名称：【MacOS@SourceTree】🐦Flutter自动化生产代码.command
-# - 核心用途：执行“🐦Flutter自动化生产代码”对应的移动端项目自动化任务。
-# - 影响范围：可能修改项目依赖、生成文件、构建产物或开发工具配置。
+# - 核心用途：按选定工程配置执行依赖准备、代码和资源生成。
+# - 影响范围：默认 clean 并拉取依赖；build_runner 可覆盖冲突的生成输出，任一步失败后立即停止。
 # - 运行提示：运行后会先打印内置自述；Sourcetree 模式无交互连续执行，终端模式确认后继续。
 # =====================================================================
 # Jobs 标准化脚本外壳
@@ -32,9 +32,10 @@ jobs_intro_style() {
     }
   '
 }
+# 按脚本源码路径和标准目录解析真实入口文件。
 resolve_script_path() {
-  local script_source="${BASH_SOURCE[0]:-${(%):-%x}}"
-  local script_name="$(basename -- "$0")"
+  local script_source="$SCRIPT_SOURCE"
+  local script_name="${SCRIPT_SOURCE:t}"
   local candidate=""
 
   for candidate in \
@@ -50,15 +51,15 @@ resolve_script_path() {
   printf "%s/%s\n" "$PWD" "$script_name"
 }
 
-SCRIPT_PATH="$(resolve_script_path)"
-SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd -P)"
-SCRIPT_BASENAME="$(basename "$SCRIPT_PATH" | sed 's/\.[^.]*$//')"
-LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"
+readonly SCRIPT_SOURCE="$0"
+SCRIPT_PATH=""
+SCRIPT_DIR=""
+SCRIPT_BASENAME=""
+LOG_FILE=""
+LOG_READY=0
 # 识别 Sourcetree 自定义动作的瘦身运行环境，系统终端双击运行不降级。
 is_sourcetree_runtime() {
   env | grep -Eqi '^SOURCETREE|^SOURCE_TREE' && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/SourceTree.command/"* ]] && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/Documents/Github/JobsGenesis/SourceTree.command/"* ]] && return 0
 
   local pid="$PPID"
   local command_name=""
@@ -81,53 +82,80 @@ strip_ansi_text() {
   perl -pe 's/\e\[[0-9;]*[[:alpha:]]//g'
 }
 # 根据运行入口和终端能力预先切换纯文本输出，避免 Sourcetree 显示 ANSI 转义码。
+# 在第一屏输出前确定纯文本模式，确认后再重复初始化输出环境。
 prepare_plain_output_context() {
-  [[ -n "${TERM:-}" ]] || export TERM="dumb"
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" || "${JOBS_PLAIN_OUTPUT:-0}" == "1" ]]; then
+  SOURCETREE_PLAIN_OUTPUT=0
+  PLAIN_OUTPUT=0
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == 1 || ! -t 1 || -z "${TERM:-}" || "${TERM:-}" == dumb || -n "${NO_COLOR+x}" || "${JOBS_PLAIN_OUTPUT:-0}" == 1 ]]; then
     SOURCETREE_PLAIN_OUTPUT=1
-    COLOR_ENABLED=0
-    export NO_COLOR="${NO_COLOR:-1}"
-    export FORCE_COLOR=0
-    export CLICOLOR="0"
-    export ANSI_COLORS_DISABLED="1"
-    export npm_config_color=false
+    PLAIN_OUTPUT=1
+    export NO_COLOR=1 FORCE_COLOR=0 CLICOLOR=0 ANSI_COLORS_DISABLED=1 npm_config_color=false
   fi
 }
+# 只准备自述所需路径和入口身份，尚不创建日志或执行工程操作。
+prepare_script_metadata() {
+  SCRIPT_PATH="$(resolve_script_path)"
+  SCRIPT_DIR="${SCRIPT_PATH:h}"
+  SCRIPT_BASENAME="${SCRIPT_PATH:t:r}"
+  LOG_FILE="${TMPDIR:-/tmp}/${SCRIPT_BASENAME}.log"
+  IS_SOURCETREE_RUNTIME=0
+  if is_sourcetree_runtime; then
+    IS_SOURCETREE_RUNTIME=1
+  fi
+  prepare_plain_output_context
+}
 # 按当前输出级别记录终端信息，并同步写入脚本日志。
-log() {
-  if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == "1" ]]; then
-    printf "%b\n" "$1" | strip_ansi_text | tee -a "$LOG_FILE"
+# 确认前仅显示文字，确认后将同一输出同步写入日志。
+write_log_output() {
+  if [[ "${LOG_READY:-0}" == 1 ]]; then
+    tee -a "$LOG_FILE"
   else
-    printf "%b\n" "$1" | tee -a "$LOG_FILE"
+    cat
   fi
 }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-color_echo()     { log "\033[1;32m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-info_echo()      { log "\033[1;34mℹ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-success_echo()   { log "\033[1;32m✔ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-warn_echo()      { log "\033[1;33m⚠ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-warm_echo()      { log "\033[1;33m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-note_echo()      { log "\033[1;35m➤ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-error_echo()     { log "\033[1;31m✖ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-err_echo()       { log "\033[1;31m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-debug_echo()     { log "\033[1;35m🐞 $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-highlight_echo() { log "\033[1;36m🔹 $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-gray_echo()      { log "\033[0;90m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-bold_echo()      { log "\033[1m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-underline_echo() { log "\033[4m$1\033[0m"; }
-# ============================= 标准工具函数 =============================
+# 保留路径和命令中的字面反斜杠，只过滤展示用 ANSI 控制码。
+log() {
+  if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == 1 ]]; then
+    printf '%s\n' "$1" | strip_ansi_text | write_log_output
+  else
+    printf '%s\n' "$1" | write_log_output
+  fi
+}
+# 颜色只作用于日志样式，正文始终按字面文字输出。
+color_log() {
+  if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == 1 ]]; then
+    log "$2"
+  else
+    log "$(printf '%b%s%b' "$1" "$2" '\033[0m')"
+  fi
+}
+# 输出一般完成信息。
+color_echo() { color_log '\033[1;32m' "$1"; }
+# 输出步骤与环境信息。
+info_echo() { color_log '\033[1;34m' "ℹ $1"; }
+# 输出已完成步骤。
+success_echo() { color_log '\033[1;32m' "✔ $1"; }
+# 输出需要关注的风险。
+warn_echo() { color_log '\033[1;33m' "⚠ $1"; }
+# 输出温馨提示。
+warm_echo() { color_log '\033[1;33m' "$1"; }
+# 输出操作说明。
+note_echo() { color_log '\033[1;35m' "➤ $1"; }
+# 输出带前缀的错误信息。
+error_echo() { color_log '\033[1;31m' "✖ $1"; }
+# 输出错误正文。
+err_echo() { color_log '\033[1;31m' "$1"; }
+# 输出诊断信息。
+debug_echo() { color_log '\033[1;35m' "🐞 $1"; }
+# 输出展示重点。
+highlight_echo() { color_log '\033[1;36m' "🔹 $1"; }
+# 输出次要信息。
+gray_echo() { color_log '\033[0;90m' "$1"; }
+# 输出加粗信息。
+bold_echo() { color_log '\033[1m' "$1"; }
+# 输出带下划线的信息。
+underline_echo() { color_log '\033[4m' "$1"; }
+# 识别当前 CPU 架构。
 get_cpu_arch() {
   [[ "$(uname -m)" == "arm64" ]] && echo "arm64" || echo "x86_64"
 }
@@ -273,12 +301,9 @@ brew_install_or_upgrade() {
   fi
 }
 # 展示脚本用途和影响范围，并在执行前等待用户确认。
-show_readme_and_wait() {
-  if typeset -f is_sourcetree_runtime >/dev/null 2>&1 && is_sourcetree_runtime; then
-    IS_SOURCETREE_RUNTIME=1
-  fi
-  prepare_plain_output_context
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
+show_script_intro_and_wait() {
+  prepare_script_metadata
+  if [[ -z "${NO_COLOR+x}" && "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" && "${PLAIN_OUTPUT:-0}" != 1 ]]; then
     clear
   fi
 
@@ -286,7 +311,8 @@ show_readme_and_wait() {
   note_echo "脚本名称：${SCRIPT_BASENAME}.command" | jobs_intro_style title
   note_echo "脚本路径：${SCRIPT_PATH}" | jobs_intro_style body
   note_echo "运行入口：兼容系统终端双击运行和 Sourcetree 自定义动作运行。" | jobs_intro_style body
-  note_echo "核心行为：按脚本名称执行对应的 SourceTree 效率动作，运行前会先展示这段内置自述，避免误触。" | jobs_intro_style title
+  note_echo "核心用途：按选定工程配置执行依赖准备、代码和资源生成。" | jobs_intro_style body
+  warn_echo "影响范围：默认 clean 并拉取依赖；build_runner 可覆盖冲突的生成输出，任一步失败后立即停止。" | jobs_intro_style body
   note_echo "环境策略：系统终端保留清屏、彩色输出和回车确认；Sourcetree 瘦身环境自动跳过清屏和等待，并输出纯文本日志。" | jobs_intro_style body
   note_echo "文档关系：同目录 README.md 只作为外部说明文档保留，运行时自述不读取、不拼接、不依赖 README.md。" | jobs_intro_style body
   warn_echo "继续前请确认 SourceTree 传入路径、当前仓库或拖入路径正确；按 Ctrl+C 可以取消。" | jobs_intro_style body
@@ -300,242 +326,280 @@ show_readme_and_wait() {
   fi
   if [[ ! -t 0 ]]; then
     error_echo "当前不是 Sourcetree，且没有可交互输入；请在终端中重新运行。"
-    return 1
+    exit 1
   fi
-  read "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..."
+  read -r "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..." _ || exit 1
 }
 # 执行已经拆分完成的独立业务步骤。
-run_original_logic() {
-  # ============================= 原脚本业务逻辑区 =============================
-  # ============================== 配置开关（可用环境变量覆盖） ==============================
-  WATCH="${WATCH:-0}"     # 交互时可 WATCH=1 开启 build_runner watch；非交互一律关闭
-  PROJECT_DIR="${PROJECT_DIR:-}"  # 指定项目根；不指定则自动探测
-
-  # ============================== 工具链选择（FVM 优先） ==============================
-  typeset -ga flutter_cmd dart_cmd
-  # 封装 _set_toolchain 对应的独立处理逻辑。
-  _set_toolchain() {
-    if command -v fvm >/dev/null 2>&1 && [[ -f ".fvmrc" || -d ".fvm" ]]; then
-      flutter_cmd=(fvm flutter)
-      dart_cmd=(fvm dart)
-    else
-      if ! command -v flutter >/dev/null 2>&1; then
-        echo "❌ 未找到 flutter 命令；请确认 PATH 或安装 FVM/Flutter。"; exit 1
-      fi
-      flutter_cmd=(flutter)
-      # 优先使用 Flutter 内置的 dart（避免系统 dart 版本不一致）
-      local dart_in_flutter
-      dart_in_flutter="$(dirname "$(command -v "${flutter_cmd[@]}")")/../cache/dart-sdk/bin/dart"
-      if [[ -x "$dart_in_flutter" ]]; then
-        dart_cmd=("$dart_in_flutter")
-      else
-        dart_cmd=(dart)
-      fi
+# 对输入只解除外层引号和拖拽转义，保留目录内原有引号。
+normalize_flutter_input() {
+  local input_value="$1"
+  if [[ -e "$input_value" ]]; then
+    print -r -- "$input_value"
+    return 0
+  fi
+  input_value="${input_value%$'\r'}"
+  input_value="${input_value%$'\n'}"
+  if [[ "$input_value" == \"*\" || "$input_value" == \'*\' ]]; then
+    input_value="${input_value[2,-2]}"
+  fi
+  [[ "$input_value" == '~/'* ]] && input_value="$HOME/${input_value#\~/}"
+  if [[ ! -e "$input_value" ]]; then
+    input_value="${(Q)input_value}"
+  fi
+  print -r -- "$input_value"
+}
+# 先向上定位，再在指定目录内查找；多个候选必须由用户明确路径。
+resolve_flutter_project() {
+  local base="$(normalize_flutter_input "${1:-${PROJECT_DIR:-${REPO:-$PWD}}}")"
+  local candidate="" current=""
+  local -a candidates=()
+  [[ -f "$base" ]] && base="${base:h}"
+  [[ -d "$base" ]] || { error_echo "工程路径不存在：$base"; return 1; }
+  base="$(cd "$base" && pwd -P)" || return 1
+  [[ "$base" != / && "$base" != "$HOME" ]] || { error_echo "拒绝扫描整个根目录或用户目录，请指定工程目录。"; return 1; }
+  current="$base"
+  while [[ "$current" != / ]]; do
+    if [[ -f "$current/pubspec.yaml" && -d "$current/lib" ]]; then
+      FLUTTER_ROOT="$current"
+      return 0
     fi
-  }
-  # ============================== TTY 检测 & 说明 ==============================
-  _is_tty() { [[ -t 0 && -t 1 ]]; }
-  # 封装 print_description 对应的独立处理逻辑。
-  print_description() {
-    cat <<'DESC'
-[目的]
-1) 确保你在 Flutter 项目根目录（同时存在 lib/ 与 pubspec.yaml）。
-2) 交互模式下会等待你按回车并支持拖拽路径；非交互模式自动探测项目根。
-3) 根据项目配置自动跑：pub get、build_runner、图标、Splash、l10n、FFI、Pigeon、Protobuf。
-
-[提示]
-- 非交互环境（如 SourceTree 自定义动作）不会等待输入，也不会进入 watch。
-- 使用 FVM 时自动用 FVM 的 flutter/dart；否则用系统 flutter 与其内置 dart。
-DESC
-  }
-  # 封装 wait_for_user_to_start 对应的独立处理逻辑。
-  wait_for_user_to_start() {
-    echo ""
-    read "?👉 按下回车开始执行（Ctrl+C 取消）"
-    echo ""
-  }
-  # ============================== 项目根判断 & 查找 ==============================
-  _is_flutter_root() { [[ -d "$1/lib" && -f "$1/pubspec.yaml" ]]; }
-  # 封装 _find_flutter_root_upwards 对应的独立处理逻辑。
-  _find_flutter_root_upwards() {
-    local d="$1"
-    while [[ "$d" != "/" && -n "$d" ]]; do
-      _is_flutter_root "$d" && { echo "$d"; return 0; }
-      d="${d:h}"
+    current="${current:h}"
+  done
+  while IFS= read -r -d '' candidate; do
+    [[ -d "${candidate:h}/lib" ]] && candidates+=("${candidate:h}")
+  done < <(find "$base" \( -type d \( -name .git -o -name node_modules -o -name Pods -o -name PodsManual -o -name 'ManualBy*Pods*' -o -name .dart_tool -o -name .fvm -o -name build -o -name DerivedData -o -name .import_backup -o -name vendor -o -name third_party -o -name ThirdParty \) -prune \) -o \( -type f -name pubspec.yaml -print0 \))
+  if (( ${#candidates[@]} != 1 )); then
+    error_echo "应找到唯一 Flutter 工程，当前候选数量：${#candidates[@]}。请直接传入工程根目录。"
+    for candidate in "${candidates[@]}"; do
+      gray_echo "候选：$candidate"
     done
     return 1
-  }
-  # 解析并返回后续流程需要的目标信息。
-  detect_and_cd_flutter_root() {
-    # 优先显式指定
-    if [[ -n "$PROJECT_DIR" ]]; then
-      if _is_flutter_root "$PROJECT_DIR"; then
-        cd "$PROJECT_DIR" || { echo "❌ 切换失败：$PROJECT_DIR"; exit 1; }
-        echo "✅ 已切换到 Flutter 项目目录：$PWD"
-        return 0
-      else
-        echo "❌ 指定的 PROJECT_DIR 不是 Flutter 根：$PROJECT_DIR"; exit 1
-      fi
-    fi
-
-    if _is_tty; then
-      # 交互模式：循环询问
-      while true; do
-        if _is_flutter_root "$PWD"; then
-          echo "✅ 已确认 Flutter 项目目录：$PWD"; return 0
-        fi
-        echo "❌ 当前目录不是 Flutter 根：$PWD（需有 lib/ 与 pubspec.yaml）"
-        echo "提示：可将项目根目录从 Finder 拖入后回车。"
-        read "input_path?👉 请输入 Flutter 项目路径（或直接回车重新检测当前目录）： "
-        [[ -z "$input_path" ]] && continue
-        # 去引号与空格转义
-        local p="${input_path//\\ / }"; p="${p%\"}"; p="${p#\"}"; p="${p%\'}"; p="${p#\'}"
-        [[ "$p" = ~* ]] && p="${p/#\~/$HOME}"
-        if _is_flutter_root "$p"; then
-          cd "$p" || { echo "❌ 切换失败：$p"; echo ""; continue; }
-          echo "✅ 已切换到 Flutter 项目目录：$PWD"; return 0
-        else
-          echo "❌ [$p] 不是合法 Flutter 根"; echo ""
-        fi
-      done
-    else
-      # 非交互模式：自动探测（当前目录 → git 根）
-      if _is_flutter_root "$PWD"; then
-        echo "✅ 非交互：使用当前目录作为 Flutter 根：$PWD"; return 0
-      fi
-      local git_root
-      git_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-      if [[ -n "$git_root" ]]; then
-        local found
-        found="$(_find_flutter_root_upwards "$git_root")" || true
-        if [[ -n "$found" ]]; then
-          cd "$found" || { echo "❌ 切换失败：$found"; exit 1; }
-          echo "✅ 非交互：已定位 Flutter 根：$PWD"; return 0
-        fi
-      fi
-      echo "❌ 非交互：未能自动定位 Flutter 根，请设置 PROJECT_DIR=路径 后重试。"; exit 1
-    fi
-  }
-  # ============================== 运行辅助 ==============================
-  run_step() {
-    local title="$1"; shift
-    echo "==> $title"
-    if "$@"; then
-      echo "✅ $title 完成"; echo ""
-    else
-      echo "⚠️  $title 失败（忽略继续）"; echo ""
-    fi
-  }
-  # 封装 exists 对应的独立处理逻辑。
-  exists() { command -v "$1" >/dev/null 2>&1; }
-  # 检查当前运行条件是否满足后续流程要求。
-  has_yaml_key() { grep -qE "^[[:space:]]*$1[[:space:]]*:" pubspec.yaml; }
-  # ============================== 图标产物汇总 ==============================
-  show_icon_summary() {
-    echo "—— 图标产物汇总 ——"
-
-    echo "【Android】👇"
-    ls -1 android/app/src/main/res/mipmap-*/ic_launcher.* || echo "（未找到 Android ic_launcher 图标）"
-
-    echo ""
-    echo "【iOS】👇"
-    ls -1 ios/Runner/Assets.xcassets/AppIcon.appiconset/*.png 2>/dev/null || echo "（未找到 iOS 图标 PNG）"
-
-    echo "—— 结束 ——"
-    echo ""
-  }
-  # ============================== 主流程 ==============================
-  main() {
-    _set_toolchain
-    if _is_tty; then clear; print_description; wait_for_user_to_start; else echo "ℹ 非交互模式（SourceTree 等）"; fi
-    detect_and_cd_flutter_root
-
-    # 1) 清理 & 依赖
-    run_step "flutter clean" "${flutter_cmd[@]}" clean
-    run_step "flutter pub get" "${flutter_cmd[@]}" pub get
-
-    # 2) build_runner（一次性；watch 仅交互+显式开启）
-    if grep -q 'build_runner' pubspec.yaml; then
-      run_step "build_runner build" "${dart_cmd[@]}" run build_runner build --delete-conflicting-outputs
-      if _is_tty && [[ "$WATCH" == "1" ]]; then
-        echo "==> build_runner watch（按 Ctrl+C 结束）"
-        exec "${dart_cmd[@]}" run build_runner watch --delete-conflicting-outputs
-      fi
-    fi
-
-    # 3) App Icon（flutter_launcher_icons）
-    if has_yaml_key "flutter_launcher_icons"; then
-      # 清残留，避免 v26 xml 搞事
-      find android/app/src/main/res -name 'ic_launcher*' -delete 2>/dev/null || true
-      run_step "生成 App Icon (flutter_launcher_icons)" \
-        "${flutter_cmd[@]}" pub run flutter_launcher_icons:main
-      # ✅ 同时打印 Android + iOS 产物
-      show_icon_summary
-    fi
-
-    # 4) Splash（flutter_native_splash）
-    if grep -q 'flutter_native_splash' pubspec.yaml; then
-      run_step "生成启动页 (flutter_native_splash)" \
-        "${flutter_cmd[@]}" pub run flutter_native_splash:create
-    fi
-
-    # 5) 官方 l10n
-    if [[ -d "lib/l10n" || -f "l10n.yaml" ]]; then
-      run_step "生成本地化 (flutter gen-l10n)" "${flutter_cmd[@]}" gen-l10n
-    fi
-
-    # 6) ffigen（需配置）
-    if grep -q 'ffigen' pubspec.yaml; then
-      run_step "FFI 绑定生成 (ffigen)" "${dart_cmd[@]}" run ffigen
-    fi
-
-    # 7) Pigeon（若有 pigeons 目录）
-    if [[ -d "pigeons" ]]; then
-      mkdir -p lib/pigeon
-      run_step "Pigeon 生成" "${dart_cmd[@]}" run pigeon \
-        --input pigeons/messages.dart \
-        --dart_out lib/pigeon/messages.g.dart
-    fi
-
-    # 8) Protobuf（若有 protos 且安装了 protoc）
-    if [[ -d "protos" ]] && exists protoc; then
-      mkdir -p lib/generated
-      run_step "Protobuf/gRPC 生成" protoc --dart_out=grpc:lib/generated -Iprotos protos/*.proto
-    fi
-
-    echo "🎯 全部完成。"
-  }
-
-  main "$@"
-
-  # =========================== 原脚本业务逻辑区结束 ===========================
+  fi
+  FLUTTER_ROOT="${candidates[1]}"
 }
-# 编排脚本的高层业务流程。
-# 初始化脚本运行环境，并集中承载原有的顶层执行逻辑。
-initialize_script_runtime() {
-  : > "$LOG_FILE"
-  is_sourcetree_runtime && IS_SOURCETREE_RUNTIME=1
-  prepare_plain_output_context
-  [[ -n "${TERM:-}" ]] || export TERM="dumb"
-  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" ]]; then
-    SOURCETREE_PLAIN_OUTPUT=1
-    export NO_COLOR="${NO_COLOR:-1}"
-    export FORCE_COLOR=0
-    export CLICOLOR="0"
-    export ANSI_COLORS_DISABLED="1"
-    export npm_config_color=false
+# 进入工程后再选择其固定 SDK，避免使用启动目录的 FVM 配置。
+choose_project_flutter() {
+  typeset -ga FLUTTER_CMD DART_CMD
+  cd "$FLUTTER_ROOT" || return 1
+  export PATH="$HOME/.pub-cache/bin:$HOME/.fvm/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+  if [[ -x "$FLUTTER_ROOT/.fvm/flutter_sdk/bin/flutter" ]]; then
+    FLUTTER_CMD=("$FLUTTER_ROOT/.fvm/flutter_sdk/bin/flutter")
+    DART_CMD=("$FLUTTER_ROOT/.fvm/flutter_sdk/bin/dart")
+  elif [[ -f .fvmrc || -f .fvm/fvm_config.json ]]; then
+    command -v fvm >/dev/null 2>&1 || { error_echo "工程固定了 FVM，但本地 SDK / fvm 不可用，请先恢复对应 SDK。"; return 1; }
+    FLUTTER_CMD=(fvm flutter)
+    DART_CMD=(fvm dart)
+  elif command -v flutter >/dev/null 2>&1; then
+    local flutter_executable="${commands[flutter]:A}"
+    FLUTTER_CMD=("$flutter_executable")
+    if [[ -x "${flutter_executable:h}/dart" ]]; then
+      DART_CMD=("${flutter_executable:h}/dart")
+    else
+      DART_CMD=(dart)
+    fi
+  else
+    error_echo "没有可用的 Flutter SDK，请检查 PATH 或项目 FVM 配置。"
+    return 1
+  fi
+  info_echo "工程目录：$FLUTTER_ROOT"
+  info_echo "Flutter 命令：${(j: :)FLUTTER_CMD}"
+}
+# 过滤展示输出，不将业务函数放进管道。
+flutter_command_output() {
+  if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == 1 ]]; then
+    strip_ansi_text
+  else
+    cat
   fi
 }
+# 管道失败与命令失败都必须向调用方传播。
+run_flutter_step() {
+  local title="$1"
+  shift
+  info_echo "开始：$title"
+  if "$@" 2>&1 | flutter_command_output | tee -a "$LOG_FILE"; then
+    success_echo "完成：$title"
+  else
+    local command_ec=$?
+    error_echo "$title 失败，退出码：$command_ec。后续步骤已停止。"
+    return "$command_ec"
+  fi
+}
+# 只匹配实际 YAML 键，注释中的包名不会触发生成器。
+has_generator_key() {
+  grep -Eq "^[[:space:]]*$1[[:space:]]*:" pubspec.yaml
+}
+# 对输入只解除外层引号和拖拽转义，保留目录内原有引号。
+normalize_flutter_input() {
+  local input_value="$1"
+  input_value="${input_value%$'\r'}"
+  input_value="${input_value%$'\n'}"
+  if [[ "$input_value" == \"*\" || "$input_value" == \'*\' ]]; then
+    input_value="${input_value[2,-2]}"
+  fi
+  [[ "$input_value" == '~/'* ]] && input_value="$HOME/${input_value#\~/}"
+  if [[ ! -e "$input_value" ]]; then
+    input_value="${(Q)input_value}"
+  fi
+  print -r -- "$input_value"
+}
+# 先向上定位，再在指定目录内查找；多个候选必须由用户明确路径。
+resolve_flutter_project() {
+  local base="$(normalize_flutter_input "${1:-${PROJECT_DIR:-${REPO:-$PWD}}}")"
+  local candidate="" current=""
+  local -a candidates=()
+  [[ -f "$base" ]] && base="${base:h}"
+  [[ -d "$base" ]] || { error_echo "工程路径不存在：$base"; return 1; }
+  base="$(cd "$base" && pwd -P)" || return 1
+  [[ "$base" != / && "$base" != "$HOME" ]] || { error_echo "拒绝扫描整个根目录或用户目录，请指定工程目录。"; return 1; }
+  current="$base"
+  while [[ "$current" != / ]]; do
+    if [[ -f "$current/pubspec.yaml" && -d "$current/lib" ]]; then
+      FLUTTER_ROOT="$current"
+      return 0
+    fi
+    current="${current:h}"
+  done
+  while IFS= read -r -d '' candidate; do
+    [[ -d "${candidate:h}/lib" ]] && candidates+=("${candidate:h}")
+  done < <(find "$base" \( -type d \( -name .git -o -name node_modules -o -name Pods -o -name PodsManual -o -name 'ManualBy*Pods*' -o -name .dart_tool -o -name .fvm -o -name build -o -name DerivedData -o -name .import_backup -o -name vendor -o -name third_party -o -name ThirdParty \) -prune \) -o \( -type f -name pubspec.yaml -print0 \))
+  if (( ${#candidates[@]} != 1 )); then
+    error_echo "应找到唯一 Flutter 工程，当前候选数量：${#candidates[@]}。请直接传入工程根目录。"
+    for candidate in "${candidates[@]}"; do
+      gray_echo "候选：$candidate"
+    done
+    return 1
+  fi
+  FLUTTER_ROOT="${candidates[1]}"
+}
+# 进入工程后再选择其固定 SDK，避免使用启动目录的 FVM 配置。
+choose_project_flutter() {
+  typeset -ga FLUTTER_CMD DART_CMD
+  cd "$FLUTTER_ROOT" || return 1
+  export PATH="$HOME/.pub-cache/bin:$HOME/.fvm/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+  if [[ -x "$FLUTTER_ROOT/.fvm/flutter_sdk/bin/flutter" ]]; then
+    FLUTTER_CMD=("$FLUTTER_ROOT/.fvm/flutter_sdk/bin/flutter")
+    DART_CMD=("$FLUTTER_ROOT/.fvm/flutter_sdk/bin/dart")
+  elif [[ -f .fvmrc || -f .fvm/fvm_config.json ]]; then
+    command -v fvm >/dev/null 2>&1 || { error_echo "工程固定了 FVM，但本地 SDK / fvm 不可用，请先恢复对应 SDK。"; return 1; }
+    FLUTTER_CMD=(fvm flutter)
+    DART_CMD=(fvm dart)
+  elif command -v flutter >/dev/null 2>&1; then
+    local flutter_executable="${commands[flutter]:A}"
+    FLUTTER_CMD=("$flutter_executable")
+    if [[ -x "${flutter_executable:h}/dart" ]]; then
+      DART_CMD=("${flutter_executable:h}/dart")
+    else
+      DART_CMD=(dart)
+    fi
+  else
+    error_echo "没有可用的 Flutter SDK，请检查 PATH 或项目 FVM 配置。"
+    return 1
+  fi
+  info_echo "工程目录：$FLUTTER_ROOT"
+  info_echo "Flutter 命令：${(j: :)FLUTTER_CMD}"
+}
+# 过滤展示输出，不将业务函数放进管道。
+flutter_command_output() {
+  if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == 1 ]]; then
+    strip_ansi_text
+  else
+    cat
+  fi
+}
+# 管道失败与命令失败都必须向调用方传播。
+run_flutter_step() {
+  local title="$1"
+  shift
+  info_echo "开始：$title"
+  if "$@" 2>&1 | flutter_command_output | tee -a "$LOG_FILE"; then
+    success_echo "完成：$title"
+  else
+    local command_ec=$?
+    error_echo "$title 失败，退出码：$command_ec。后续步骤已停止。"
+    return "$command_ec"
+  fi
+}
+# 只匹配实际 YAML 键，注释中的包名不会触发生成器。
+has_generator_key() {
+  grep -Eq "^[[:space:]]*$1[[:space:]]*:" pubspec.yaml
+}
+# 按已校验的工程和参数执行业务，逐步传播失败状态。
+run_original_logic() {
+  setopt NO_NOMATCH PIPE_FAIL
+  (( $# <= 1 )) || { error_echo "用法：脚本 [Flutter 工程目录]"; return 2; }
+  resolve_flutter_project "${1:-}" || return $?
+  choose_project_flutter || return $?
+  command -v "${DART_CMD[1]}" >/dev/null 2>&1 || { error_echo "未找到与 Flutter 对应的 Dart 命令。"; return 1; }
+  if [[ "${CLEAN_FIRST:-1}" == 1 ]]; then
+    run_flutter_step 'flutter clean' "${FLUTTER_CMD[@]}" clean || return $?
+  fi
+  run_flutter_step 'flutter pub get' "${FLUTTER_CMD[@]}" pub get || return $?
+  if has_generator_key build_runner; then
+    run_flutter_step 'build_runner build' "${DART_CMD[@]}" run build_runner build --delete-conflicting-outputs || return $?
+  fi
+  if has_generator_key flutter_launcher_icons; then
+    run_flutter_step '生成 App Icon' "${DART_CMD[@]}" run flutter_launcher_icons || return $?
+  fi
+  if has_generator_key flutter_native_splash; then
+    run_flutter_step '生成启动页' "${DART_CMD[@]}" run flutter_native_splash:create || return $?
+  fi
+  if [[ -d lib/l10n || -f l10n.yaml ]]; then
+    run_flutter_step 'flutter gen-l10n' "${FLUTTER_CMD[@]}" gen-l10n || return $?
+  fi
+  if has_generator_key ffigen; then
+    run_flutter_step '生成 FFI 绑定' "${DART_CMD[@]}" run ffigen || return $?
+  fi
+  if [[ -d pigeons ]]; then
+    [[ -f pigeons/messages.dart ]] || { error_echo "缺少 pigeons/messages.dart，无法按约定生成 Pigeon。"; return 1; }
+    mkdir -p lib/pigeon || return $?
+    run_flutter_step '生成 Pigeon' "${DART_CMD[@]}" run pigeon --input pigeons/messages.dart --dart_out lib/pigeon/messages.g.dart || return $?
+  fi
+  if [[ -d protos ]]; then
+    local -a proto_inputs=(protos/*.proto(N))
+    (( ${#proto_inputs[@]} > 0 )) || { error_echo "protos 中没有 .proto 文件。"; return 1; }
+    command -v protoc >/dev/null 2>&1 || { error_echo "Protobuf 生成需要 protoc。"; return 1; }
+    command -v protoc-gen-dart >/dev/null 2>&1 || { error_echo "Protobuf 生成需要 protoc-gen-dart，请先安装项目要求的插件。"; return 1; }
+    mkdir -p lib/generated || return $?
+    run_flutter_step '生成 Protobuf / gRPC' protoc --dart_out=grpc:lib/generated -Iprotos "${proto_inputs[@]}" || return $?
+  fi
+  if [[ "${WATCH:-0}" == 1 ]] && has_generator_key build_runner; then
+    if [[ "${IS_SOURCETREE_RUNTIME:-0}" == 1 || ! -t 0 || ! -t 1 ]]; then
+      warn_echo 'Sourcetree / 非交互入口已跳过持续 watch。'
+    else
+      run_flutter_step 'build_runner watch（Ctrl+C 结束）' "${DART_CMD[@]}" run build_runner watch --delete-conflicting-outputs || return $?
+    fi
+  fi
+  success_echo '所有已启用的生成步骤完成。'
+}
+
+# 初始化 Shell 和输出上下文。
+# 在用户确认后初始化 Shell、当前进程 PATH 和日志。
+initialize_script_runtime() {
+  setopt NO_NOMATCH PIPE_FAIL
+  export PATH="$HOME/.pub-cache/bin:$HOME/.fvm/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+  prepare_plain_output_context
+  : > "$LOG_FILE" || { print -r -- "日志不可写：$LOG_FILE" >&2; exit 1; }
+  LOG_READY=1
+}
 # 编排脚本的高层业务流程。
+# 业务失败时立即结束入口，避免后续成功提示掩盖错误。
+run_checked_business() {
+  local business_ec=0
+  if run_original_logic "$@"; then
+    success_echo "脚本执行结束。日志：$LOG_FILE"
+  else
+    business_ec=$?
+    error_echo "脚本执行失败，退出码：$business_ec。日志：$LOG_FILE"
+    exit "$business_ec"
+  fi
+}
+# 先完成自述确认，再准备运行环境并执行工程业务。
 main() {
-  # 展示脚本内置自述，并按运行入口完成防误触确认。
-  show_readme_and_wait
-  # 初始化 Shell 选项、日志、依赖和入口运行状态。
-  initialize_script_runtime
-  # 执行 run_original_logic 对应的核心业务步骤。
-  run_original_logic "$@"
-  # 输出脚本执行结果、摘要和日志位置。
-  success_echo "脚本执行结束。日志：$LOG_FILE"
+  show_script_intro_and_wait # 打印内置自述，终端模式确认后继续。
+  initialize_script_runtime # 确认后初始化 Shell、PATH 和日志。
+  run_checked_business "$@" # 执行业务，失败保留退出码并终止后续步骤。
 }
 
 main "$@"

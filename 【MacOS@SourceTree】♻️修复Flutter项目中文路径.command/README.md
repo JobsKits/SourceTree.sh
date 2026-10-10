@@ -4,83 +4,70 @@
 
 [toc]
 
+---
+
 ## 🔥 <font id=前言>前言</font>
 
-- 采用 Shell 脚本的原因：Shell 来自 [**macOS**](https://www.apple.com/macos/) 原生系统底层，虽然写法相对繁琐冗杂，但执行效率高，并且不需要额外介入 [**Ruby**](https://www.ruby-lang.org)、[**Python**](https://www.python.org) 等第三方运行环境，因此具备更好的移植性。
+这是 [**Sourcetree**](https://www.sourcetreeapp.com/) 的 [**Flutter**](https://flutter.dev/) 工程动作。将自有 Dart 文件中 `package:` 指令内的 URI 编码 Unicode 路径还原为 UTF-8 字符，并保存原始文件。
 
-- 本自述文件对应脚本：`【MacOS@SourceTree】♻️修复Flutter项目中文路径.command`。
-- 脚本原始位置：`JobsGenesis@JobsCommand.SourceTree`。
-- 脚本定位：用于 SourceTree 自定义操作入口。
-- 脚本运行策略：兼容系统终端双击运行和 Sourcetree 自定义动作运行，按实际环境决定是否启用完整终端交互。
-- 普通安装 / 更新 / 升级交互统一为：**回车跳过，输入任意字符后回车执行**。
-- 危险操作不应该靠回车默认执行；涉及破坏性修改时，应单独输入 `YES` 确认。
+## 一、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-## 一、脚本用途 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
-
-| 项目 | 说明 |
-|---|---|
-| 脚本名称 | `【MacOS@SourceTree】♻️修复Flutter项目中文路径.command` |
-| 所属目录 | `JobsGenesis@JobsCommand.SourceTree` |
-| 主要标签 | `SourceTree` |
-| 是否涉及 Homebrew | `是` |
-| 是否可能联网 | `否` |
-| 是否含高风险命令 | `否` |
-| zsh 静态检查 | `当前生成环境未执行，请在 macOS 上复核` |
-
-## 二、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
-
-推荐双击 `.command` 运行。终端方式如下：
+在 Sourcetree 已安装的动作中传入 `$REPO`。系统终端独立运行先打印脚本内置自述，按回车继续，按 `Ctrl+C` 取消；运行时不读取 README。Sourcetree 身份通过环境变量或父进程确认，非 TTY 本身不会绕过确认。
 
 ```shell
-chmod +x './【MacOS@SourceTree】♻️修复Flutter项目中文路径.command'
-'./【MacOS@SourceTree】♻️修复Flutter项目中文路径.command'
+zsh "./【MacOS@SourceTree】♻️修复Flutter项目中文路径.command" "<工程目录>"
 ```
 
-脚本启动后会先显示本 README，并等待回车继续，避免误触执行。
+接受一个可选工程路径；支持直接工程、工程内文件和唯一子工程。
 
-## 三、脚本运行策略 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+自述与确认阶段只输出到屏幕；确认后才初始化日志。非 Sourcetree 且没有交互输入时直接退出，不执行工程业务。
 
-- 脚本使用 `# shell: zsh` 和 `main "$@"` 统一收口，先展示自述说明，再进入真实业务逻辑。
-- 系统终端双击运行时，脚本保持完整终端体验：可清屏、可彩色输出、可等待用户回车确认。
-- Sourcetree 自定义动作运行时，脚本会识别瘦身环境，自动跳过 `clear` 和回车等待，并关闭 ANSI 彩色码，避免日志里出现 ANSI 转义码。
-- 脚本会兜底解析真实脚本目录，确保 Sourcetree 只传脚本名时仍能读取同目录 `README.md`。
-- 终端输出和日志同步落盘；排查时优先查看 README 中声明的 `$TMPDIR/脚本名.log`。
+## 二、执行前检查 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-## 四、Homebrew 标准 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+使用 [**macOS**](https://www.apple.com/macos/) 自带 [**Perl**](https://www.perl.org/) 与核心 `Encode` 模块，不依赖第三方 URI 模块或 Python。
 
-若脚本涉及 Homebrew，统一遵循下面的健康标准：
+路径支持中文、空格和拖拽外层引号。需要递归定位的工程动作会排除依赖、缓存和构建目录；多个工程候选时应直接指定目标。
 
-- 自动识别 `arm64` / `x86_64`。
-- Apple Silicon 优先使用 `$(brew --prefix)/bin/brew`。
-- Intel 优先使用 `$(brew --prefix)/bin/brew`。
-- 自动把 `brew shellenv` 写入当前 shell 对应配置文件。
-- 当前会话立即 `eval "$({brew_bin} shellenv)"` 生效。
-- 已安装时不强制升级，而是询问：**回车跳过，输入任意字符后回车升级**。
-- 健康更新顺序为：`brew update` → `brew upgrade` → `brew cleanup` → `brew doctor` → `brew -v`。
+## 三、实际执行流程 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-## 五、注意事项 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+整段解码连续 UTF-8 高位字节，避免逐字节解码造成中文替换字符。引号、斜杠和其他 ASCII 的百分号转义保持原样；无效 UTF-8 保持原样。只匹配以指令开头的行，不更改普通字符串或注释中的示例。
 
-- 我没有在生成阶段执行脚本里的 macOS 专属命令，例如 `brew`、`pod`、`flutter`、`xcodebuild`、`osascript`、`sudo`、模拟器控制等。
-- 首次运行前建议先阅读本 README，再执行脚本。
-- 如果脚本涉及工程目录，请确认当前目录或拖入路径正确。
-- 如果脚本涉及 Git / CocoaPods / Flutter 依赖更新，建议先提交或备份本地改动。
-- 运行日志默认写入：`$TMPDIR/【MacOS@SourceTree】♻️修复Flutter项目中文路径.log`。
+```shell
+# 仅处理 lib/、test/、integration_test/ 内的 .dart 文件
+# 支持单引号 / 双引号的 import、export、part package 指令
+```
 
-## 六、流程图 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## 四、风险与失败处理 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+
+修改范围限于三处源码目录。跳过生成文件、明显由其他作者创建的文件、Pods / vendor / third_party / 缓存 / 构建目录以及旧备份。原文件按相对路径存入工程 `.import_backup/时间戳_进程号/`，重复运行不会覆盖上一次备份。
+
+Sourcetree 不发起输入等待；无法安全确定目标或缺少必要条件时直接报错。外部命令失败返回非零状态，后续业务停止。脚本及外部输出在受限输出窗口使用纯文本。
+
+## 五、日志与产物 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+
+执行日志位于系统临时目录，文件名为 `【MacOS@SourceTree】♻️修复Flutter项目中文路径.log`。终端和 Sourcetree 都会打印实际日志位置。
+
+## 六、验证边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+
+已用隔离 Dart 夹具验证连续中文解码、单 / 双引号、import / export / part、无效 UTF-8 和 ASCII 转义保留、原文件备份、缓存与生成文件排除。
+
+已通过 `zsh -n` 静态语法检查。 入口已隔离验证非交互拒绝、确认前不创建日志、`NO_COLOR` 空值降级与业务失败退出码传播。隔离夹具验证没有运行真实 Flutter / Xcode 构建、安装、依赖清理或模拟器操作；真实工程的签名、网络和工具版本仍需按运行日志确认。
+
+## 七、流程图 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 ```mermaid
-graph TD
-    A([开始]) --> B[显示 README 并等待回车]
-    B --> C[初始化脚本路径与日志]
-    C --> D{是否涉及 Homebrew 或依赖工具}
-    D --> |是| E[执行标准自检 / 可选升级]
-    D --> |否| F[进入业务逻辑]
-    E --> F[进入业务逻辑]
-    F --> G{是否存在危险操作}
-    G --> |是| H[要求明确确认]
-    G --> |否| I[执行任务]
-    H --> I[执行任务]
-    I --> J([结束])
+flowchart TD
+    A[展示内置自述] --> B{是否 Sourcetree 动作}
+    B -->|是| C[无交互解析参数]
+    B -->|否| D[终端回车确认]
+    D --> C
+    C --> E[定位目标与检查条件]
+    E --> F{目标是否唯一且有效}
+    F -->|否| G[报错并退出]
+    F -->|是| H[顺序执行业务并记录日志]
+    H --> I{命令是否成功}
+    I -->|否| G
+    I -->|是| J[输出结果与日志位置]
 ```
 
 <a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>

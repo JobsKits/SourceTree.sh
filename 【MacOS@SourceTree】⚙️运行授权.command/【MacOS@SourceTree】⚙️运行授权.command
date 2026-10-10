@@ -1,14 +1,9 @@
 #!/bin/zsh
 # 脚本自述：
 # - 脚本名称：【MacOS@SourceTree】⚙️运行授权.command
-# - 核心用途：执行“⚙️运行授权”对应的自动化任务。
-# - 影响范围：可能修改当前项目、用户环境或脚本指定的目标。
-# - 运行提示：运行后会先打印内置自述；Sourcetree 模式无交互连续执行，终端模式确认后继续。
-# =====================================================================
-# Jobs 标准化脚本外壳
-# 说明：保留原脚本业务逻辑，补齐 README 防误触、彩色日志、zsh 入口、Homebrew 健康自检标准。
-# =====================================================================
-# Sourcetree 自定义动作可能只传脚本名，不传绝对路径；这里兜底找回真实脚本位置。
+# - 核心用途：对明确选定的 .command 文件添加用户执行权限。
+# - 影响范围：只修改目标入口权限并移除该文件的隔离属性；递归跳过缓存、第三方及生成目录。
+# - 运行提示：Sourcetree 无交互；终端先展示自述并按回车确认，Ctrl+C 取消。
 # 仅渲染自述：标题红色加粗，编号正文蓝色常规字重；非彩色终端输出纯文本。
 jobs_intro_style() {
   local intro_color=0
@@ -32,455 +27,186 @@ jobs_intro_style() {
     }
   '
 }
-resolve_script_path() {
-  local script_source="${BASH_SOURCE[0]:-${(%):-%x}}"
-  local script_name="$(basename -- "$0")"
-  local candidate=""
 
-  for candidate in \
-    "$script_source" \
-    "${PWD}/${script_source}" \
-    "${HOME}/SourceTree.command/${script_name}/${script_name}" \
-    "${HOME}/Documents/Github/JobsGenesis/SourceTree.command/${script_name}/${script_name}"; do
-    [[ -n "$candidate" && -f "$candidate" ]] || continue
-    (cd "$(dirname "$candidate")" 2>/dev/null && printf "%s/%s\n" "$(pwd -P)" "$(basename "$candidate")")
-    return 0
-  done
-
-  printf "%s/%s\n" "$PWD" "$script_name"
-}
-
-SCRIPT_PATH="$(resolve_script_path)"
-SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd -P)"
-SCRIPT_BASENAME="$(basename "$SCRIPT_PATH" | sed 's/\.[^.]*$//')"
-LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"
-# 识别 Sourcetree 自定义动作的瘦身运行环境，系统终端双击运行不降级。
+SCRIPT_SOURCE="$0"
+SCRIPT_PATH=""
+SCRIPT_DIR=""
+SCRIPT_BASENAME=""
+LOG_FILE=""
+LOG_READY=0
+IS_SOURCETREE_RUNTIME=0
+PLAIN_OUTPUT=0
+# 仅根据显式环境或父进程链识别 Sourcetree，普通相对路径调用仍需确认。
 is_sourcetree_runtime() {
-  env | grep -Eqi '^SOURCETREE|^SOURCE_TREE' && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/SourceTree.command/"* ]] && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/Documents/Github/JobsGenesis/SourceTree.command/"* ]] && return 0
-
-  local pid="$PPID"
-  local command_name=""
-  local guard=0
-  while [[ -n "$pid" && "$pid" != "0" && "$guard" -lt 8 ]]; do
-    command_name="$(ps -o comm= -p "$pid" 2>/dev/null || true)"
-    [[ "$command_name" == *SourceTree* || "$command_name" == *Sourcetree* ]] && return 0
-    pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
-    guard=$((guard + 1))
+  env | grep -Eqi '^(SOURCETREE|SOURCE_TREE)[^=]*=' && return 0
+  local process_id="$PPID" process_name="" depth=0
+  while [[ "$process_id" == <-> && "$process_id" -gt 1 && "$depth" -lt 8 ]]; do
+    process_name="$(ps -o comm= -p "$process_id" 2>/dev/null || true)"
+    [[ "$process_name" == *SourceTree* || "$process_name" == *Sourcetree* ]] && return 0
+    process_id="$(ps -o ppid= -p "$process_id" 2>/dev/null | tr -d ' ' || true)"
+    depth=$((depth + 1))
   done
-
   return 1
 }
-
-IS_SOURCETREE_RUNTIME=0
-
-SOURCETREE_PLAIN_OUTPUT=0
-# 封装 strip_ansi_text 对应的独立处理逻辑。
-strip_ansi_text() {
-  perl -pe 's/\e\[[0-9;]*[[:alpha:]]//g'
-}
-# 根据运行入口和终端能力预先切换纯文本输出，避免 Sourcetree 显示 ANSI 转义码。
-prepare_plain_output_context() {
-  [[ -n "${TERM:-}" ]] || export TERM="dumb"
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" || "${JOBS_PLAIN_OUTPUT:-0}" == "1" ]]; then
-    SOURCETREE_PLAIN_OUTPUT=1
-    COLOR_ENABLED=0
-    export NO_COLOR="${NO_COLOR:-1}"
-    export FORCE_COLOR=0
-    export CLICOLOR="0"
-    export ANSI_COLORS_DISABLED="1"
-    export npm_config_color=false
-  fi
-}
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-log() {
-  if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == "1" ]]; then
-    printf "%b\n" "$1" | strip_ansi_text | tee -a "$LOG_FILE"
-  else
-    printf "%b\n" "$1" | tee -a "$LOG_FILE"
-  fi
-}
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-color_echo()     { log "\033[1;32m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-info_echo()      { log "\033[1;34mℹ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-success_echo()   { log "\033[1;32m✔ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-warn_echo()      { log "\033[1;33m⚠ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-warm_echo()      { log "\033[1;33m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-note_echo()      { log "\033[1;35m➤ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-error_echo()     { log "\033[1;31m✖ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-err_echo()       { log "\033[1;31m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-debug_echo()     { log "\033[1;35m🐞 $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-highlight_echo() { log "\033[1;36m🔹 $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-gray_echo()      { log "\033[0;90m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-bold_echo()      { log "\033[1m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-underline_echo() { log "\033[4m$1\033[0m"; }
-# ============================= 标准工具函数 =============================
-get_cpu_arch() {
-  [[ "$(uname -m)" == "arm64" ]] && echo "arm64" || echo "x86_64"
-}
-# 封装 abs_path 对应的独立处理逻辑。
-abs_path() {
-  local p="$1"
-  [[ -z "$p" ]] && return 1
-  p="${p//\"/}"
-  [[ "$p" != "/" ]] && p="${p%/}"
-  if [[ -d "$p" ]]; then
-    (cd "$p" 2>/dev/null && pwd -P)
-  elif [[ -f "$p" ]]; then
-    (cd "${p:h}" 2>/dev/null && printf "%s/%s\n" "$(pwd -P)" "${p:t}")
-  else
-    return 1
-  fi
-}
-# 收集并校验用户输入，决定后续执行路径。
-ask_run() {
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
-    gray_echo "Sourcetree 连续执行模式已跳过当前可选交互。"
-    return 1
-  fi
-  echo ""
-  note_echo "👉 $1"
-  gray_echo "【回车=跳过，输入任意字符后回车=执行】"
-  local input=""
-  IFS= read -r "input?➤ "
-  [[ -n "$input" ]]
-}
-# 收集并校验用户输入，决定后续执行路径。
-confirm_yes() {
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
-    gray_echo "Sourcetree 连续执行模式已跳过当前可选交互。"
-    return 1
-  fi
-  echo ""
-  warn_echo "⚠ $1"
-  gray_echo "危险操作必须输入 YES 后回车；其它输入一律取消。"
-  local input=""
-  IFS= read -r "input?➤ "
-  [[ "$input" == "YES" ]]
-}
-# 封装 inject_shellenv_block 对应的独立处理逻辑。
-inject_shellenv_block() {
-  local profile_file="$1"
-  local shellenv_cmd="$2"
-  local header="# >>> Homebrew 环境变量 >>>"
-  [[ -z "$profile_file" || -z "$shellenv_cmd" ]] && { error_echo "缺少参数：inject_shellenv_block <profile_file> <shellenv_cmd>"; return 1; }
-  mkdir -p "$(dirname "$profile_file")"
-  touch "$profile_file"
-  if grep -Fq "$shellenv_cmd" "$profile_file" 2>/dev/null; then
-    info_echo "已存在 Homebrew shellenv：$profile_file"
-  elif grep -Fq "$header" "$profile_file" 2>/dev/null; then
-    info_echo "已存在 Homebrew 环境变量块：$profile_file"
-  else
-    {
-      echo ""
-      echo "$header"
-      echo "$shellenv_cmd"
-    } >> "$profile_file"
-    success_echo "已写入 Homebrew shellenv：$profile_file"
-  fi
-  eval "$shellenv_cmd" || true
-}
-# 封装 activate_homebrew_shellenv 对应的独立处理逻辑。
-activate_homebrew_shellenv() {
-  local arch="$(get_cpu_arch)"
-  local brew_bin=""
-  if command -v brew >/dev/null 2>&1; then
-    brew_bin="$(command -v brew)"
-  elif [[ "$arch" == "arm64" && -x "/opt/homebrew/bin/brew" ]]; then
-    brew_bin="/opt/homebrew/bin/brew"
-  elif [[ -x "/usr/local/bin/brew" ]]; then
-    brew_bin="/usr/local/bin/brew"
-  fi
-  [[ -z "$brew_bin" ]] && return 1
-
-  local shell_name="${SHELL##*/}"
-  local profile_file=""
-  case "$shell_name" in
-    zsh)  profile_file="$HOME/.zprofile" ;;
-    bash) profile_file="$HOME/.bash_profile" ;;
-    *)    profile_file="$HOME/.profile" ;;
-  esac
-  inject_shellenv_block "$profile_file" "eval \"\$(${brew_bin} shellenv)\""
-  eval "$(${brew_bin} shellenv)"
-}
-# 执行已经拆分完成的独立业务步骤。
-run_brew_health_update() {
-  info_echo "正在执行 Homebrew 健康更新..."
-  brew update  || { error_echo "brew update 失败"; return 1; }
-  brew upgrade || { error_echo "brew upgrade 失败"; return 1; }
-  brew cleanup || { error_echo "brew cleanup 失败"; return 1; }
-  brew doctor  || warn_echo "brew doctor 有警告，请按输出处理"
-  brew -v      || warn_echo "打印 brew 版本失败，可忽略"
-  success_echo "Homebrew 健康更新完成"
-}
-# 执行对应的环境配置或同步处理。
-install_homebrew() {
-  local arch="$(get_cpu_arch)"
-  local brew_bin=""
-
-  if ! command -v brew >/dev/null 2>&1 && [[ ! -x "/opt/homebrew/bin/brew" && ! -x "/usr/local/bin/brew" ]]; then
-    warn_echo "未检测到 Homebrew，准备按架构安装：$arch"
-    if [[ "$arch" == "arm64" ]]; then
-      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || { error_echo "Homebrew 安装失败（arm64）"; return 1; }
-      brew_bin="/opt/homebrew/bin/brew"
-    else
-      arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || { error_echo "Homebrew 安装失败（x86_64）"; return 1; }
-      brew_bin="/usr/local/bin/brew"
-    fi
-    success_echo "Homebrew 安装完成"
-    activate_homebrew_shellenv || true
-    return 0
-  fi
-
-  activate_homebrew_shellenv || true
-  info_echo "Homebrew 已安装。"
-  if ask_run "是否执行 Homebrew 更新 / 升级 / 清理 / doctor？"; then
-    run_brew_health_update
-  else
-    note_echo "已跳过 Homebrew 更新"
-  fi
-}
-# 封装 brew_install_or_upgrade 对应的独立处理逻辑。
-brew_install_or_upgrade() {
-  local formula="$1"
-  [[ -z "$formula" ]] && return 1
-  install_homebrew || return 1
-  if ! brew list --formula "$formula" >/dev/null 2>&1 && ! command -v "$formula" >/dev/null 2>&1; then
-    note_echo "未检测到 $formula，正在安装..."
-    brew install "$formula" || { error_echo "$formula 安装失败"; return 1; }
-    success_echo "$formula 安装完成"
-  else
-    info_echo "$formula 已安装。"
-    if ask_run "是否升级 $formula？"; then
-      brew upgrade "$formula" || warn_echo "$formula 可能已是最新或升级失败，请检查输出"
-      brew cleanup || true
-    else
-      note_echo "已跳过 $formula 升级"
-    fi
-  fi
-}
-# 展示脚本用途和影响范围，并在执行前等待用户确认。
-show_readme_and_wait() {
-  if typeset -f is_sourcetree_runtime >/dev/null 2>&1 && is_sourcetree_runtime; then
-    IS_SOURCETREE_RUNTIME=1
-  fi
-  prepare_plain_output_context
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
-    clear
-  fi
-
-  highlight_echo "============================== 脚本内置自述 ==============================" | jobs_intro_style title
-  note_echo "脚本名称：${SCRIPT_BASENAME}.command" | jobs_intro_style title
-  note_echo "脚本路径：${SCRIPT_PATH}" | jobs_intro_style body
-  note_echo "运行入口：兼容系统终端双击运行和 Sourcetree 自定义动作运行。" | jobs_intro_style body
-  note_echo "核心行为：按脚本名称执行对应的 SourceTree 效率动作，运行前会先展示这段内置自述，避免误触。" | jobs_intro_style title
-  note_echo "环境策略：系统终端保留清屏、彩色输出和回车确认；Sourcetree 瘦身环境自动跳过清屏和等待，并输出纯文本日志。" | jobs_intro_style body
-  note_echo "文档关系：同目录 README.md 只作为外部说明文档保留，运行时自述不读取、不拼接、不依赖 README.md。" | jobs_intro_style body
-  warn_echo "继续前请确认 SourceTree 传入路径、当前仓库或拖入路径正确；按 Ctrl+C 可以取消。" | jobs_intro_style body
-  gray_echo "日志文件：${LOG_FILE}" | jobs_intro_style body
-  highlight_echo "=======================================================================" | jobs_intro_style title
-  echo "" | jobs_intro_style body
-
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
-    gray_echo "已识别为 Sourcetree 自定义动作，将跳过交互并连续执行。" | jobs_intro_style body
-    return 0
-  fi
-  if [[ ! -t 0 ]]; then
-    error_echo "当前不是 Sourcetree，且没有可交互输入；请在终端中重新运行。"
-    return 1
-  fi
-  read "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..."
-}
-# 执行已经拆分完成的独立业务步骤。
-run_original_logic() {
-  # ============================= 原脚本业务逻辑区 =============================
-  # 【macOS | SourceTree 专用】为 .command 脚本添加执行权限（纯文本输出）
-
-  set -euo pipefail
-  [[ "${DEBUG:-0}" == "1" ]] && set -x
-
-  export LC_ALL=en_US.UTF-8
-  export LANG=en_US.UTF-8
-
-  # -------------------- 日志与纯文本输出 --------------------
-  SCRIPT_BASENAME="$(basename "$SCRIPT_PATH" | sed 's/\.[^.]*$//')"
-  LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"
-  : > "$LOG_FILE"
-  # 按当前输出级别记录终端信息，并同步写入脚本日志。
-  log()  { echo "$1" | tee -a "$LOG_FILE"; }
-  # 按当前输出级别记录终端信息，并同步写入脚本日志。
-  info() { log "[INFO] $1"; }
-  # 封装 ok 对应的独立处理逻辑。
-  ok()   { log "[OK]   $1"; }
-  # 按当前输出级别记录终端信息，并同步写入脚本日志。
-  warn() { log "[WARN] $1"; }
-  # 按当前输出级别记录终端信息，并同步写入脚本日志。
-  err()  { log "[ERR]  $1"; }
-
-  trap '
-    code=$?
-    script_path=${0:A}
-    err "失败（退出码 $code） at ${script_path}:${LINENO}"
-    [[ ${#funcfiletrace[@]} -gt 0 ]] && { echo "—— 调用栈 ——"; print -l -- "${(F)funcfiletrace}"; } | tee -a "$LOG_FILE"
-    echo "—— 日志尾部（最近 80 行）——"
-    tail -n 80 "$LOG_FILE" 2>/dev/null || true
-    exit $code
-  ' ERR
-
-  # -------------------- PATH（SourceTree 非登录 Shell） --------------------
-  export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
-  [[ -x /opt/homebrew/bin/brew ]] && eval "$(/opt/homebrew/bin/brew shellenv)" 2>/dev/null || true
-  # -------------------- 工具函数 --------------------
-  abs_path() {
-    local p="${1:-}"
-    p="${p//\"/}"
-    [[ -z "$p" ]] && return 1
-    [[ -f "$p" ]] && p="$(dirname "$p")"
-    cd "$p" 2>/dev/null && pwd -P
-  }
-  # 封装 list_targets_in_dir 对应的独立处理逻辑。
-  list_targets_in_dir() {
-    # 参数：$1=目录  $2=是否递归(0/1)
-    setopt localoptions extended_glob null_glob
-    local dir="$1" rec="$2"
-    local files=()
-    if [[ "$rec" == "1" ]]; then
-      files=("$dir"/**/*.command(N))
-    else
-      files=("$dir"/*.command(N))
-    fi
-    reply=("${files[@]}")
-  }
-  # 执行对应的清理操作，并保留必要的安全检查。
-  remove_quarantine_if_possible() {
-    # xattr 在极少数精简系统上可能不存在，先探测
-    if command -v xattr >/dev/null 2>&1; then
-      xattr -d com.apple.quarantine "$1" 2>>"$LOG_FILE" || true
-    fi
-  }
-  # -------------------- 主逻辑 --------------------
-  main() {
-    local SCRIPT_DIR; SCRIPT_DIR="$(cd "$(dirname "${0:A}")" && pwd -P)"
-
-    # —— 基准目录优先级：
-    # 1) 显式第一个参数（如果提供，则消费并 shift）
-    # 2) 环境变量 $REPO
-    # 3) 脚本所在目录（独立运行时兜底；在 SourceTree 步骤脚本里也安全）
-    local BASE_DIR=""
-    if [[ -n "${1:-}" ]]; then
-      BASE_DIR="$(abs_path "$1" || true)"
-      [[ -z "$BASE_DIR" ]] && { err "参数路径无效：$1"; exit 1; }
-      shift   # ✅ 只有在确实使用了 $1 时才 shift，避免“shift count must be <= $#”
-    elif [[ -n "${REPO:-}" ]]; then
-      BASE_DIR="$(abs_path "$REPO" || true)"
-      [[ -z "$BASE_DIR" ]] && { err "环境变量 REPO 路径无效：$REPO"; exit 1; }
-    else
-      BASE_DIR="$SCRIPT_DIR"
-    fi
-
-    local RECUR="${RECURSIVE:-0}"
-    [[ "$RECUR" == "1" ]] && info "模式：递归授权" || info "模式：当前目录授权"
-    info "基准目录：$BASE_DIR"
-
-    # —— 收集目标：如果后续还传了参数，则把它们当作文件/目录；否则枚举 BASE_DIR
-    typeset -a targets=()
-    if [[ $# -gt 0 ]]; then
-      while [[ $# -gt 0 ]]; do
-        local raw="$1"; shift
-        if [[ -f "$raw" ]]; then
-          targets+=("${raw}")
-        elif [[ -d "$raw" ]]; then
-          list_targets_in_dir "$(abs_path "$raw")" "$RECUR"
-          targets+=("${reply[@]}")
-        else
-          warn "忽略无效路径：$raw"
-        fi
-      done
-    else
-      list_targets_in_dir "$BASE_DIR" "$RECUR"
-      targets+=("${reply[@]}")
-    fi
-
-    if [[ ${#targets[@]} -eq 0 ]]; then
-      warn "未找到任何 .command 文件"
-      ok "完成（无操作）。日志：$LOG_FILE"
-      return 0
-    fi
-
-    info "待授权文件数：${#targets[@]}"
-
-    # 去重
-    typeset -A seen; typeset -a uniq_targets=()
-    for f in "${targets[@]}"; do
-      [[ -z "${seen[$f]:-}" ]] && { uniq_targets+=("$f"); seen[$f]=1; }
-    done
-    targets=("${uniq_targets[@]}")
-
-    local ok_cnt=0 fail_cnt=0
-    for f in "${targets[@]}"; do
-      if [[ -x "$f" ]]; then
-        ok "[skip] 已可执行：$f"
-        remove_quarantine_if_possible "$f"
-        ok_cnt=$((ok_cnt+1))
-      else
-        if chmod +x "$f" 2>>"$LOG_FILE"; then
-          remove_quarantine_if_possible "$f"
-          ok "[+x] 授权成功：$f"
-          ok_cnt=$((ok_cnt+1))
-        else
-          err "[FAIL] 授权失败：$f"
-          fail_cnt=$((fail_cnt+1))
-        fi
-      fi
-    done
-
-    info "统计：成功 $ok_cnt 个；失败 $fail_cnt 个"
-    ok "完成。日志：$LOG_FILE"
-  }
-
-  main "$@"
-
-  # =========================== 原脚本业务逻辑区结束 ===========================
-}
-# 编排脚本的高层业务流程。
-# 初始化脚本运行环境，并集中承载原有的顶层执行逻辑。
-initialize_script_runtime() {
-  : > "$LOG_FILE"
+# 准备展示所需路径和纯文本策略，不写入文件或修改项目。
+prepare_display_context() {
+  local candidate="" script_name="${SCRIPT_SOURCE:t}"
+  for candidate in "$SCRIPT_SOURCE" "$HOME/SourceTree.command/$script_name/$script_name" "$HOME/Documents/Github/JobsGenesis/SourceTree.command/$script_name/$script_name"; do
+    [[ -f "$candidate" ]] || continue
+    SCRIPT_PATH="${candidate:A}"
+    break
+  done
+  [[ -n "$SCRIPT_PATH" ]] || { print -u2 -r -- "无法定位脚本：$script_name"; exit 1; }
+  SCRIPT_DIR="${SCRIPT_PATH:h}"
+  SCRIPT_BASENAME="${SCRIPT_PATH:t:r}"
+  LOG_FILE="${TMPDIR:-/tmp}/${SCRIPT_BASENAME}.log"
   is_sourcetree_runtime && IS_SOURCETREE_RUNTIME=1
-  prepare_plain_output_context
-  [[ -n "${TERM:-}" ]] || export TERM="dumb"
-  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" ]]; then
-    SOURCETREE_PLAIN_OUTPUT=1
-    export NO_COLOR="${NO_COLOR:-1}"
-    export FORCE_COLOR=0
-    export CLICOLOR="0"
-    export ANSI_COLORS_DISABLED="1"
-    export npm_config_color=false
+  if [[ "$IS_SOURCETREE_RUNTIME" == 1 || ! -t 1 || -z "${TERM:-}" || "${TERM:-}" == dumb || -n "${NO_COLOR+x}" || "${JOBS_PLAIN_OUTPUT:-0}" == 1 ]]; then
+    PLAIN_OUTPUT=1
+    export NO_COLOR=1 FORCE_COLOR=0 CLICOLOR=0 ANSI_COLORS_DISABLED=1 npm_config_color=false
   fi
 }
-# 编排脚本的高层业务流程。
+# 移除外部命令的颜色转义码，保证 Sourcetree 日志可读。
+strip_ansi_stream() {
+  /usr/bin/perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]//g; s/\e\][^\a]*(?:\a|\e\\)//g'
+}
+# 保真输出路径和消息，确认后才同步写入日志。
+log() {
+  if [[ "$LOG_READY" == 1 ]]; then
+    printf '%s\n' "$1" | tee -a "$LOG_FILE"
+  else
+    printf '%s\n' "$1"
+  fi
+}
+# 为完整终端着色，消息中的路径按字面保留。
+color_log() {
+  local message="$2"
+  if [[ "$PLAIN_OUTPUT" == 0 && -t 1 ]]; then
+    printf -v message '%b%s%b' "$1" "$2" '\033[0m'
+  fi
+  log "$message"
+}
+# 输出明确的正常步骤。
+info_echo() { color_log '\033[0;34m' "[INFO] $1"; }
+# 输出明确的完成结果。
+success_echo() { color_log '\033[1;32m' "[OK] $1"; }
+# 输出需要留意的边界。
+warn_echo() { color_log '\033[1;33m' "[WARN] $1"; }
+# 输出失败原因。
+error_echo() { color_log '\033[1;31m' "[ERROR] $1"; }
+# 报告失败后停止，禁止后续步骤误报成功。
+die() { error_echo "$1"; exit 1; }
+# 确认后初始化系统工具 PATH、zsh 选项及本次日志。
+initialize_script_runtime() {
+  setopt NO_NOMATCH ERR_EXIT PIPE_FAIL
+  export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+  : > "$LOG_FILE"
+  LOG_READY=1
+}
+# 外部命令输出同步落盘，并明确传播原命令及日志管道失败。
+run_cmd() {
+  "$@" 2>&1 | strip_ansi_stream | tee -a "$LOG_FILE"
+  local -a command_codes=("${pipestatus[@]}")
+  local command_code=0
+  for command_code in "${command_codes[@]}"; do
+    (( command_code == 0 )) || return "$command_code"
+  done
+}
+# 去除拖入路径的外层引号和末尾换行，不删除文件名内部引号。
+strip_outer_quotes() {
+  local value="$1"
+  value="${value%$'\n'}"
+  value="${value%$'\r'}"
+  if [[ "$value" == \"*\" || "$value" == \'*\' ]]; then
+    value="${value[2,-2]}"
+  fi
+  [[ "$value" == '~' ]] && value="$HOME"
+  [[ "$value" == '~/'* ]] && value="$HOME/${value#\~/}"
+  print -r -- "$value"
+}
+
+BASE_DIR=""
+typeset -gaU TARGETS=()
+# 展示授权范围，确认失败即停止。
+show_script_intro_and_wait() {
+  prepare_display_context
+  print -r -- "${SCRIPT_BASENAME}：授权 .command 入口" | jobs_intro_style title
+  print -r -- "1、参数可为文件或目录；无参数使用 REPO 或脚本库根目录。默认只扫描当前目录。" | jobs_intro_style body
+  print -r -- "2、RECURSIVE=1 才递归；跳过 .git、node_modules、Pods、.dart_tool、build、DerivedData。" | jobs_intro_style body
+  print -r -- "3、仅对 .command 普通文件 chmod u+x，并移除该文件的 quarantine；任何失败返回非零。" | jobs_intro_style body
+  print -r -- "日志：${LOG_FILE}；Ctrl+C 取消。" | jobs_intro_style body
+  [[ "$IS_SOURCETREE_RUNTIME" == 1 ]] && return 0
+  [[ -t 0 ]] || die "当前不是 Sourcetree 且没有可交互输入，请在终端运行。"
+  read -r "?👉 按回车继续；Ctrl+C 取消：" _ || exit 1
+}
+# 只清理本次完整枚举创建的临时列表。
+cleanup_authorization_list() {
+  local list_file="$1"
+  [[ "$list_file" == "${TMPDIR:-/tmp}"/jobs_auth_find.* && -f "$list_file" ]] || return 0
+  rm -f -- "$list_file" || warn_echo "临时列表清理失败：$list_file"
+}
+# 完整验证递归枚举后才加入目标，避免按部分结果授权。
+collect_directory_scripts() {
+  local directory="$1" script="" scripts_list="" find_ec=0
+  if [[ "${RECURSIVE:-0}" == 1 ]]; then
+    scripts_list="$(mktemp "${TMPDIR:-/tmp}/jobs_auth_find.XXXXXX")" || { error_echo "无法创建授权枚举列表。"; return 1; }
+    trap "cleanup_authorization_list ${(q)scripts_list}" EXIT # 捕获转义后的路径，避免函数退出时局部变量已释放。
+    if find "$directory" \( -name .git -o -name node_modules -o -name Pods -o -name .dart_tool -o -name build -o -name DerivedData \) -prune -o -type f -name '*.command' -print0 > "$scripts_list" 2>> "$LOG_FILE"; then
+      while IFS= read -r -d '' script; do
+        TARGETS+=("$script")
+      done < "$scripts_list"
+    else
+      find_ec=$?
+      error_echo "递归枚举未完整完成：$directory；退出码 $find_ec。未授权任何部分结果；日志：$LOG_FILE"
+      return "$find_ec"
+    fi
+  else
+    while IFS= read -r -d '' script; do TARGETS+=("$script"); done < <(find "$directory" -maxdepth 1 -type f -name '*.command' -print0)
+  fi
+}
+# 接受多个路径，明确文件不再被当作基准目录丢掉。
+resolve_authorization_targets() {
+  local -a inputs=("$@")
+  local input="" resolved=""
+  (( ${#inputs} > 0 )) || inputs=("${REPO:-${SCRIPT_DIR:h}}")
+  for input in "${inputs[@]}"; do
+    resolved="$(strip_outer_quotes "$input")"
+    [[ -e "$resolved" && ! -L "$resolved" ]] || die "路径不存在或是符号链接：$resolved"
+    resolved="${resolved:A}"
+    if [[ -d "$resolved" ]]; then
+      collect_directory_scripts "$resolved" || exit $?
+    elif [[ "$resolved" == *.command && -f "$resolved" ]]; then
+      TARGETS+=("$resolved")
+    else
+      die "只接受目录或 .command 文件：$resolved"
+    fi
+  done
+  info_echo "待授权入口：${#TARGETS} 个；递归：${RECURSIVE:-0}。"
+}
+# 授权单个入口并在隔离属性确实存在时移除。
+authorize_one_script() {
+  local script="$1"
+  chmod u+x "$script" 2>>"$LOG_FILE" || { error_echo "授权失败：$script"; return 1; }
+  if command -v xattr >/dev/null 2>&1 && xattr -p com.apple.quarantine "$script" >/dev/null 2>&1; then
+    xattr -d com.apple.quarantine "$script" 2>>"$LOG_FILE" || { error_echo "移除隔离属性失败：$script"; return 1; }
+  fi
+  success_echo "$script"
+}
+# 汇总实际失败数，并把批量失败传播给调用者。
+run_authorization() {
+  local script="" failed=0
+  for script in "${TARGETS[@]}"; do
+    authorize_one_script "$script" || failed=$((failed + 1))
+  done
+  info_echo "总计 ${#TARGETS} 个；成功 $((${#TARGETS} - failed)) 个；失败 $failed 个。日志：$LOG_FILE"
+  (( failed == 0 )) || exit 1
+}
+# 编排说明、目标收集和逐项授权。
 main() {
-  # 展示脚本内置自述，并按运行入口完成防误触确认。
-  show_readme_and_wait
-  # 初始化 Shell 选项、日志、依赖和入口运行状态。
-  initialize_script_runtime
-  # 执行 run_original_logic 对应的核心业务步骤。
-  run_original_logic "$@"
-  # 输出脚本执行结果、摘要和日志位置。
-  success_echo "脚本执行结束。日志：$LOG_FILE"
+  show_script_intro_and_wait # 先说明权限影响并按入口确认。
+  initialize_script_runtime # 确认后初始化日志与 Shell。
+  resolve_authorization_targets "$@" # 解析多个目标并限定 .command 范围。
+  run_authorization # 逐项授权并传播失败统计。
 }
 
 main "$@"

@@ -4,83 +4,42 @@
 
 [toc]
 
+---
+
 ## 🔥 <font id=前言>前言</font>
 
-- 采用 Shell 脚本的原因：Shell 来自 [**macOS**](https://www.apple.com/macos/) 原生系统底层，虽然写法相对繁琐冗杂，但执行效率高，并且不需要额外介入 [**Ruby**](https://www.ruby-lang.org)、[**Python**](https://www.python.org) 等第三方运行环境，因此具备更好的移植性。
+为明确选定的 `.command` 普通文件添加用户执行权限，并移除该文件已有的隔离属性。用于 [**Sourcetree**](https://www.sourcetreeapp.com/) 菜单入口授权，不修改 Git 或安装工具链。
 
-- 本自述文件对应脚本：`【MacOS@SourceTree】⚙️运行授权.command`。
-- 脚本原始位置：`JobsGenesis@JobsCommand.SourceTree`。
-- 脚本定位：用于 SourceTree 自定义操作入口。
-- 脚本运行策略：兼容系统终端双击运行和 Sourcetree 自定义动作运行，按实际环境决定是否启用完整终端交互。
-- 普通安装 / 更新 / 升级交互统一为：**回车跳过，输入任意字符后回车执行**。
-- 危险操作不应该靠回车默认执行；涉及破坏性修改时，应单独输入 `YES` 确认。
-
-## 一、脚本用途 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
-
-| 项目 | 说明 |
-|---|---|
-| 脚本名称 | `【MacOS@SourceTree】⚙️运行授权.command` |
-| 所属目录 | `JobsGenesis@JobsCommand.SourceTree` |
-| 主要标签 | `SourceTree` |
-| 是否涉及 Homebrew | `是` |
-| 是否可能联网 | `否` |
-| 是否含高风险命令 | `是` |
-| zsh 静态检查 | `当前生成环境未执行，请在 macOS 上复核` |
-
-## 二、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
-
-推荐双击 `.command` 运行。终端方式如下：
+## 一、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 ```shell
-chmod +x './【MacOS@SourceTree】⚙️运行授权.command'
-'./【MacOS@SourceTree】⚙️运行授权.command'
+/bin/zsh './【MacOS@SourceTree】⚙️运行授权.command' '/目标目录'
+/bin/zsh './【MacOS@SourceTree】⚙️运行授权.command' '/目标脚本.command' '/另一个目录'
+RECURSIVE=1 /bin/zsh './【MacOS@SourceTree】⚙️运行授权.command' '/脚本库目录'
 ```
 
-脚本启动后会先显示本 README，并等待回车继续，避免误触执行。
+无参数时使用环境 `REPO`，否则使用脚本库根目录。文件参数直接授权，不会丢掉第一个文件。带空格路径必须作为一个参数传入；拖入路径去除外围引号与末尾 CRLF 换行。
 
-## 三、脚本运行策略 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## 二、交互和范围 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-- 脚本使用 `# shell: zsh` 和 `main "$@"` 统一收口，先展示自述说明，再进入真实业务逻辑。
-- 系统终端双击运行时，脚本保持完整终端体验：可清屏、可彩色输出、可等待用户回车确认。
-- Sourcetree 自定义动作运行时，脚本会识别瘦身环境，自动跳过 `clear` 和回车等待，并关闭 ANSI 彩色码，避免日志里出现 ANSI 转义码。
-- 脚本会兜底解析真实脚本目录，确保 Sourcetree 只传脚本名时仍能读取同目录 `README.md`。
-- 终端输出和日志同步落盘；排查时优先查看 README 中声明的 `$TMPDIR/脚本名.log`。
+终端展示内置自述，回车继续、`Ctrl+C` 取消；明确识别为 Sourcetree 后无交互执行，非 Sourcetree 且没有可交互输入时退出。
 
-## 四、Homebrew 标准 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+默认只扫描目标目录第一层；`RECURSIVE=1` 才递归。递归跳过 `.git`、`node_modules`、`Pods`、`.dart_tool`、`build`、`DerivedData`；不跟随目录符号链接。多个目标去重处理。递归先把 NUL 分隔列表保存到本次独立临时文件，确认 `find` 完整成功后才收集目标；枚举失败时停止，不按已输出的部分路径授权，临时列表随该枚举流程结束清理。
 
-若脚本涉及 Homebrew，统一遵循下面的健康标准：
+## 三、实际命令 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-- 自动识别 `arm64` / `x86_64`。
-- Apple Silicon 优先使用 `$(brew --prefix)/bin/brew`。
-- Intel 优先使用 `$(brew --prefix)/bin/brew`。
-- 自动把 `brew shellenv` 写入当前 shell 对应配置文件。
-- 当前会话立即 `eval "$({brew_bin} shellenv)"` 生效。
-- 已安装时不强制升级，而是询问：**回车跳过，输入任意字符后回车升级**。
-- 健康更新顺序为：`brew update` → `brew upgrade` → `brew cleanup` → `brew doctor` → `brew -v`。
+仅执行目标文件的 `chmod u+x`；检测到 `com.apple.quarantine` 后执行单文件 `xattr -d`，不对目录执行递归授权或递归移除属性。已可执行入口幂等处理。文件不存在、符号链接、非 `.command` 文件均停止，不静默换成其它路径。
 
-## 五、注意事项 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## 四、结果和日志 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-- 我没有在生成阶段执行脚本里的 macOS 专属命令，例如 `brew`、`pod`、`flutter`、`xcodebuild`、`osascript`、`sudo`、模拟器控制等。
-- 首次运行前建议先阅读本 README，再执行脚本。
-- 如果脚本涉及工程目录，请确认当前目录或拖入路径正确。
-- 如果脚本涉及 Git / CocoaPods / Flutter 依赖更新，建议先提交或备份本地改动。
-- 运行日志默认写入：`$TMPDIR/【MacOS@SourceTree】⚙️运行授权.log`。
+每个入口输出成功或失败，最后汇总总数、成功数、失败数；任何失败最终返回非零。空目录返回成功并报告零操作。日志位于系统临时目录，文件名 `【MacOS@SourceTree】⚙️运行授权.log`；确认前不写日志。
 
-## 六、流程图 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## 五、风险和常见问题 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-```mermaid
-graph TD
-    A([开始]) --> B[显示 README 并等待回车]
-    B --> C[初始化脚本路径与日志]
-    C --> D{是否涉及 Homebrew 或依赖工具}
-    D --> |是| E[执行标准自检 / 可选升级]
-    D --> |否| F[进入业务逻辑]
-    E --> F[进入业务逻辑]
-    F --> G{是否存在危险操作}
-    G --> |是| H[要求明确确认]
-    G --> |否| I[执行任务]
-    H --> I[执行任务]
-    I --> J([结束])
-```
+授权只改变执行位，不证明脚本可信。只选择自有脚本范围；移除隔离属性会改变 Gatekeeper 提示，执行前先检查内容。权限失败检查目标所有者和写入权限，不使用全目录 `chmod -R`。
+
+## 六、验证边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+
+已通过 `zsh -n`，使用临时目录验证多个含中文/空格路径、第一参数为文件、递归排除、重复目标去重、CRLF 拖入路径及失败退出，并用假 `find` 验证输出部分列表后失败时不执行授权、临时列表完成清理。未对真实项目批量授权。
 
 <a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>

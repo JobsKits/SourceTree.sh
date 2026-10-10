@@ -1,8 +1,8 @@
 #!/bin/zsh
 # 脚本自述：
 # - 脚本名称：【MacOS@SourceTree】♻️修复Flutter项目中文路径.command
-# - 核心用途：执行“♻️修复Flutter项目中文路径”对应的移动端项目自动化任务。
-# - 影响范围：可能修改项目依赖、生成文件、构建产物或开发工具配置。
+# - 核心用途：修复自有 Dart package 指令里的 URI 编码中文路径。
+# - 影响范围：仅处理 lib、test、integration_test，原文件保存在每次独立的 .import_backup 子目录。
 # - 运行提示：运行后会先打印内置自述；Sourcetree 模式无交互连续执行，终端模式确认后继续。
 # =====================================================================
 # Jobs 标准化脚本外壳
@@ -32,9 +32,10 @@ jobs_intro_style() {
     }
   '
 }
+# 按脚本源码路径和标准目录解析真实入口文件。
 resolve_script_path() {
-  local script_source="${BASH_SOURCE[0]:-${(%):-%x}}"
-  local script_name="$(basename -- "$0")"
+  local script_source="$SCRIPT_SOURCE"
+  local script_name="${SCRIPT_SOURCE:t}"
   local candidate=""
 
   for candidate in \
@@ -50,15 +51,15 @@ resolve_script_path() {
   printf "%s/%s\n" "$PWD" "$script_name"
 }
 
-SCRIPT_PATH="$(resolve_script_path)"
-SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd -P)"
-SCRIPT_BASENAME="$(basename "$SCRIPT_PATH" | sed 's/\.[^.]*$//')"
-LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"
+readonly SCRIPT_SOURCE="$0"
+SCRIPT_PATH=""
+SCRIPT_DIR=""
+SCRIPT_BASENAME=""
+LOG_FILE=""
+LOG_READY=0
 # 识别 Sourcetree 自定义动作的瘦身运行环境，系统终端双击运行不降级。
 is_sourcetree_runtime() {
   env | grep -Eqi '^SOURCETREE|^SOURCE_TREE' && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/SourceTree.command/"* ]] && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/Documents/Github/JobsGenesis/SourceTree.command/"* ]] && return 0
 
   local pid="$PPID"
   local command_name=""
@@ -81,53 +82,80 @@ strip_ansi_text() {
   perl -pe 's/\e\[[0-9;]*[[:alpha:]]//g'
 }
 # 根据运行入口和终端能力预先切换纯文本输出，避免 Sourcetree 显示 ANSI 转义码。
+# 在第一屏输出前确定纯文本模式，确认后再重复初始化输出环境。
 prepare_plain_output_context() {
-  [[ -n "${TERM:-}" ]] || export TERM="dumb"
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" || "${JOBS_PLAIN_OUTPUT:-0}" == "1" ]]; then
+  SOURCETREE_PLAIN_OUTPUT=0
+  PLAIN_OUTPUT=0
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == 1 || ! -t 1 || -z "${TERM:-}" || "${TERM:-}" == dumb || -n "${NO_COLOR+x}" || "${JOBS_PLAIN_OUTPUT:-0}" == 1 ]]; then
     SOURCETREE_PLAIN_OUTPUT=1
-    COLOR_ENABLED=0
-    export NO_COLOR="${NO_COLOR:-1}"
-    export FORCE_COLOR=0
-    export CLICOLOR="0"
-    export ANSI_COLORS_DISABLED="1"
-    export npm_config_color=false
+    PLAIN_OUTPUT=1
+    export NO_COLOR=1 FORCE_COLOR=0 CLICOLOR=0 ANSI_COLORS_DISABLED=1 npm_config_color=false
   fi
+}
+# 只准备自述所需路径和入口身份，尚不创建日志或执行工程操作。
+prepare_script_metadata() {
+  SCRIPT_PATH="$(resolve_script_path)"
+  SCRIPT_DIR="${SCRIPT_PATH:h}"
+  SCRIPT_BASENAME="${SCRIPT_PATH:t:r}"
+  LOG_FILE="${TMPDIR:-/tmp}/${SCRIPT_BASENAME}.log"
+  IS_SOURCETREE_RUNTIME=0
+  if is_sourcetree_runtime; then
+    IS_SOURCETREE_RUNTIME=1
+  fi
+  prepare_plain_output_context
 }
 # 统一输出终端信息并同步记录日志。
-log() {
-  if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == "1" ]]; then
-    printf "%b\n" "$1" | strip_ansi_text | tee -a "$LOG_FILE"
+# 确认前仅显示文字，确认后将同一输出同步写入日志。
+write_log_output() {
+  if [[ "${LOG_READY:-0}" == 1 ]]; then
+    tee -a "$LOG_FILE"
   else
-    printf "%b\n" "$1" | tee -a "$LOG_FILE"
+    cat
   fi
 }
-# 输出 color echo 对应级别的日志信息。
-color_echo()     { log "\033[1;32m$1\033[0m"; }
-# 输出 info echo 对应级别的日志信息。
-info_echo()      { log "\033[1;34mℹ $1\033[0m"; }
-# 输出 success echo 对应级别的日志信息。
-success_echo()   { log "\033[1;32m✔ $1\033[0m"; }
-# 输出 warn echo 对应级别的日志信息。
-warn_echo()      { log "\033[1;33m⚠ $1\033[0m"; }
-# 输出 warm echo 对应级别的日志信息。
-warm_echo()      { log "\033[1;33m$1\033[0m"; }
-# 输出 note echo 对应级别的日志信息。
-note_echo()      { log "\033[1;35m➤ $1\033[0m"; }
-# 输出 error echo 对应级别的日志信息。
-error_echo()     { log "\033[1;31m✖ $1\033[0m"; }
-# 输出 err echo 对应级别的日志信息。
-err_echo()       { log "\033[1;31m$1\033[0m"; }
-# 输出 debug echo 对应级别的日志信息。
-debug_echo()     { log "\033[1;35m🐞 $1\033[0m"; }
-# 输出 highlight echo 对应级别的日志信息。
-highlight_echo() { log "\033[1;36m🔹 $1\033[0m"; }
-# 输出 gray echo 对应级别的日志信息。
-gray_echo()      { log "\033[0;90m$1\033[0m"; }
-# 输出 bold echo 对应级别的日志信息。
-bold_echo()      { log "\033[1m$1\033[0m"; }
-# 输出 underline echo 对应级别的日志信息。
-underline_echo() { log "\033[4m$1\033[0m"; }
-# ============================= 标准工具函数 =============================
+# 保留路径和命令中的字面反斜杠，只过滤展示用 ANSI 控制码。
+log() {
+  if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == 1 ]]; then
+    printf '%s\n' "$1" | strip_ansi_text | write_log_output
+  else
+    printf '%s\n' "$1" | write_log_output
+  fi
+}
+# 颜色只作用于日志样式，正文始终按字面文字输出。
+color_log() {
+  if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == 1 ]]; then
+    log "$2"
+  else
+    log "$(printf '%b%s%b' "$1" "$2" '\033[0m')"
+  fi
+}
+# 输出一般完成信息。
+color_echo() { color_log '\033[1;32m' "$1"; }
+# 输出步骤与环境信息。
+info_echo() { color_log '\033[1;34m' "ℹ $1"; }
+# 输出已完成步骤。
+success_echo() { color_log '\033[1;32m' "✔ $1"; }
+# 输出需要关注的风险。
+warn_echo() { color_log '\033[1;33m' "⚠ $1"; }
+# 输出温馨提示。
+warm_echo() { color_log '\033[1;33m' "$1"; }
+# 输出操作说明。
+note_echo() { color_log '\033[1;35m' "➤ $1"; }
+# 输出带前缀的错误信息。
+error_echo() { color_log '\033[1;31m' "✖ $1"; }
+# 输出错误正文。
+err_echo() { color_log '\033[1;31m' "$1"; }
+# 输出诊断信息。
+debug_echo() { color_log '\033[1;35m' "🐞 $1"; }
+# 输出展示重点。
+highlight_echo() { color_log '\033[1;36m' "🔹 $1"; }
+# 输出次要信息。
+gray_echo() { color_log '\033[0;90m' "$1"; }
+# 输出加粗信息。
+bold_echo() { color_log '\033[1m' "$1"; }
+# 输出带下划线的信息。
+underline_echo() { color_log '\033[4m' "$1"; }
+# 识别当前 CPU 架构。
 get_cpu_arch() {
   [[ "$(uname -m)" == "arm64" ]] && echo "arm64" || echo "x86_64"
 }
@@ -273,12 +301,9 @@ brew_install_or_upgrade() {
   fi
 }
 # 输出 show readme and wait 对应的说明与结果。
-show_readme_and_wait() {
-  if typeset -f is_sourcetree_runtime >/dev/null 2>&1 && is_sourcetree_runtime; then
-    IS_SOURCETREE_RUNTIME=1
-  fi
-  prepare_plain_output_context
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
+show_script_intro_and_wait() {
+  prepare_script_metadata
+  if [[ -z "${NO_COLOR+x}" && "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" && "${PLAIN_OUTPUT:-0}" != 1 ]]; then
     clear
   fi
 
@@ -286,7 +311,8 @@ show_readme_and_wait() {
   note_echo "脚本名称：${SCRIPT_BASENAME}.command" | jobs_intro_style title
   note_echo "脚本路径：${SCRIPT_PATH}" | jobs_intro_style body
   note_echo "运行入口：兼容系统终端双击运行和 Sourcetree 自定义动作运行。" | jobs_intro_style body
-  note_echo "核心行为：按脚本名称执行对应的 SourceTree 效率动作，运行前会先展示这段内置自述，避免误触。" | jobs_intro_style title
+  note_echo "核心用途：修复自有 Dart package 指令里的 URI 编码中文路径。" | jobs_intro_style body
+  warn_echo "影响范围：仅处理 lib、test、integration_test，原文件保存在每次独立的 .import_backup 子目录。" | jobs_intro_style body
   note_echo "环境策略：系统终端保留清屏、彩色输出和回车确认；Sourcetree 瘦身环境自动跳过清屏和等待，并输出纯文本日志。" | jobs_intro_style body
   note_echo "文档关系：同目录 README.md 只作为外部说明文档保留，运行时自述不读取、不拼接、不依赖 README.md。" | jobs_intro_style body
   warn_echo "继续前请确认 SourceTree 传入路径、当前仓库或拖入路径正确；按 Ctrl+C 可以取消。" | jobs_intro_style body
@@ -300,168 +326,297 @@ show_readme_and_wait() {
   fi
   if [[ ! -t 0 ]]; then
     error_echo "当前不是 Sourcetree，且没有可交互输入；请在终端中重新运行。"
-    return 1
+    exit 1
   fi
-  read "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..."
+  read -r "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..." _ || exit 1
 }
 # 执行 run original logic 对应的独立业务步骤。
-run_original_logic() {
-  # ============================= 原脚本业务逻辑区 =============================
-  # 【MacOS】修复 Flutter 项目中 import 中文被 URI 编码的路径（SourceTree 专用 / 无颜色无 emoji）
-  set -euo pipefail
-  [[ "${DEBUG:-0}" == "1" ]] && set -x
-
-  export LC_ALL=en_US.UTF-8
-  export LANG=en_US.UTF-8
-
-  # 错误输出
-  SCRIPT_BASENAME="$(basename "$SCRIPT_PATH" | sed 's/\.[^.]*$//')"
-  LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"; : > "$LOG_FILE"
-  trap '
-    code=$?
-    script_path=${0:A}
-    echo "✖ 失败（退出码 $code） at ${script_path}:${LINENO}"
-    [[ ${#funcfiletrace[@]} -gt 0 ]] && { echo "—— 调用栈 ——"; print -l -- "${(F)funcfiletrace}"; }
-    echo "—— 日志尾部（最近 80 行）——"; tail -n 80 "$LOG_FILE" 2>/dev/null || true
-    exit $code
-  ' ERR
-
-  # SourceTree 下补 PATH
-  export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
-  [[ -x /opt/homebrew/bin/brew ]] && eval "$(/opt/homebrew/bin/brew shellenv)" 2>/dev/null || true
-  # 输出函数（纯文本）
-  log()        { echo "$1" | tee -a "$LOG_FILE"; }
-  # 输出 info echo 对应级别的日志信息。
-  info_echo()  { log "[INFO] $1"; }
-  # 输出 success echo 对应级别的日志信息。
-  success_echo(){ log "[OK]   $1"; }
-  # 输出 warn echo 对应级别的日志信息。
-  warn_echo()  { log "[WARN] $1"; }
-  # 输出 error echo 对应级别的日志信息。
-  error_echo() { log "[ERR]  $1"; }
-  # 输出 debug echo 对应级别的日志信息。
-  debug_echo() { [[ "${DEBUG:-0}" == "1" ]] && log "[DBG]  $1"; }
-  # 判断 Flutter 项目
-  is_flutter_project_root() { [[ -f "$1/pubspec.yaml" && -d "$1/lib" ]]; }
-
-  # 解析项目根（参数/REPO 优先，找不到就全仓库搜索）
-  typeset -g FLUTTER_ROOT=""
-  typeset -g ENTRY_FILE=""
-  # 解析并返回 resolve project root 所需信息。
-  resolve_project_root() {
-    set +e
-    local arg="${1:-}" repo_root cand
-    if [[ -n "$arg" ]]; then
-      [[ -f "$arg" ]] && arg="$(dirname "$arg")"
-      if cd "$arg" 2>/dev/null; then
-        repo_root="$(pwd -P)"
-        if is_flutter_project_root "$repo_root"; then
-          FLUTTER_ROOT="$repo_root"; ENTRY_FILE="$repo_root/lib/main.dart"; set -e; return 0
-        fi
-      fi
-    fi
-    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-      repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"
-    else
-      repo_root="$(pwd -P)"
-    fi
-    if [[ -f "$repo_root/pubspec.yaml" && -d "$repo_root/lib" ]]; then
-      FLUTTER_ROOT="$repo_root"; ENTRY_FILE="$repo_root/lib/main.dart"; set -e; return 0
-    fi
-    cand="$(/usr/bin/find "$repo_root" -name pubspec.yaml -type f -print 2>/dev/null | head -n1)"
-    if [[ -n "$cand" ]]; then
-      FLUTTER_ROOT="$(dirname "$cand")"; ENTRY_FILE="$FLUTTER_ROOT/lib/main.dart"; set -e; return 0
-    fi
-    set -e
-    error_echo "未找到 Flutter 项目（缺 pubspec.yaml 或 lib）"
-    exit 1
-  }
-
-  # Perl 检测（有就用，没有就 Python 兜底）
-  typeset -g USE_PERL_URI_ESCAPE=0
-  # 检查 ensure perl and module 所需条件，不满足时阻止继续执行。
-  ensure_perl_and_module() {
-    if command -v perl >/dev/null 2>&1 && perl -MURI::Escape -e 1 >/dev/null 2>&1; then
-      USE_PERL_URI_ESCAPE=1; info_echo "Perl + URI::Escape 可用"
-    else
-      USE_PERL_URI_ESCAPE=0; info_echo "未检测到 Perl 模块，使用 Python3 兜底"
-    fi
-  }
-  # 修复 import（zsh glob）
-  replace_uri_imports() {
-    cd "$FLUTTER_ROOT"
-    local BACKUP_DIR=".import_backup"; mkdir -p "$BACKUP_DIR"
-    local changed=0
-    for file in **/*.dart(N); do
-      if grep -q "import 'package:[^']*%[0-9A-Fa-f][0-9A-Fa-f]" "$file"; then
-        mkdir -p "$BACKUP_DIR/$(dirname "$file")"
-        cp "$file" "$BACKUP_DIR/$file"
-        if [[ "$USE_PERL_URI_ESCAPE" == "1" ]]; then
-          perl -i -pe "use URI::Escape; s|(import\\s+'package:[^']*)|uri_unescape(\$1)|ge" "$file"
-        else
-          /usr/bin/env python3 - "$file" <<'PY'
-import sys, re, urllib.parse, io
-p = sys.argv[1]
-with io.open(p,'r',encoding='utf-8',errors='ignore') as f:s=f.read()
-def unq(m):return urllib.parse.unquote(m.group(0))
-def repl(m):inner=m.group(1);return "import '"+re.sub(r'%[0-9A-Fa-f]{2}',unq,inner)+"'"
-s2=re.sub(r"import\s+'(package:[^']*)'",repl,s)
-if s2!=s:
-  with io.open(p,'w',encoding='utf-8') as f:f.write(s2)
-PY
-        fi
-        info_echo "修复：$file"; changed=$((changed+1))
-      fi
-    done
-    [[ "$changed" -gt 0 ]] && success_echo "完成：修复 $changed 个文件；备份在 $BACKUP_DIR" || info_echo "未发现需要修复的 import"
-  }
-  # 自述
-  print_banner() {
-    echo "[RUN] 修复 Flutter 项目 import 中文路径" | jobs_intro_style body
-    echo " - 自动识别项目根（参数/ \$REPO 优先，找不到就全仓库搜索）" | jobs_intro_style body
-    echo " - Perl 模块缺失自动 Python3 兜底" | jobs_intro_style body
-    echo " - 按相对路径备份到 .import_backup/" | jobs_intro_style body
-  }
-  # 编排脚本的高层业务流程。
-  main() {
-    print_banner
-    resolve_project_root "${1:-${REPO:-}}"
-    success_echo "项目路径：$FLUTTER_ROOT"
-    ensure_perl_and_module
-    replace_uri_imports
-    success_echo "完成。日志：$LOG_FILE"
-  }
-
-  main "$@"
-
-  # =========================== 原脚本业务逻辑区结束 ===========================
+# 对输入只解除外层引号和拖拽转义，保留目录内原有引号。
+normalize_flutter_input() {
+  local input_value="$1"
+  if [[ -e "$input_value" ]]; then
+    print -r -- "$input_value"
+    return 0
+  fi
+  input_value="${input_value%$'\r'}"
+  input_value="${input_value%$'\n'}"
+  if [[ "$input_value" == \"*\" || "$input_value" == \'*\' ]]; then
+    input_value="${input_value[2,-2]}"
+  fi
+  [[ "$input_value" == '~/'* ]] && input_value="$HOME/${input_value#\~/}"
+  if [[ ! -e "$input_value" ]]; then
+    input_value="${(Q)input_value}"
+  fi
+  print -r -- "$input_value"
 }
-# 编排脚本的高层业务流程。
-# 初始化脚本运行环境，并集中承载原有的顶层执行逻辑。
-initialize_script_runtime() {
-  : > "$LOG_FILE"
-  is_sourcetree_runtime && IS_SOURCETREE_RUNTIME=1
-  prepare_plain_output_context
-  [[ -n "${TERM:-}" ]] || export TERM="dumb"
-  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" ]]; then
-    SOURCETREE_PLAIN_OUTPUT=1
-    export NO_COLOR="${NO_COLOR:-1}"
-    export FORCE_COLOR=0
-    export CLICOLOR="0"
-    export ANSI_COLORS_DISABLED="1"
-    export npm_config_color=false
+# 先向上定位，再在指定目录内查找；多个候选必须由用户明确路径。
+resolve_flutter_project() {
+  local base="$(normalize_flutter_input "${1:-${PROJECT_DIR:-${REPO:-$PWD}}}")"
+  local candidate="" current=""
+  local -a candidates=()
+  [[ -f "$base" ]] && base="${base:h}"
+  [[ -d "$base" ]] || { error_echo "工程路径不存在：$base"; return 1; }
+  base="$(cd "$base" && pwd -P)" || return 1
+  [[ "$base" != / && "$base" != "$HOME" ]] || { error_echo "拒绝扫描整个根目录或用户目录，请指定工程目录。"; return 1; }
+  current="$base"
+  while [[ "$current" != / ]]; do
+    if [[ -f "$current/pubspec.yaml" && -d "$current/lib" ]]; then
+      FLUTTER_ROOT="$current"
+      return 0
+    fi
+    current="${current:h}"
+  done
+  while IFS= read -r -d '' candidate; do
+    [[ -d "${candidate:h}/lib" ]] && candidates+=("${candidate:h}")
+  done < <(find "$base" \( -type d \( -name .git -o -name node_modules -o -name Pods -o -name PodsManual -o -name 'ManualBy*Pods*' -o -name .dart_tool -o -name .fvm -o -name build -o -name DerivedData -o -name .import_backup -o -name vendor -o -name third_party -o -name ThirdParty \) -prune \) -o \( -type f -name pubspec.yaml -print0 \))
+  if (( ${#candidates[@]} != 1 )); then
+    error_echo "应找到唯一 Flutter 工程，当前候选数量：${#candidates[@]}。请直接传入工程根目录。"
+    for candidate in "${candidates[@]}"; do
+      gray_echo "候选：$candidate"
+    done
+    return 1
+  fi
+  FLUTTER_ROOT="${candidates[1]}"
+}
+# 进入工程后再选择其固定 SDK，避免使用启动目录的 FVM 配置。
+choose_project_flutter() {
+  typeset -ga FLUTTER_CMD DART_CMD
+  cd "$FLUTTER_ROOT" || return 1
+  export PATH="$HOME/.pub-cache/bin:$HOME/.fvm/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+  if [[ -x "$FLUTTER_ROOT/.fvm/flutter_sdk/bin/flutter" ]]; then
+    FLUTTER_CMD=("$FLUTTER_ROOT/.fvm/flutter_sdk/bin/flutter")
+    DART_CMD=("$FLUTTER_ROOT/.fvm/flutter_sdk/bin/dart")
+  elif [[ -f .fvmrc || -f .fvm/fvm_config.json ]]; then
+    command -v fvm >/dev/null 2>&1 || { error_echo "工程固定了 FVM，但本地 SDK / fvm 不可用，请先恢复对应 SDK。"; return 1; }
+    FLUTTER_CMD=(fvm flutter)
+    DART_CMD=(fvm dart)
+  elif command -v flutter >/dev/null 2>&1; then
+    local flutter_executable="${commands[flutter]:A}"
+    FLUTTER_CMD=("$flutter_executable")
+    if [[ -x "${flutter_executable:h}/dart" ]]; then
+      DART_CMD=("${flutter_executable:h}/dart")
+    else
+      DART_CMD=(dart)
+    fi
+  else
+    error_echo "没有可用的 Flutter SDK，请检查 PATH 或项目 FVM 配置。"
+    return 1
+  fi
+  info_echo "工程目录：$FLUTTER_ROOT"
+  info_echo "Flutter 命令：${(j: :)FLUTTER_CMD}"
+}
+# 过滤展示输出，不将业务函数放进管道。
+flutter_command_output() {
+  if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == 1 ]]; then
+    strip_ansi_text
+  else
+    cat
   fi
 }
+# 管道失败与命令失败都必须向调用方传播。
+run_flutter_step() {
+  local title="$1"
+  shift
+  info_echo "开始：$title"
+  if "$@" 2>&1 | flutter_command_output | tee -a "$LOG_FILE"; then
+    success_echo "完成：$title"
+  else
+    local command_ec=$?
+    error_echo "$title 失败，退出码：$command_ec。后续步骤已停止。"
+    return "$command_ec"
+  fi
+}
+# 只解码 package 指令中的连续 UTF-8 高位字节，保留引号、斜杠等 ASCII 转义。
+repair_package_directives() {
+  perl -MEncode=decode,FB_CROAK -0777 -pe '
+    sub unicode_path {
+      my ($text) = @_;
+      $text =~ s{((?:%[89a-fA-F][0-9a-fA-F])+)}{
+        my $encoded = $1;
+        my $bytes = $encoded;
+        $bytes =~ s/%([0-9a-fA-F]{2})/chr(hex($1))/ge;
+        my $decoded = eval { decode("UTF-8", $bytes, FB_CROAK) };
+        defined($decoded) ? Encode::encode("UTF-8", $decoded) : $encoded;
+      }ge;
+      return $text;
+    }
+    s{^([ \t]*(?:import|export|part)[ \t]+(["\x27])package:)([^"\x27\r\n]*)(\2)}{$1 . unicode_path($3) . $4}gme;
+  ' "$1"
+}
+# 对输入只解除外层引号和拖拽转义，保留目录内原有引号。
+normalize_flutter_input() {
+  local input_value="$1"
+  input_value="${input_value%$'\r'}"
+  input_value="${input_value%$'\n'}"
+  if [[ "$input_value" == \"*\" || "$input_value" == \'*\' ]]; then
+    input_value="${input_value[2,-2]}"
+  fi
+  [[ "$input_value" == '~/'* ]] && input_value="$HOME/${input_value#\~/}"
+  if [[ ! -e "$input_value" ]]; then
+    input_value="${(Q)input_value}"
+  fi
+  print -r -- "$input_value"
+}
+# 先向上定位，再在指定目录内查找；多个候选必须由用户明确路径。
+resolve_flutter_project() {
+  local base="$(normalize_flutter_input "${1:-${PROJECT_DIR:-${REPO:-$PWD}}}")"
+  local candidate="" current=""
+  local -a candidates=()
+  [[ -f "$base" ]] && base="${base:h}"
+  [[ -d "$base" ]] || { error_echo "工程路径不存在：$base"; return 1; }
+  base="$(cd "$base" && pwd -P)" || return 1
+  [[ "$base" != / && "$base" != "$HOME" ]] || { error_echo "拒绝扫描整个根目录或用户目录，请指定工程目录。"; return 1; }
+  current="$base"
+  while [[ "$current" != / ]]; do
+    if [[ -f "$current/pubspec.yaml" && -d "$current/lib" ]]; then
+      FLUTTER_ROOT="$current"
+      return 0
+    fi
+    current="${current:h}"
+  done
+  while IFS= read -r -d '' candidate; do
+    [[ -d "${candidate:h}/lib" ]] && candidates+=("${candidate:h}")
+  done < <(find "$base" \( -type d \( -name .git -o -name node_modules -o -name Pods -o -name PodsManual -o -name 'ManualBy*Pods*' -o -name .dart_tool -o -name .fvm -o -name build -o -name DerivedData -o -name .import_backup -o -name vendor -o -name third_party -o -name ThirdParty \) -prune \) -o \( -type f -name pubspec.yaml -print0 \))
+  if (( ${#candidates[@]} != 1 )); then
+    error_echo "应找到唯一 Flutter 工程，当前候选数量：${#candidates[@]}。请直接传入工程根目录。"
+    for candidate in "${candidates[@]}"; do
+      gray_echo "候选：$candidate"
+    done
+    return 1
+  fi
+  FLUTTER_ROOT="${candidates[1]}"
+}
+# 进入工程后再选择其固定 SDK，避免使用启动目录的 FVM 配置。
+choose_project_flutter() {
+  typeset -ga FLUTTER_CMD DART_CMD
+  cd "$FLUTTER_ROOT" || return 1
+  export PATH="$HOME/.pub-cache/bin:$HOME/.fvm/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+  if [[ -x "$FLUTTER_ROOT/.fvm/flutter_sdk/bin/flutter" ]]; then
+    FLUTTER_CMD=("$FLUTTER_ROOT/.fvm/flutter_sdk/bin/flutter")
+    DART_CMD=("$FLUTTER_ROOT/.fvm/flutter_sdk/bin/dart")
+  elif [[ -f .fvmrc || -f .fvm/fvm_config.json ]]; then
+    command -v fvm >/dev/null 2>&1 || { error_echo "工程固定了 FVM，但本地 SDK / fvm 不可用，请先恢复对应 SDK。"; return 1; }
+    FLUTTER_CMD=(fvm flutter)
+    DART_CMD=(fvm dart)
+  elif command -v flutter >/dev/null 2>&1; then
+    local flutter_executable="${commands[flutter]:A}"
+    FLUTTER_CMD=("$flutter_executable")
+    if [[ -x "${flutter_executable:h}/dart" ]]; then
+      DART_CMD=("${flutter_executable:h}/dart")
+    else
+      DART_CMD=(dart)
+    fi
+  else
+    error_echo "没有可用的 Flutter SDK，请检查 PATH 或项目 FVM 配置。"
+    return 1
+  fi
+  info_echo "工程目录：$FLUTTER_ROOT"
+  info_echo "Flutter 命令：${(j: :)FLUTTER_CMD}"
+}
+# 过滤展示输出，不将业务函数放进管道。
+flutter_command_output() {
+  if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == 1 ]]; then
+    strip_ansi_text
+  else
+    cat
+  fi
+}
+# 管道失败与命令失败都必须向调用方传播。
+run_flutter_step() {
+  local title="$1"
+  shift
+  info_echo "开始：$title"
+  if "$@" 2>&1 | flutter_command_output | tee -a "$LOG_FILE"; then
+    success_echo "完成：$title"
+  else
+    local command_ec=$?
+    error_echo "$title 失败，退出码：$command_ec。后续步骤已停止。"
+    return "$command_ec"
+  fi
+}
+# 只解码 package 指令中的连续 UTF-8 高位字节，保留引号、斜杠等 ASCII 转义。
+repair_package_directives() {
+  perl -MEncode=decode,FB_CROAK -0777 -pe '
+    sub unicode_path {
+      my ($text) = @_;
+      $text =~ s{((?:%[89a-fA-F][0-9a-fA-F])+)}{
+        my $encoded = $1;
+        my $bytes = $encoded;
+        $bytes =~ s/%([0-9a-fA-F]{2})/chr(hex($1))/ge;
+        my $decoded = eval { decode("UTF-8", $bytes, FB_CROAK) };
+        defined($decoded) ? Encode::encode("UTF-8", $decoded) : $encoded;
+      }ge;
+      return $text;
+    }
+    s{^([ \t]*(?:import|export|part)[ \t]+(["\x27])package:)([^"\x27\r\n]*)(\2)}{$1 . unicode_path($3) . $4}gme;
+  ' "$1"
+}
+# 按已校验的工程和参数执行业务，逐步传播失败状态。
+run_original_logic() {
+  setopt NO_NOMATCH PIPE_FAIL
+  (( $# <= 1 )) || { error_echo "用法：脚本 [Flutter 工程目录]"; return 2; }
+  command -v perl >/dev/null 2>&1 || { error_echo "缺少系统 Perl，无法安全修复 UTF-8 路径。"; return 1; }
+  resolve_flutter_project "${1:-}" || return $?
+  local source_file="" relative_file="" staged_file="" changed=0 skipped=0
+  local backup_root="$FLUTTER_ROOT/.import_backup/$(date +%Y%m%d_%H%M%S)_$$"
+  local -a source_roots=()
+  for source_file in lib test integration_test; do
+    [[ -d "$FLUTTER_ROOT/$source_file" && ! -L "$FLUTTER_ROOT/$source_file" ]] && source_roots+=("$FLUTTER_ROOT/$source_file")
+  done
+  while IFS= read -r -d '' source_file; do
+    if [[ "$source_file" == *.g.dart || "$source_file" == *.freezed.dart || "$source_file" == *.mocks.dart ]] ||
+       head -n 80 "$source_file" | grep -Eqi 'GENERATED CODE|DO NOT (EDIT|MODIFY)|Created by ' &&
+       { [[ "$source_file" == *.g.dart || "$source_file" == *.freezed.dart || "$source_file" == *.mocks.dart ]] ||
+         ! head -n 80 "$source_file" | grep -Eqi 'Created by Jobs'; }; then
+      skipped=$((skipped + 1))
+      continue
+    fi
+    relative_file="${source_file#$FLUTTER_ROOT/}"
+    grep -Eq '^[[:space:]]*(import|export|part)[[:space:]]+["\x27]package:.*%[89a-fA-F][0-9a-fA-F]' "$source_file" || continue
+    mkdir -p "$backup_root/${relative_file:h}" || return $?
+    staged_file="$backup_root/$relative_file.decoded"
+    repair_package_directives "$source_file" > "$staged_file" || return $?
+    if cmp -s "$source_file" "$staged_file"; then
+      rm -f -- "$staged_file"
+      continue
+    fi
+    cp -p "$source_file" "$backup_root/$relative_file" || return $?
+    cat "$staged_file" > "$source_file" || return $?
+    rm -f -- "$staged_file"
+    changed=$((changed + 1))
+    info_echo "修复：$relative_file"
+  done < <(find "${source_roots[@]}" \( -type d \( -name .git -o -name node_modules -o -name Pods -o -name PodsManual -o -name 'ManualBy*Pods*' -o -name .dart_tool -o -name build -o -name DerivedData -o -name .import_backup -o -name vendor -o -name third_party -o -name ThirdParty \) -prune \) -o \( -type f -name '*.dart' -print0 \))
+  success_echo "修复文件：$changed；跳过生成 / 第三方文件：$skipped"
+  (( changed == 0 )) || info_echo "原文件备份：$backup_root"
+  return 0
+}
+
+# 初始化 Shell 和输出上下文。
+# 在用户确认后初始化 Shell、当前进程 PATH 和日志。
+initialize_script_runtime() {
+  setopt NO_NOMATCH PIPE_FAIL
+  export PATH="$HOME/.pub-cache/bin:$HOME/.fvm/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+  prepare_plain_output_context
+  : > "$LOG_FILE" || { print -r -- "日志不可写：$LOG_FILE" >&2; exit 1; }
+  LOG_READY=1
+}
 # 编排脚本的高层业务流程。
+# 业务失败时立即结束入口，避免后续成功提示掩盖错误。
+run_checked_business() {
+  local business_ec=0
+  if run_original_logic "$@"; then
+    success_echo "脚本执行结束。日志：$LOG_FILE"
+  else
+    business_ec=$?
+    error_echo "脚本执行失败，退出码：$business_ec。日志：$LOG_FILE"
+    exit "$business_ec"
+  fi
+}
+# 先完成自述确认，再准备运行环境并执行工程业务。
 main() {
-  # 展示脚本内置自述，并按运行入口完成防误触确认。
-  show_readme_and_wait
-  # 初始化 Shell 选项、日志、依赖和入口运行状态。
-  initialize_script_runtime
-  # 执行 run_original_logic 对应的核心业务步骤。
-  run_original_logic "$@"
-  # 输出脚本执行结果、摘要和日志位置。
-  success_echo "脚本执行结束。日志：$LOG_FILE"
+  show_script_intro_and_wait # 打印内置自述，终端模式确认后继续。
+  initialize_script_runtime # 确认后初始化 Shell、PATH 和日志。
+  run_checked_business "$@" # 执行业务，失败保留退出码并终止后续步骤。
 }
 
 main "$@"

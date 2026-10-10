@@ -16,7 +16,7 @@
 - 有改动时创建“提交说明为空白”的正常提交；没有改动时不制造无意义的空提交。
 - 正常分支先 fetch 每条推送线路，再提交本地改动、整合全部远端历史；最后把同一个 HEAD 逐条 push，并核对各线路提交号。没有文件改动时也会同步远端和补推已有提交。
 - 远端查询、fetch、push 遇到超时、空响应或连接中断时最多尝试 3 次；认证、权限、证书及推送拒绝直接停止。重试只重复该条网络命令。
-- 当前层全部线路推送并核验成功后才进入父仓，使父仓提交的 gitlink 指向已经上传的子仓提交。
+- 当前层全部线路推送并核验成功后才进入父仓，使父仓提交的 gitlink 指向已经上传的子仓提交。父仓整合远端后再次核对子仓指针；若快进或合并改变了已完成子仓的 gitlink，会重新暂存这些直接子仓并创建必要提交。
 - 处理“当前仓库管理的全部子仓 → 当前仓库 → 上层父仓”；从子仓发起时，不扩展扫描上层的兄弟仓库。
 
 ## 二、适用场景 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
@@ -52,6 +52,7 @@ chmod +x './【MacOS@SourceTree】🚀逐层空白提交并Push.command'
 - 每层不能存在未解决冲突、未完成的 rebase、cherry-pick、revert 或 bisect。正常分支的 merge 若冲突已全部解决并暂存，允许续跑并完成合并提交；即使最终文件内容与 HEAD 相同，也会创建必要的合并提交。
 - 每层必须已配置 upstream；未配置时，脚本只在存在 `origin` 或唯一远端时自动建立关联。
 - 预检会在任何 `git add` 前覆盖全部已发现的子仓、当前仓库及上层父仓；其中任意一层不满足条件，整个流程都不开始。
+- `JobsOCBaseConfigDemo@ByPods` 使用 GitHub 完整历史和 Gitee 独立零点快照。队列包含该工程时，在 Fetch、恢复、暂存或推送前停止；应使用该工程原生推送窗口或明确的快照映射。
 
 ## 五、执行流程 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
@@ -68,7 +69,8 @@ flowchart TD
     E -->|无| G[不新建提交]
     F --> M[快进或合并远端，冲突时停止]
     G --> M
-    M --> H[逐条 push GitHub / 码云并核对同一提交号]
+    M --> S[重新核对已完成子仓 gitlink，必要时提交]
+    S --> H[逐条 push GitHub / 码云并核对同一提交号]
     H --> I{推送是否成功}
     I -->|否| J[立即停止]
     I -->|是| K{队列是否还有仓库}
@@ -144,18 +146,24 @@ flowchart TD
 
 每个仓库按自己的 remote 配置识别线路，支持 [**GitHub**](https://github.com) 与 [**码云 Gitee**](https://gitee.com)：主上游的全部 push URL 始终纳入；其它远端的地址指向 `github.com` / `gitee.com`，或远端名为 `github` / `gitee` 时也纳入。相同地址去重，无关远端不会自动推送。也支持一个 remote 配置多个 push URL。
 
-两边使用主上游配置的目标分支名（未配置时使用当前本地分支名），不会向码云默认分支猜测推送。只有一条已配置线路的子仓继续单线运行；脚本不会猜测、创建码云仓库或自动添加远端。可在目标仓库配置：
+通常使用主上游配置的目标分支名（未配置时使用当前本地分支名）。`JobsGenesis`、`JobsBaseConfig` 及其下属仓库采用固定码云规则：码云远端别名为 `gitee`，远端目标分支为 `gitee`；GitHub 仍使用主上游目标分支。例如当前 `main` 会分别同步到 GitHub 的 `main` 与码云的 `gitee`，两端最后提交号一致。其它范围沿用主上游分支名，不猜测码云默认分支。
+
+全部线路成功后，范围内本地 `gitee` 跟踪分支与 `gitee/gitee` 同步到最终提交；已有本地 `gitee` 分支只允许安全快进，包含未整合独有提交或被其它工作树占用时停止，保留原状。未配置 `gitee` 别名时先修正配置后重试；脚本不创建远端仓库。只有一条已配置线路的子仓继续单线运行。可在目标仓库配置：
 
 ```shell
 git remote add gitee git@gitee.com:你的账号/你的仓库.git
 ```
 
-全部线路先获取、再整合，最后逐条推送相同 HEAD。远端分支不存在时首次创建；存在独立且无共同祖先的历史时停止，需人工处理。任一线路失败停止父仓，已经成功的推送保留，修复后重跑。不会强推，也不会把当前分支的 upstream 改成第二条线路。获取的历史保存在 `refs/jobs-push-sync/` 下，供本次合并使用。
+全部线路先获取、再整合，最后逐条推送相同 HEAD。远端分支不存在时首次创建；存在独立且无共同祖先的历史时停止，需人工处理。任一线路失败停止父仓，已经成功的推送保留，修复后重跑。不会强推，也不会把当前分支的 upstream 改成第二条线路。获取的历史保存在 `refs/jobs-push-sync/` 下，供本次合并使用。OC 新工程的独立快照例外会在整队列执行前明确阻断，不把快照历史合入 GitHub 开发分支。
 
 ### 8.9、Sourcetree 为什么只显示终端启动结果？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 Sourcetree 动作现在只负责打开 Terminal.app；实际 Git 流程在独立终端中执行，避免等待 Sourcetree 输出窗口刷新。终端先展示影响范围并等待回车，执行时持续输出日志，结束后显示退出码（`0` 为成功），窗口保持打开。按 `Ctrl+C` 可中止正在执行的流程。
 
 首次打开可能出现 macOS 自动化授权，需允许启动进程控制 Terminal.app。启动失败会直接报错，不在 Sourcetree 后台继续提交或推送；可改用终端直接运行同一个脚本。
+
+### 8.10、验证范围 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+
+脚本通过 `zsh -n`；隔离临时仓库验证 GitHub/main 与 Gitee/gitee 双线路、本地 `gitee` 独有历史保护、OC 快照例外门禁和远端整合后的父仓 gitlink 收口。已通过隔离父子仓的完整提交推送流程和已解决待提交 merge 的续跑；网络 stub 验证短暂超时最多 3 次、认证错误只执行 1 次，既有重试行为保留。验证未对用户仓库执行提交、推送、重置或清理；Sourcetree 到 Terminal.app 的实际交接另需结合菜单配置与系统自动化权限核对。
 
 <a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>

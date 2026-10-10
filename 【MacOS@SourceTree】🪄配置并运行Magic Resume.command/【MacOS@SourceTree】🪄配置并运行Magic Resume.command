@@ -93,8 +93,6 @@ resolve_script_metadata() {
 # 组合环境变量、脚本解析路径和父进程链识别 Sourcetree 自定义动作。
 is_sourcetree_runtime() {
   env | grep -Eqi '^SOURCETREE|^SOURCE_TREE' && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/SourceTree.command/"* ]] && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/Documents/Github/JobsGenesis/SourceTree.command/"* ]] && return 0
 
   local pid="$PPID"
   local command_name=""
@@ -119,7 +117,7 @@ strip_ansi_stream() {
 # 在任何首屏输出前配置 Sourcetree 和非 TTY 场景的纯文本环境。
 prepare_plain_output_context() {
   [[ -n "${TERM:-}" ]] || export TERM="dumb"
-  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" || "${JOBS_PLAIN_OUTPUT:-0}" == "1" ]]; then
+  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR+x}" || "${JOBS_PLAIN_OUTPUT:-0}" == "1" ]]; then
     PLAIN_OUTPUT=1
     export NO_COLOR=1
     export FORCE_COLOR=0
@@ -131,52 +129,90 @@ prepare_plain_output_context() {
   fi
 }
 # 同步输出运行信息；确认前只写屏幕，运行态初始化后同时写入日志。
-log() {
-  if [[ "$RUNTIME_INITIALIZED" == "1" ]]; then
-    if [[ "$PLAIN_OUTPUT" == "1" ]]; then
-      printf "%b\n" "$1" | strip_ansi_stream | tee -a "$LOG_FILE"
-    else
-      printf "%b\n" "$1" | tee -a "$LOG_FILE"
-    fi
-  elif [[ "$PLAIN_OUTPUT" == "1" ]]; then
-    printf "%b\n" "$1" | strip_ansi_stream
+render_log_stream() {
+  if [[ "$PLAIN_OUTPUT" == 1 ]]; then
+    strip_ansi_stream
   else
-    printf "%b\n" "$1"
+    cat
   fi
 }
-# 输出正常绿色信息。
-color_echo()     { log "\033[1;32m$1\033[0m"; }
-# 输出蓝色信息提示。
-info_echo()      { log "\033[1;34mℹ $1\033[0m"; }
-# 输出绿色成功提示。
-success_echo()   { log "\033[1;32m✔ $1\033[0m"; }
-# 输出黄色警告提示。
-warn_echo()      { log "\033[1;33m⚠ $1\033[0m"; }
-# 输出黄色温馨提示。
-warm_echo()      { log "\033[1;33m$1\033[0m"; }
-# 输出紫色说明提示。
-note_echo()      { log "\033[1;35m➤ $1\033[0m"; }
-# 输出红色错误提示。
-error_echo()     { log "\033[1;31m✖ $1\033[0m"; }
-# 输出红色纯文本错误。
-err_echo()       { log "\033[1;31m$1\033[0m"; }
-# 输出紫色调试提示。
-debug_echo()     { log "\033[1;35m🐞 $1\033[0m"; }
-# 输出青色高亮提示。
-highlight_echo() { log "\033[1;36m🔹 $1\033[0m"; }
-# 输出灰色次要信息。
-gray_echo()      { log "\033[0;90m$1\033[0m"; }
+# 确认前只输出屏幕，初始化后同时保存日志。
+log() {
+  local message="$1"
+  if [[ "$RUNTIME_INITIALIZED" == 1 ]]; then
+    printf "%s\n" "$message" | render_log_stream | tee -a "$LOG_FILE"
+  else
+    printf "%s\n" "$message" | render_log_stream
+  fi
+}
+# 仅转换固定颜色码，路径和工具输出始终按原文字面值记录。
+color_log() {
+  local color="$1" message="$2"
+  if [[ "$PLAIN_OUTPUT" == 1 ]]; then
+    log "$message"
+  else
+    log "$(printf '\033[%sm%s\033[0m' "$color" "$message")"
+  fi
+}
+# 输出正常信息。
+color_echo() {
+  color_log "1;32" "$1"
+}
+# 输出提示信息。
+info_echo() {
+  color_log "1;34" "ℹ $1"
+}
+# 输出成功信息。
+success_echo() {
+  color_log "1;32" "✔ $1"
+}
+# 输出警告信息。
+warn_echo() {
+  color_log "1;33" "⚠ $1"
+}
+# 输出温馨提示信息。
+warm_echo() {
+  color_log "1;33" "$1"
+}
+# 输出说明信息。
+note_echo() {
+  color_log "1;35" "➤ $1"
+}
+# 输出错误信息。
+error_echo() {
+  color_log "1;31" "✖ $1"
+}
+# 输出错误信息。
+err_echo() {
+  color_log "1;31" "$1"
+}
+# 输出调试信息。
+debug_echo() {
+  color_log "1;35" "🐞 $1"
+}
+# 输出高亮信息。
+highlight_echo() {
+  color_log "1;36" "🔹 $1"
+}
+# 输出次要信息。
+gray_echo() {
+  color_log "0;90" "$1"
+}
 # 输出加粗信息。
-bold_echo()      { log "\033[1m$1\033[0m"; }
+bold_echo() {
+  color_log "1" "$1"
+}
 # 输出下划线信息。
-underline_echo() { log "\033[4m$1\033[0m"; }
+underline_echo() {
+  color_log "4" "$1"
+}
 # 打印内置自述，并按真实运行入口决定是否等待回车。
 show_script_intro_and_wait() {
   resolve_script_metadata
   is_sourcetree_runtime && IS_SOURCETREE_RUNTIME=1
   prepare_plain_output_context
 
-  if [[ "$IS_SOURCETREE_RUNTIME" != "1" && -t 1 && "$TERM" != "dumb" ]]; then
+  if [[ -z "${NO_COLOR+x}" && "$IS_SOURCETREE_RUNTIME" != "1" && "$PLAIN_OUTPUT" != 1 && -t 1 && "$TERM" != "dumb" ]]; then
     clear
   fi
 
@@ -198,9 +234,9 @@ show_script_intro_and_wait() {
   fi
   if [[ ! -t 0 ]]; then
     error_echo "当前不是 Sourcetree，且没有可交互输入；请在终端中重新运行。"
-    return 1
+    exit 1
   fi
-  read -r "?👉 已了解脚本用途与影响，按回车继续；按 Ctrl+C 取消：" _
+  read -r "?👉 已了解脚本用途与影响，按回车继续；按 Ctrl+C 取消：" _ || exit 1
 }
 # 在用户确认后初始化 Shell 选项、PATH、日志文件和输出环境。
 initialize_script_runtime() {
@@ -233,27 +269,25 @@ run_cmd() {
   fi
   success_echo "完成：${title}"
 }
-# 清理 SourceTree 参数或拖入路径外围的引号、file 协议和换行。
+# 清理完整外围引号及末尾换行，保留文件名内部引号和反斜线。
 strip_outer_quotes() {
   local value="$1"
-  value="${value%$'\r'}"
-  value="${value%$'\n'}"
-  value="${value#file://}"
-  value="${value#\"}"
-  value="${value%\"}"
-  value="${value#\'}"
-  value="${value%\'}"
+  while [[ "$value" == *$'\r' || "$value" == *$'\n' ]]; do
+    value="${value%?}"
+  done
+  if (( ${#value} >= 2 )) && [[ "$value" == \"*\" || "$value" == \'*\' ]]; then
+    value="${value[2,-2]}"
+  fi
   print -r -- "$value"
 }
-# 将用户输入路径还原为可安全解析的本机路径。
+# 按字面解析 argv 路径，仅去除完整外围引号、换行并展开家目录缩写。
 normalize_user_input_path() {
   local value="$(strip_outer_quotes "$1")"
   if [[ "$value" == "~" ]]; then
     value="$HOME"
   elif [[ "$value" == "~/"* ]]; then
-    value="${HOME}/${value#~/}"
+    value="${HOME}/${value#\~/}"
   fi
-  value="${(Q)value}"
   print -r -- "$value"
 }
 # 从目录或仓库内文件向上解析 Git 工作区根目录。
@@ -273,7 +307,12 @@ prompt_input_repository() {
   local resolved=""
 
   while true; do
-    read -r "input_path?👉 请输入或拖入当前 Git 仓库目录（Ctrl+C 取消）：" input_path
+    read -r "input_path?👉 请输入或拖入当前 Git 仓库目录（Ctrl+C 取消）：" input_path || die "路径输入已结束，停止执行。"
+    input_path="$(normalize_user_input_path "$input_path")"
+    if [[ ! -e "$input_path" ]]; then
+      local unescaped_path="${(Q)input_path}"
+      [[ ! -e "$unescaped_path" ]] || input_path="$unescaped_path"
+    fi
     resolved="$(resolve_repo_root_from_candidate "$input_path" 2>/dev/null || true)"
     if [[ -n "$resolved" ]]; then
       INPUT_REPO_ROOT="$resolved"
@@ -285,35 +324,17 @@ prompt_input_repository() {
 }
 # 从 SourceTree 的 REPO 参数、命令行参数或当前目录确定运行仓库。
 resolve_input_repository() {
-  local candidate=""
-  local resolved=""
-
-  if [[ "$#" -gt 0 ]]; then
-    for candidate in "$@"; do
-      resolved="$(resolve_repo_root_from_candidate "$candidate" 2>/dev/null || true)"
-      [[ -n "$resolved" ]] || continue
-      INPUT_REPO_ROOT="$resolved"
-      REPO_INPUT_SOURCE="SourceTree / 命令行参数"
-      break
-    done
-    if [[ -z "$INPUT_REPO_ROOT" ]]; then
-      resolved="$(resolve_repo_root_from_candidate "$*" 2>/dev/null || true)"
-      [[ -n "$resolved" ]] || die "传入参数无法识别为 Git 仓库。SourceTree 自定义动作参数请填写 \$REPO。"
-      INPUT_REPO_ROOT="$resolved"
-      REPO_INPUT_SOURCE="SourceTree / 命令行参数"
-    fi
+  (( $# <= 1 )) || die "只接受一个仓库路径，请给含空格的路径加引号。"
+  local candidate="${1:-${SOURCETREE_REPO_PATH:-${REPO:-$PWD}}}" resolved=""
+  resolved="$(resolve_repo_root_from_candidate "$candidate" 2>/dev/null || true)"
+  if [[ -n "$resolved" ]]; then
+    INPUT_REPO_ROOT="$resolved"
+    REPO_INPUT_SOURCE="参数 / 环境 / 当前目录"
+  elif (( $# > 0 )) || [[ -n "${SOURCETREE_REPO_PATH:-}${REPO:-}" || "$IS_SOURCETREE_RUNTIME" == 1 || ! -t 0 ]]; then
+    die "指定路径无法识别为 Git 仓库：$candidate；Sourcetree 参数请填 \$REPO。"
   else
-    resolved="$(resolve_repo_root_from_candidate "$PWD" 2>/dev/null || true)"
-    if [[ -n "$resolved" ]]; then
-      INPUT_REPO_ROOT="$resolved"
-      REPO_INPUT_SOURCE="当前工作目录"
-    elif [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 0 ]]; then
-      die "未收到仓库路径且当前目录不是 Git 仓库。SourceTree 自定义动作参数请填写 \$REPO。"
-    else
-      prompt_input_repository
-    fi
+    prompt_input_repository
   fi
-
   success_echo "已识别运行仓库：${INPUT_REPO_ROOT}"
   gray_echo "仓库来源：${REPO_INPUT_SOURCE}"
 }
@@ -364,8 +385,10 @@ repository_matches_expected() {
 }
 # 判断候选文件夹是否存在且完全为空。
 directory_is_empty() {
-  [[ -d "$1" ]] || return 1
-  [[ -z "$(find "$1" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]
+  local directory="$1" entries=""
+  [[ -d "$directory" ]] || return 1
+  entries="$(find "$directory" -mindepth 1 -maxdepth 1 -print -quit 2>&1)" || die "无法枚举候选目录，停止克隆：${directory}；${entries}"
+  [[ -z "$entries" ]]
 }
 # 扫描父目录第一层的全部文件夹，寻找任意名称但 remote 匹配的同级仓库。
 find_existing_expected_sibling_repository() {
@@ -486,7 +509,8 @@ check_base_environment() {
   for command_name in git curl lsof nohup open; do
     command -v "$command_name" >/dev/null 2>&1 || die "缺少必要命令：${command_name}"
   done
-  success_echo "macOS 基础命令检查通过。"
+  git --version >/dev/null 2>&1 || die "Git 健康检查失败；请先修复 Git / Command Line Tools。"
+  success_echo "macOS 基础命令与 Git 健康检查通过。"
 }
 # 按 Apple Silicon、Intel 和当前 PATH 顺序寻找 Homebrew。
 find_brew() {
@@ -515,18 +539,19 @@ activate_brew() {
 ensure_node_runtime() {
   NODE_BIN="$(command -v node 2>/dev/null || true)"
   NPM_BIN="$(command -v npm 2>/dev/null || true)"
-  if [[ -n "$NODE_BIN" && -n "$NPM_BIN" ]]; then
-    success_echo "已检测到 Node.js：$($NODE_BIN --version)"
+  if [[ -n "$NODE_BIN" && -n "$NPM_BIN" ]] && "$NODE_BIN" --version >/dev/null 2>&1 && "$NPM_BIN" --version >/dev/null 2>&1; then
+    success_echo "Node.js / npm 健康检查通过：$($NODE_BIN --version)"
     return 0
   fi
-
+  [[ "${JOBS_MAGIC_RESUME_DRY_RUN:-0}" != 1 ]] || die "Dry-run 不安装工具链；请先准备可用 Node.js / npm。"
   BREW_BIN="$(find_brew 2>/dev/null || true)"
-  [[ -n "$BREW_BIN" ]] || die "未检测到 Node.js，且系统没有 Homebrew；请先安装 Node.js 后重试。"
+  [[ -n "$BREW_BIN" ]] && "$BREW_BIN" --version >/dev/null 2>&1 || die "Node.js / npm 不可用，且没有健康 Homebrew；请先修复工具链。"
   activate_brew || die "Homebrew 环境激活失败。"
   run_cmd "通过 Homebrew 安装 Node.js" "$BREW_BIN" install node || die "Node.js 安装失败。"
+  activate_brew || die "安装后 Homebrew 环境刷新失败。"
   NODE_BIN="$(command -v node 2>/dev/null || true)"
   NPM_BIN="$(command -v npm 2>/dev/null || true)"
-  [[ -n "$NODE_BIN" && -n "$NPM_BIN" ]] || die "Node.js 安装后仍无法找到 node / npm。"
+  [[ -n "$NODE_BIN" && -n "$NPM_BIN" ]] && "$NODE_BIN" --version >/dev/null 2>&1 && "$NPM_BIN" --version >/dev/null 2>&1 || die "安装后 Node.js / npm 仍不可用，停止后续业务。"
 }
 # 把 npm 全局可执行目录补入当前 PATH。
 refresh_npm_global_path() {
@@ -542,13 +567,14 @@ ensure_pnpm_runtime() {
   [[ "$PACKAGE_MANAGER_SPEC" == pnpm@* ]] || PACKAGE_MANAGER_SPEC="pnpm@latest"
   PNPM_BIN="$(command -v pnpm 2>/dev/null || true)"
 
-  if [[ -z "$PNPM_BIN" ]]; then
+  if [[ -z "$PNPM_BIN" ]] || ! "$PNPM_BIN" --version >/dev/null 2>&1; then
+    [[ "${JOBS_MAGIC_RESUME_DRY_RUN:-0}" != 1 ]] || die "Dry-run 不安装 pnpm；请先准备项目所需 pnpm。"
     run_cmd "安装项目声明的 pnpm：${PACKAGE_MANAGER_SPEC}" "$NPM_BIN" install --global "$PACKAGE_MANAGER_SPEC" || die "pnpm 安装失败，请检查 npm 全局目录权限。"
     refresh_npm_global_path
     PNPM_BIN="$(command -v pnpm 2>/dev/null || true)"
   fi
 
-  [[ -n "$PNPM_BIN" && -x "$PNPM_BIN" ]] || die "未找到可执行的 pnpm。"
+  [[ -n "$PNPM_BIN" && -x "$PNPM_BIN" ]] && "$PNPM_BIN" --version >/dev/null 2>&1 || die "pnpm 安装后健康检查失败。"
   success_echo "已检测到 pnpm：$($PNPM_BIN --version)"
 }
 # 核对仓库 remote 和快速开始所需的关键项目文件。
@@ -571,27 +597,48 @@ install_project_dependencies() {
 port_listener_pids() {
   lsof -nP -tiTCP:"$LOCAL_PORT" -sTCP:LISTEN 2>/dev/null || true
 }
-# 检查监听进程的工作目录是否属于当前 magic-resume 仓库。
+# 核验全部监听进程均为当前仓库 Vite dev，避免 IPv4 / IPv6 混合占用误判。
 listener_belongs_to_repository() {
   local pids_output="$(port_listener_pids)"
-  local listener_pid=""
-  local listener_cwd=""
+  local listener_pid="" listener_cwd="" selected_pid=""
 
+  [[ -n "$pids_output" ]] || return 1
   for listener_pid in ${(f)pids_output}; do
+    [[ "$listener_pid" == <-> ]] || return 1
     listener_cwd="$(lsof -a -p "$listener_pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)"
-    [[ -n "$listener_cwd" ]] || continue
+    [[ -n "$listener_cwd" ]] || return 1
     listener_cwd="$(cd "$listener_cwd" 2>/dev/null && pwd -P || true)"
-    if [[ "$listener_cwd" == "$REPO_ROOT" ]]; then
-      print -r -- "$listener_pid"
-      return 0
-    fi
+    [[ "$listener_cwd" == "$REPO_ROOT" ]] || return 1
+    process_is_vite_dev_server "$listener_pid" || return 1
+    [[ -n "$selected_pid" ]] || selected_pid="$listener_pid"
   done
-  return 1
+  [[ -n "$selected_pid" ]] || return 1
+  print -r -- "$selected_pid"
 }
 # 检查监听进程命令是否明确属于 Vite 开发服务器。
 process_is_vite_dev_server() {
+  local process_executable="$(ps -p "$1" -o comm= 2>/dev/null || true)"
   local process_command="$(ps -p "$1" -o command= 2>/dev/null || true)"
-  [[ "$process_command" == *vite* && "$process_command" == *dev* ]]
+  local vite_entry="${REPO_ROOT}/node_modules/vite/bin/vite.js"
+  local node_prefix="" candidate="" expected_prefix="" arguments="" subcommand=""
+  local -a node_prefixes=("$process_executable" "${process_executable:t}")
+  local -a vite_entries=("$vite_entry" "${vite_entry:A}" "${REPO_ROOT}/node_modules/.bin/../vite/bin/vite.js")
+
+  [[ "${process_executable:t}" == node && -f "$vite_entry" ]] || return 1
+  if [[ -n "$NODE_BIN" ]]; then
+    node_prefixes+=("$NODE_BIN" "${NODE_BIN:A}")
+  fi
+  for node_prefix in "${node_prefixes[@]}"; do
+    [[ -n "$node_prefix" ]] || continue
+    for candidate in "${vite_entries[@]}"; do
+      expected_prefix="${node_prefix} ${candidate} "
+      [[ "$process_command" == "$expected_prefix"* ]] || continue
+      arguments="${process_command#"$expected_prefix"}"
+      subcommand="${arguments%%[[:space:]]*}"
+      [[ "$subcommand" == dev || "$subcommand" == serve ]] && return 0
+    done
+  done
+  return 1
 }
 # 读取脚本上次记录的实际监听进程 PID，并过滤过期或非法内容。
 read_managed_server_pid() {
@@ -645,6 +692,7 @@ reuse_existing_server_if_possible() {
   if [[ -n "$owned_pid" ]]; then
     managed_pid="$(read_managed_server_pid 2>/dev/null || true)"
     if [[ "$managed_pid" == "$owned_pid" ]]; then
+      process_is_vite_dev_server "$owned_pid" || die "PID 文件对应的监听进程不是 Vite dev，停止复用。"
       info_echo "检测到本脚本托管的后台服务，正在确认可访问性：PID ${owned_pid}"
       wait_for_development_server 15 || die "已托管服务在 15 秒内未就绪。"
       SERVER_REUSED=1
@@ -664,7 +712,7 @@ launch_development_server_in_background() {
 
   cd "$REPO_ROOT" || die "无法进入项目目录启动服务：${REPO_ROOT}"
   NO_COLOR=1 FORCE_COLOR=0 CLICOLOR=0 ANSI_COLORS_DISABLED=1 npm_config_color=false \
-    nohup "$PNPM_BIN" dev </dev/null >"$DEV_SERVER_LOG" 2>&1 &!
+    nohup "$PNPM_BIN" dev --port "$LOCAL_PORT" --strictPort </dev/null >"$DEV_SERVER_LOG" 2>&1 &!
   dev_pid="$!"
   [[ -n "$dev_pid" ]] || die "后台服务启动后未获得进程 ID。"
   print -r -- "$dev_pid" > "$DEV_SERVER_PID_FILE"
@@ -676,7 +724,7 @@ launch_development_server_in_background() {
 # 用真正监听 3000 端口的子进程 PID 更新停止服务所需的 PID 文件。
 record_server_listener_pid() {
   local listener_pid="$(listener_belongs_to_repository 2>/dev/null || true)"
-  [[ -n "$listener_pid" ]] || return 1
+  [[ -n "$listener_pid" ]] && process_is_vite_dev_server "$listener_pid" || return 1
   print -r -- "$listener_pid" > "$DEV_SERVER_PID_FILE"
   success_echo "已记录 3000 端口监听进程：PID ${listener_pid}"
 }
@@ -689,7 +737,7 @@ start_or_reuse_development_server() {
   reuse_existing_server_if_possible && return 0
   launch_development_server_in_background
   wait_for_development_server 60 || die "开发服务器在 60 秒内未就绪，请查看服务日志：${DEV_SERVER_LOG}"
-  record_server_listener_pid || warn_echo "服务已经就绪，但未能刷新监听进程 PID；停止服务前请用 lsof 核对。"
+  record_server_listener_pid || die "端口响应未归属于当前仓库的 Vite dev，停止打开页面；请查看服务日志。"
   success_echo "开发服务器已经就绪：${LOCAL_URL}"
 }
 # 使用系统默认浏览器打开 localhost；Dry-run 只展示地址。

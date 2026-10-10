@@ -44,12 +44,15 @@ LOCAL_ACTIONS_PLIST="${SCRIPT_DIR}/actions.plist"
 HOME_PACKAGE_ROOT="${HOME}/${SOURCE_PACKAGE_NAME}"
 DEPLOYED_PACKAGE_ROOT=""
 DEPLOY_TARGET_PACKAGE=""
+DEPLOY_STAGING_DIR=""
 SOURCETREE_APP_NAME="Sourcetree"
 SOURCETREE_PROCESS_NAME="Sourcetree"
 ACTION_SYNC_PACKAGE_TO_SOURCETREE="将脚本包 actions.plist 同步到 Sourcetree 当前用户配置"
 ACTION_SYNC_SOURCETREE_TO_PACKAGES="将 Sourcetree 当前用户配置同步回所有脚本包 actions.plist"
 ACTION_SYNC_CANCEL="取消同步"
 PLAIN_OUTPUT=0
+RUNTIME_INITIALIZED=0
+SOURCETREE_NEEDS_REOPEN=0
 
 # 移除 ANSI 颜色码，避免 Sourcetree 输出窗口显示乱码。
 strip_ansi_text() {
@@ -58,7 +61,7 @@ strip_ansi_text() {
 # 配置当前输出模式，非完整终端或 Sourcetree 环境统一输出纯文本。
 configure_output_mode() {
   [[ -n "${TERM:-}" ]] || export TERM="dumb"
-  if env | grep -Eqi '^SOURCETREE|^SOURCE_TREE' || [[ ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" || "${JOBS_PLAIN_OUTPUT:-0}" == "1" ]]; then
+  if env | grep -Eqi '^SOURCETREE|^SOURCE_TREE' || [[ ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR+x}" || "${JOBS_PLAIN_OUTPUT:-0}" == "1" ]]; then
     PLAIN_OUTPUT=1
     export NO_COLOR="${NO_COLOR:-1}"
     export FORCE_COLOR=0
@@ -68,64 +71,82 @@ configure_output_mode() {
   fi
 }
 # 输出日志并同步写入日志文件。
-log() {
-  if [[ "$PLAIN_OUTPUT" == "1" ]]; then
-    printf "%b\n" "$1" | strip_ansi_text | tee -a "$LOG_FILE"
+render_log_stream() {
+  if [[ "$PLAIN_OUTPUT" == 1 ]]; then
+    strip_ansi_text
   else
-    printf "%b\n" "$1" | tee -a "$LOG_FILE"
+    cat
   fi
 }
-# 输出绿色成功类信息。
+# 确认前只输出屏幕，初始化后同时保存日志。
+log() {
+  local message="$1"
+  if [[ "$RUNTIME_INITIALIZED" == 1 ]]; then
+    printf "%s\n" "$message" | render_log_stream | tee -a "$LOG_FILE"
+  else
+    printf "%s\n" "$message" | render_log_stream
+  fi
+}
+# 仅转换固定颜色码，路径和工具输出始终按原文字面值记录。
+color_log() {
+  local color="$1" message="$2"
+  if [[ "$PLAIN_OUTPUT" == 1 ]]; then
+    log "$message"
+  else
+    log "$(printf '\033[%sm%s\033[0m' "$color" "$message")"
+  fi
+}
+# 输出正常信息。
 color_echo() {
-  log "\033[1;32m$1\033[0m"
+  color_log "1;32" "$1"
 }
-# 输出蓝色提示类信息。
+# 输出提示信息。
 info_echo() {
-  log "\033[1;34mℹ $1\033[0m"
+  color_log "1;34" "ℹ $1"
 }
-# 输出绿色成功信息。
+# 输出成功信息。
 success_echo() {
-  log "\033[1;32m✔ $1\033[0m"
+  color_log "1;32" "✔ $1"
 }
-# 输出黄色警告信息。
+# 输出警告信息。
 warn_echo() {
-  log "\033[1;33m⚠ $1\033[0m"
+  color_log "1;33" "⚠ $1"
 }
-# 输出黄色温馨提示。
+# 输出温馨提示信息。
 warm_echo() {
-  log "\033[1;33m$1\033[0m"
+  color_log "1;33" "$1"
 }
-# 输出紫色说明信息。
+# 输出说明信息。
 note_echo() {
-  log "\033[1;35m➤ $1\033[0m"
+  color_log "1;35" "➤ $1"
 }
-# 输出红色错误信息。
+# 输出错误信息。
 error_echo() {
-  log "\033[1;31m✖ $1\033[0m"
+  color_log "1;31" "✖ $1"
 }
-# 输出红色纯文本错误信息。
+# 输出错误信息。
 err_echo() {
-  log "\033[1;31m$1\033[0m"
+  color_log "1;31" "$1"
 }
-# 输出紫色调试信息。
+# 输出调试信息。
 debug_echo() {
-  log "\033[1;35m🐞 $1\033[0m"
+  color_log "1;35" "🐞 $1"
 }
-# 输出青色高亮信息。
+# 输出高亮信息。
 highlight_echo() {
-  log "\033[1;36m🔹 $1\033[0m"
+  color_log "1;36" "🔹 $1"
 }
-# 输出灰色次要信息。
+# 输出次要信息。
 gray_echo() {
-  log "\033[0;90m$1\033[0m"
+  color_log "0;90" "$1"
 }
 # 输出加粗信息。
 bold_echo() {
-  log "\033[1m$1\033[0m"
+  color_log "1" "$1"
 }
 # 输出下划线信息。
 underline_echo() {
-  log "\033[4m$1\033[0m"
+  color_log "4" "$1"
 }
 # 输出错误并立即终止脚本。
 exit_with_error() {
@@ -134,7 +155,8 @@ exit_with_error() {
 }
 # 打印脚本内置自述，并等待用户确认后再继续。
 show_script_intro_and_wait() {
-  if [[ -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
+  configure_output_mode
+  if [[ -z "${NO_COLOR+x}" && "$PLAIN_OUTPUT" != 1 && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
     clear
   fi
 
@@ -143,7 +165,7 @@ show_script_intro_and_wait() {
   print -r -- "脚本路径：${SCRIPT_PATH}" | jobs_intro_style body
   print -r -- "第一阶段：发送 ${SOURCE_PACKAGE_NAME} 库到目标目录，默认目标父目录为当前用户家目录。" | jobs_intro_style body
   print -r -- "第二阶段：脚本包有 actions.plist 时通过 fzf 选择同步方向；没有时从 Sourcetree 默认路径自动回收。" | jobs_intro_style body
-  print -r -- "影响范围：可能替换目标 ${SOURCE_PACKAGE_NAME} 目录；选择同步方向时可能覆盖 Sourcetree 的 actions.plist。" | jobs_intro_style body
+  print -r -- "影响范围：可能替换目标 ${SOURCE_PACKAGE_NAME} 目录；安装菜单时正常退出并重开 Sourcetree，合并 actions.plist。" | jobs_intro_style body
   print -r -- "安全策略：目标库已存在时直接回车保留并继续；输入 YES 才会备份替换；actions.plist 覆盖前自动备份。" | jobs_intro_style body
   print -r -- "日志文件：${LOG_FILE}" | jobs_intro_style body
   print -r -- "取消方式：确认前按 Ctrl+C 终止，不会继续执行后续业务。" | jobs_intro_style body
@@ -154,7 +176,7 @@ show_script_intro_and_wait() {
     print -u2 -r -- "当前没有可交互输入，请在终端中重新运行。"
     exit 1
   fi
-  read -r "?👉 已了解脚本用途与影响，按回车继续；按 Ctrl+C 取消：" _
+  read -r "?👉 已了解脚本用途与影响，按回车继续；按 Ctrl+C 取消：" _ || exit 1
 }
 # 初始化 Shell 运行选项和日志文件。
 initialize_script_runtime() {
@@ -162,6 +184,7 @@ initialize_script_runtime() {
   set -o pipefail
   setopt NO_NOMATCH
   : > "$LOG_FILE"
+  RUNTIME_INITIALIZED=1
   configure_output_mode
 }
 # 阻止 root 用户执行，避免把配置写入错误用户目录。
@@ -187,12 +210,11 @@ check_fzf_environment() {
 # 去掉用户拖入路径时可能带上的外层引号和换行。
 strip_outer_quotes() {
   local value="$1"
-  value="${value%$'\r'}"
   value="${value%$'\n'}"
-  value="${value#\"}"
-  value="${value%\"}"
-  value="${value#\'}"
-  value="${value%\'}"
+  value="${value%$'\r'}"
+  if [[ "$value" == \"*\" || "$value" == \'*\' ]]; then
+    value="${value[2,-2]}"
+  fi
   print -r -- "$value"
 }
 # 展开用户输入路径里的当前用户家目录缩写。
@@ -203,7 +225,7 @@ expand_user_path() {
     return 0
   fi
   if [[ "$input_path" == "~/"* ]]; then
-    print -r -- "${HOME}/${input_path#~/}"
+    print -r -- "${HOME}/${input_path#\~/}"
     return 0
   fi
   print -r -- "$input_path"
@@ -219,19 +241,14 @@ normalize_existing_path() {
 }
 # 把待创建路径规整为便于比较的绝对路径。
 normalize_target_path() {
-  local input_path="$1"
-  local parent_dir="${input_path:h}"
-  local base_name="${input_path:t}"
-
-  if [[ -d "$input_path" ]]; then
-    cd -P "$input_path" && pwd
-    return 0
-  fi
-  if [[ -d "$parent_dir" ]]; then
-    printf "%s/%s\n" "$(cd -P "$parent_dir" && pwd)" "$base_name"
-    return 0
-  fi
-  print -r -- "$input_path"
+  local input_path="$1" existing="$1" suffix=""
+  [[ "$input_path" == /* ]] || existing="$PWD/$input_path"
+  while [[ ! -e "$existing" && ! -L "$existing" && "$existing" != / ]]; do
+    suffix="/${existing:t}${suffix}"
+    existing="${existing:h}"
+  done
+  [[ -d "$existing" ]] || { print -r -- "$input_path"; return 1; }
+  print -r -- "$(cd -P "$existing" && pwd)${suffix}"
 }
 # 判断数组里是否已经包含指定路径。
 array_contains() {
@@ -282,6 +299,7 @@ ensure_deploy_target_is_safe() {
   local source_abs=""
   local target_abs=""
 
+  [[ ! -L "$DEPLOY_TARGET_PACKAGE" ]] || exit_with_error "目标库是符号链接，停止替换：$DEPLOY_TARGET_PACKAGE"
   source_abs="$(normalize_existing_path "$SOURCE_PACKAGE_ROOT")"
   target_abs="$(normalize_target_path "$DEPLOY_TARGET_PACKAGE")"
 
@@ -330,10 +348,19 @@ copy_git_metadata_to_temp() {
     return 0
   fi
 
+  local source_common_dir="$(git -C "$SOURCE_PACKAGE_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  [[ "$source_common_dir" == "$source_git_dir" ]] || exit_with_error "源库是共享 Git 对象的 linked worktree，不能只复制私有 gitdir；请独立克隆后再部署。"
+  [[ ! -s "$source_common_dir/objects/info/alternates" && -z "${GIT_ALTERNATE_OBJECT_DIRECTORIES:-}" ]] || exit_with_error "源库借用了外部 Git 对象，不能作为独立副本发送；请先建立完整独立克隆。"
   rm -rf "${temp_package}/.git"
   ditto "$source_git_dir" "${temp_package}/.git" || exit_with_error "复制 Git 元数据失败：${source_git_dir}"
   git -C "$temp_package" config --local --unset core.worktree 2>/dev/null || true
   git -C "$temp_package" rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit_with_error "目标临时库 Git 元数据校验失败：${temp_package}"
+  if git -C "$temp_package" rev-parse --verify HEAD >/dev/null 2>&1; then
+    git -C "$temp_package" cat-file -e 'HEAD^{commit}' || exit_with_error "目标临时库缺少 HEAD 对象，停止替换。"
+  else
+    git -C "$temp_package" symbolic-ref -q HEAD >/dev/null || exit_with_error "目标临时库 HEAD 无效，停止替换。"
+  fi
+  GIT_OPTIONAL_LOCKS=0 git -C "$temp_package" status --porcelain >/dev/null || exit_with_error "目标临时库 Git 状态校验失败，停止替换。"
   success_echo "已把 Git 元数据复制为目标库独立 .git。"
 }
 # 用临时目录替换最终目标库，并为旧目标生成备份。
@@ -344,7 +371,7 @@ replace_target_package_with_temp() {
 
   mkdir -p "$target_parent" || exit_with_error "创建目标父目录失败：${target_parent}"
   if [[ -e "$DEPLOY_TARGET_PACKAGE" ]]; then
-    backup_package="${DEPLOY_TARGET_PACKAGE}.bak.$(date '+%Y%m%d_%H%M%S')"
+    backup_package="${DEPLOY_TARGET_PACKAGE}.bak.$(date '+%Y%m%d_%H%M%S').$$"
     mv "$DEPLOY_TARGET_PACKAGE" "$backup_package" || exit_with_error "备份旧目标库失败：${DEPLOY_TARGET_PACKAGE}"
     success_echo "已备份旧目标库：${backup_package}"
   fi
@@ -355,6 +382,13 @@ replace_target_package_with_temp() {
     fi
     exit_with_error "写入目标库失败：${DEPLOY_TARGET_PACKAGE}"
   fi
+}
+# 只清理本次 mktemp 产生且尚未移入目标的部署暂存目录。
+cleanup_deploy_staging() {
+  [[ -n "$DEPLOY_STAGING_DIR" && -d "$DEPLOY_STAGING_DIR" &&
+     "${DEPLOY_STAGING_DIR:h}" == "${DEPLOY_TARGET_PACKAGE:h}" &&
+     "${DEPLOY_STAGING_DIR:t}" == .${SOURCE_PACKAGE_NAME}.tmp.* ]] || return 0
+  rm -rf -- "$DEPLOY_STAGING_DIR"
 }
 # 发送 SourceTree.command 库到用户指定目录。
 send_package_to_user_directory() {
@@ -370,8 +404,9 @@ send_package_to_user_directory() {
 
   target_parent="${DEPLOY_TARGET_PACKAGE:h}"
   mkdir -p "$target_parent" || exit_with_error "创建目标父目录失败：${target_parent}"
-  temp_package="${target_parent}/.${SOURCE_PACKAGE_NAME}.tmp.$(date '+%Y%m%d_%H%M%S').$$"
-  rm -rf "$temp_package"
+  temp_package="$(mktemp -d "${target_parent}/.${SOURCE_PACKAGE_NAME}.tmp.XXXXXX")" || exit_with_error "创建临时部署目录失败。"
+  DEPLOY_STAGING_DIR="$temp_package"
+  trap cleanup_deploy_staging EXIT
   copy_source_worktree_to_temp "$temp_package"
   copy_git_metadata_to_temp "$temp_package"
   replace_target_package_with_temp "$temp_package"
@@ -398,7 +433,7 @@ validate_local_actions_plist() {
 backup_file_if_exists() {
   local file_path="$1"
   [[ -f "$file_path" ]] || return 0
-  local backup_file="${file_path}.bak.$(date '+%Y%m%d_%H%M%S')"
+  local backup_file="${file_path}.bak.$(date '+%Y%m%d_%H%M%S').$$"
   cp -p "$file_path" "$backup_file" || exit_with_error "备份失败：${file_path}"
   success_echo "已备份：${backup_file}"
 }
@@ -413,7 +448,7 @@ copy_file_with_backup() {
     success_echo "源文件与目标文件一致，无需覆盖。"
     gray_echo "源文件：${source_file}"
     gray_echo "目标文件：${target_file}"
-    return 1
+    return 0
   fi
 
   backup_file_if_exists "$target_file"
@@ -431,7 +466,7 @@ peer_install_dirs() {
   local package_root=""
   local install_dir=""
 
-  package_roots=("$HOME_PACKAGE_ROOT" "$SOURCE_PACKAGE_ROOT")
+  package_roots=("$HOME_PACKAGE_ROOT" "$SOURCE_PACKAGE_ROOT" "$HOME/Documents/Github/JobsGenesis/SourceTree.command")
   if [[ -n "$DEPLOYED_PACKAGE_ROOT" ]]; then
     package_roots+=("$DEPLOYED_PACKAGE_ROOT")
   fi
@@ -456,7 +491,7 @@ sync_local_to_peer_packages() {
     [[ "$peer_dir" == "$SCRIPT_DIR" ]] && continue
     peer_plist="${peer_dir}/actions.plist"
     info_echo "同步当前 actions.plist 到等位脚本包：${peer_plist}"
-    copy_file_with_backup "$LOCAL_ACTIONS_PLIST" "$peer_plist" || true
+    copy_file_with_backup "$LOCAL_ACTIONS_PLIST" "$peer_plist"
   done < <(peer_install_dirs)
 }
 # 把 Sourcetree 当前 actions.plist 同步回所有等位脚本包。
@@ -468,7 +503,7 @@ sync_sourcetree_to_peer_packages() {
     [[ -n "$peer_dir" && -d "$peer_dir" ]] || continue
     peer_plist="${peer_dir}/actions.plist"
     info_echo "同步 Sourcetree 当前配置到脚本包：${peer_plist}"
-    copy_file_with_backup "$TARGET_ACTIONS_PLIST" "$peer_plist" || true
+    copy_file_with_backup "$TARGET_ACTIONS_PLIST" "$peer_plist"
   done < <(peer_install_dirs)
 }
 # 输出当前参与同步的脚本包 actions.plist 路径。
@@ -505,27 +540,22 @@ is_app_running() {
 }
 # 如果 Sourcetree 正在运行，则重启以加载新的 actions.plist。
 restart_sourcetree_if_needed() {
-  local app_path=""
-
-  if ! is_app_running "$SOURCETREE_PROCESS_NAME"; then
-    warn_echo "未检测到 Sourcetree 正在运行，本次不主动启动。"
-    return 0
-  fi
-
-  app_path="$(detect_sourcetree_app_path 2>/dev/null || true)"
-  info_echo "检测到 Sourcetree 正在运行，准备重启以载入最新 actions.plist。"
-  osascript -e "tell application \"${SOURCETREE_APP_NAME}\" to quit" >/dev/null 2>&1 || true
-  sleep 2
-  if is_app_running "$SOURCETREE_PROCESS_NAME"; then
-    pkill -x "$SOURCETREE_PROCESS_NAME" >/dev/null 2>&1 || true
-    sleep 1
-  fi
-
+  [[ "$SOURCETREE_NEEDS_REOPEN" == 1 ]] || return 0
+  local app_path="$(detect_sourcetree_app_path 2>/dev/null || true)" elapsed=0
   if [[ -n "$app_path" ]]; then
-    open "$app_path" || warn_echo "重启 Sourcetree 失败，请手动打开。"
+    open "$app_path" || exit_with_error "配置已安装，但 Sourcetree 无法重新打开。"
   else
-    open -a "$SOURCETREE_APP_NAME" || warn_echo "重启 Sourcetree 失败，请手动打开。"
+    open -a "$SOURCETREE_APP_NAME" || exit_with_error "配置已安装，但 Sourcetree 无法重新打开。"
   fi
+  while (( elapsed < 10 )); do
+    if is_app_running "$SOURCETREE_PROCESS_NAME" || is_app_running SourceTree; then
+      success_echo "Sourcetree 已重载。"
+      return 0
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  exit_with_error "配置已安装，未能确认 Sourcetree 重新运行。"
 }
 # 使用 fzf 选择 actions.plist 同步方向。
 select_sync_action() {
@@ -540,15 +570,83 @@ select_sync_action() {
   [[ -n "$choice" ]] || choice="$ACTION_SYNC_CANCEL"
   print -r -- "$choice"
 }
+# 写入前正常退出 Sourcetree，避免退出落盘覆盖新配置，不强制终止。
+pause_sourcetree_before_menu_sync() {
+  local elapsed=0
+  if ! is_app_running "$SOURCETREE_PROCESS_NAME" && ! is_app_running SourceTree; then
+    return 0
+  fi
+  osascript -e 'tell application "Sourcetree" to quit' >/dev/null 2>&1 || exit_with_error "Sourcetree 拒绝正常退出，尚未覆盖配置。"
+  while (( elapsed < 10 )); do
+    if ! is_app_running "$SOURCETREE_PROCESS_NAME" && ! is_app_running SourceTree; then
+      SOURCETREE_NEEDS_REOPEN=1
+      return 0
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  exit_with_error "Sourcetree 尚未退出，可能等待操作完成；不会强杀或覆盖配置。"
+}
+# 合并按目标路径匹配的动作，保留当前自定义标题及额外动作。
+merge_actions_preserving_titles() {
+  local merged_file="$1" runtime_root="$HOME_PACKAGE_ROOT"
+  [[ -z "$DEPLOYED_PACKAGE_ROOT" || ! -d "$DEPLOYED_PACKAGE_ROOT" ]] || runtime_root="$DEPLOYED_PACKAGE_ROOT"
+  osascript -l JavaScript - "$LOCAL_ACTIONS_PLIST" "$TARGET_ACTIONS_PLIST" "$merged_file" "$runtime_root" <<'JAVASCRIPT' || exit_with_error "菜单归档合并失败，未覆盖当前配置。"
+ObjC.import('Foundation');
+function run(argv) {
+  function readArchive(path) {
+    var data = $.NSData.dataWithContentsOfFile(path);
+    if (!data || data.isNil()) throw new Error('Cannot read archive: ' + path);
+    var items = ObjC.deepUnwrap($.NSKeyedUnarchiver.unarchiveObjectWithData(data));
+    if (!Array.isArray(items)) throw new Error('Expected actions array');
+    return items;
+  }
+  function canonical(target) {
+    var name = target.split('/').pop();
+    if (name === '【MacOS@SourceTree】Pod_Install.command') name = '【MacOS@SourceTree】🫘打开终端运行Pod Install.command';
+    return target.indexOf('/SourceTree.command/') >= 0 ? argv[3] + '/' + name + '/' + name : target;
+  }
+  var templates = readArchive(argv[0]);
+  var current = $.NSFileManager.defaultManager.fileExistsAtPath(argv[1]) ? readArchive(argv[1]) : [];
+  var updates = {}, seen = {}, result = [];
+  templates.forEach(function(item) {
+    item.target = canonical(item.target);
+    if (updates[item.target]) throw new Error('Duplicate template target: ' + item.target);
+    if (!$.NSFileManager.defaultManager.isExecutableFileAtPath(item.target)) throw new Error('Missing or non-executable managed action: ' + item.target);
+    updates[item.target] = item;
+  });
+  current.forEach(function(item) {
+    var key = canonical(item.target), update = updates[key];
+    if (seen[key]) throw new Error('Duplicate action target: ' + key);
+    seen[key] = true;
+    if (update) {
+      var merged = Object.assign({}, update, item);
+      merged.target = key;
+      merged.params = update.params;
+      merged.repoAction = update.repoAction;
+      merged.fileAction = update.fileAction;
+      result.push(merged);
+    } else result.push(item);
+  });
+  templates.forEach(function(item) { if (!seen[item.target]) { seen[item.target] = true; result.push(item); } });
+  var data = $.NSKeyedArchiver.archivedDataWithRootObject($(result));
+  if (!data.writeToFileAtomically(argv[2], true)) throw new Error('Cannot save merged archive');
+}
+JAVASCRIPT
+  validate_plist "$merged_file"
+}
 # 把当前脚本包 actions.plist 安装到 Sourcetree 当前用户配置。
 sync_current_actions_to_sourcetree() {
-  local copied=0
-
-  info_echo "准备将当前脚本包 actions.plist 同步到 Sourcetree。"
+  local merged_file=""
+  info_echo "按稳定脚本路径合并菜单，保留当前用户标题及额外动作。"
   validate_plist "$LOCAL_ACTIONS_PLIST"
-  copy_file_with_backup "$LOCAL_ACTIONS_PLIST" "$TARGET_ACTIONS_PLIST" || copied="$?"
-  sync_local_to_peer_packages
-  [[ "$copied" -eq 0 ]] && restart_sourcetree_if_needed
+  pause_sourcetree_before_menu_sync
+  merged_file="$(mktemp "${TMPDIR:-/tmp}/sourcetree-actions.XXXXXX")" || exit_with_error "无法创建菜单临时文件。"
+  merge_actions_preserving_titles "$merged_file"
+  copy_file_with_backup "$merged_file" "$TARGET_ACTIONS_PLIST"
+  rm -f "$merged_file"
+  sync_sourcetree_to_peer_packages
+  restart_sourcetree_if_needed
 }
 # 把 Sourcetree 当前用户配置同步回所有脚本包。
 sync_sourcetree_actions_to_current() {

@@ -1,15 +1,11 @@
 #!/bin/zsh
 # 脚本自述：
 # - 脚本名称：【MacOS@SourceTree】♻️双击Git（识别子Git） 提交回退.command
-# - 核心用途：执行“♻️双击Git（识别子Git） 提交回退”对应的 Git / Sourcetree 自动化操作。
-# - 影响范围：可能修改当前仓库、工作区、分支、菜单配置或 Git 索引。
-# - 运行提示：运行后会先打印内置自述；Sourcetree 模式无交互连续执行，终端模式确认后继续。
-# =====================================================================
-# Jobs 标准化脚本外壳
-# 说明：保留原脚本业务逻辑，补齐 README 防误触、彩色日志、zsh 入口、Homebrew 健康自检标准。
-# =====================================================================
-# Sourcetree 自定义动作可能只传脚本名，不传绝对路径；这里兜底找回真实脚本位置。
-# 仅渲染自述：标题红色加粗，编号正文蓝色常规字重；非彩色终端输出纯文本。
+# - 核心用途：Sourcetree soft 撤回未推送提交；终端支持 upstream、提交、tag 和 reflog 回退。
+# - 影响范围：soft 保留工作区并更新暂存区；hard 舍弃已跟踪改动，但不递归重置子模块。
+# - 运行提示：终端参数模式仍先回车确认；hard 必须输入 YES，Sourcetree 只执行 soft。
+# shell: zsh
+
 jobs_intro_style() {
   local intro_color=0
   if [ -t 1 ] && [ -n "${TERM:-}" ] && [ "${TERM:-}" != dumb ] &&
@@ -32,735 +28,266 @@ jobs_intro_style() {
     }
   '
 }
-resolve_script_path() {
-  local script_source="${BASH_SOURCE[0]:-${(%):-%x}}"
-  local script_name="$(basename -- "$0")"
-  local candidate=""
+RAW_SCRIPT_PATH="$0"
+SCRIPT_PATH=""
+SCRIPT_BASENAME=""
+LOG_FILE=""
+LOG_READY=0
+IS_SOURCETREE_RUNTIME=0
+PLAIN_OUTPUT=0
+REPO_ROOT=""
+UPSTREAM_REF=""
+RESET_TARGET=""
+RESET_MODE=""
+SELECTION=""
 
-  for candidate in \
-    "$script_source" \
-    "${PWD}/${script_source}" \
-    "${HOME}/SourceTree.command/${script_name}/${script_name}" \
-    "${HOME}/Documents/Github/JobsGenesis/SourceTree.command/${script_name}/${script_name}"; do
-    [[ -n "$candidate" && -f "$candidate" ]] || continue
-    (cd "$(dirname "$candidate")" 2>/dev/null && printf "%s/%s\n" "$(pwd -P)" "$(basename "$candidate")")
-    return 0
-  done
-
-  printf "%s/%s\n" "$PWD" "$script_name"
-}
-
-SCRIPT_PATH="$(resolve_script_path)"
-SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd -P)"
-SCRIPT_BASENAME="$(basename "$SCRIPT_PATH" | sed 's/\.[^.]*$//')"
-LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"
-# 识别 Sourcetree 自定义动作的瘦身运行环境，系统终端双击运行不降级。
+# 仅以 Sourcetree 环境标记或父进程确认入口，不把命令行参数当作身份。
 is_sourcetree_runtime() {
-  env | grep -Eqi '^SOURCETREE|^SOURCE_TREE' && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/SourceTree.command/"* ]] && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/Documents/Github/JobsGenesis/SourceTree.command/"* ]] && return 0
-
-  local pid="$PPID"
-  local command_name=""
-  local guard=0
-  while [[ -n "$pid" && "$pid" != "0" && "$guard" -lt 8 ]]; do
-    command_name="$(ps -o comm= -p "$pid" 2>/dev/null || true)"
-    [[ "$command_name" == *SourceTree* || "$command_name" == *Sourcetree* ]] && return 0
-    pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+  /usr/bin/env | /usr/bin/grep -Ei '^SOURCETREE|^SOURCE_TREE' >/dev/null && return 0
+  local process_id="$PPID" process_name="" guard=0
+  while [[ -n "$process_id" && "$process_id" != 0 && "$guard" -lt 8 ]]; do
+    process_name="$(/bin/ps -o comm= -p "$process_id" 2>/dev/null || true)"
+    [[ "$process_name" == *SourceTree* || "$process_name" == *Sourcetree* ]] && return 0
+    process_id="$(/bin/ps -o ppid= -p "$process_id" 2>/dev/null | /usr/bin/tr -d ' ' || true)"
     guard=$((guard + 1))
   done
-
   return 1
 }
-
-IS_SOURCETREE_RUNTIME=0
-
-SOURCETREE_PLAIN_OUTPUT=0
-# 封装 strip_ansi_text 对应的独立处理逻辑。
-strip_ansi_text() {
-  perl -pe 's/\e\[[0-9;]*[[:alpha:]]//g'
+# 准备路径与纯文本输出，首屏不创建日志或改动 Git。
+prepare_intro_context() {
+  local filename="${RAW_SCRIPT_PATH:t}" candidate="${RAW_SCRIPT_PATH:A}"
+  local fallback=""
+  for fallback in "${HOME}/SourceTree.command/${filename}/${filename}" "${HOME}/Documents/Github/JobsGenesis/SourceTree.command/${filename}/${filename}"; do
+    [[ -f "$candidate" ]] && break
+    [[ -f "$fallback" ]] && candidate="$fallback"
+  done
+  SCRIPT_PATH="$candidate"
+  SCRIPT_BASENAME="${filename:r}"
+  LOG_FILE="${${TMPDIR:-/tmp}:A}/${SCRIPT_BASENAME}.log"
+  is_sourcetree_runtime && IS_SOURCETREE_RUNTIME=1
+  configure_output_mode
 }
-# 根据运行入口和终端能力预先切换纯文本输出，避免 Sourcetree 显示 ANSI 转义码。
-prepare_plain_output_context() {
-  [[ -n "${TERM:-}" ]] || export TERM="dumb"
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" || "${JOBS_PLAIN_OUTPUT:-0}" == "1" ]]; then
-    SOURCETREE_PLAIN_OUTPUT=1
-    COLOR_ENABLED=0
-    export NO_COLOR="${NO_COLOR:-1}"
-    export FORCE_COLOR=0
-    export CLICOLOR="0"
-    export ANSI_COLORS_DISABLED="1"
-    export npm_config_color=false
+# 确认前后均配置外部命令的纯文本环境。
+configure_output_mode() {
+  if [[ "$IS_SOURCETREE_RUNTIME" == 1 || ! -t 1 || -z "${TERM:-}" || "${TERM:-}" == dumb || -n "${NO_COLOR+x}" ]]; then
+    PLAIN_OUTPUT=1
+    export NO_COLOR=1 FORCE_COLOR=0 CLICOLOR=0 ANSI_COLORS_DISABLED=1 npm_config_color=false
   fi
+  return 0
 }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
+strip_ansi_stream() {
+  /usr/bin/perl -pe 's/\e\[[0-9;]*[[:alpha:]]//g'
+}
+# 展示颜色与业务正文分开，路径中的反斜杠保持原值。
 log() {
-  if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == "1" ]]; then
-    printf "%b\n" "$1" | strip_ansi_text | tee -a "$LOG_FILE"
-  else
-    printf "%b\n" "$1" | tee -a "$LOG_FILE"
-  fi
-}
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-color_echo()     { log "\033[1;32m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-info_echo()      { log "\033[1;34mℹ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-success_echo()   { log "\033[1;32m✔ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-warn_echo()      { log "\033[1;33m⚠ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-warm_echo()      { log "\033[1;33m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-note_echo()      { log "\033[1;35m➤ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-error_echo()     { log "\033[1;31m✖ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-err_echo()       { log "\033[1;31m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-debug_echo()     { log "\033[1;35m🐞 $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-highlight_echo() { log "\033[1;36m🔹 $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-gray_echo()      { log "\033[0;90m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-bold_echo()      { log "\033[1m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-underline_echo() { log "\033[4m$1\033[0m"; }
-# ============================= 标准工具函数 =============================
-get_cpu_arch() {
-  [[ "$(uname -m)" == "arm64" ]] && echo "arm64" || echo "x86_64"
-}
-# 封装 abs_path 对应的独立处理逻辑。
-abs_path() {
-  local p="$1"
-  [[ -z "$p" ]] && return 1
-  p="${p//\"/}"
-  [[ "$p" != "/" ]] && p="${p%/}"
-  if [[ -d "$p" ]]; then
-    (cd "$p" 2>/dev/null && pwd -P)
-  elif [[ -f "$p" ]]; then
-    (cd "${p:h}" 2>/dev/null && printf "%s/%s\n" "$(pwd -P)" "${p:t}")
-  else
-    return 1
-  fi
-}
-# 收集并校验用户输入，决定后续执行路径。
-ask_run() {
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
-    gray_echo "Sourcetree 连续执行模式已跳过当前可选交互。"
-    return 1
-  fi
-  echo ""
-  note_echo "👉 $1"
-  gray_echo "【回车=跳过，输入任意字符后回车=执行】"
-  local input=""
-  IFS= read -r "input?➤ "
-  [[ -n "$input" ]]
-}
-# 收集并校验用户输入，决定后续执行路径。
-confirm_yes() {
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
-    gray_echo "Sourcetree 连续执行模式已跳过当前可选交互。"
-    return 1
-  fi
-  echo ""
-  warn_echo "⚠ $1"
-  gray_echo "危险操作必须输入 YES 后回车；其它输入一律取消。"
-  local input=""
-  IFS= read -r "input?➤ "
-  [[ "$input" == "YES" ]]
-}
-# 封装 inject_shellenv_block 对应的独立处理逻辑。
-inject_shellenv_block() {
-  local profile_file="$1"
-  local shellenv_cmd="$2"
-  local header="# >>> Homebrew 环境变量 >>>"
-  [[ -z "$profile_file" || -z "$shellenv_cmd" ]] && { error_echo "缺少参数：inject_shellenv_block <profile_file> <shellenv_cmd>"; return 1; }
-  mkdir -p "$(dirname "$profile_file")"
-  touch "$profile_file"
-  if grep -Fq "$shellenv_cmd" "$profile_file" 2>/dev/null; then
-    info_echo "已存在 Homebrew shellenv：$profile_file"
-  elif grep -Fq "$header" "$profile_file" 2>/dev/null; then
-    info_echo "已存在 Homebrew 环境变量块：$profile_file"
-  else
-    {
-      echo ""
-      echo "$header"
-      echo "$shellenv_cmd"
-    } >> "$profile_file"
-    success_echo "已写入 Homebrew shellenv：$profile_file"
-  fi
-  eval "$shellenv_cmd" || true
-}
-# 封装 activate_homebrew_shellenv 对应的独立处理逻辑。
-activate_homebrew_shellenv() {
-  local arch="$(get_cpu_arch)"
-  local brew_bin=""
-  if command -v brew >/dev/null 2>&1; then
-    brew_bin="$(command -v brew)"
-  elif [[ "$arch" == "arm64" && -x "/opt/homebrew/bin/brew" ]]; then
-    brew_bin="/opt/homebrew/bin/brew"
-  elif [[ -x "/usr/local/bin/brew" ]]; then
-    brew_bin="/usr/local/bin/brew"
-  fi
-  [[ -z "$brew_bin" ]] && return 1
-
-  local shell_name="${SHELL##*/}"
-  local profile_file=""
-  case "$shell_name" in
-    zsh)  profile_file="$HOME/.zprofile" ;;
-    bash) profile_file="$HOME/.bash_profile" ;;
-    *)    profile_file="$HOME/.profile" ;;
+  local level="$1" message="$2" rendered="$2" color=""
+  case "$level" in
+    info) color=$'\033[1;34m' ;;
+    success) color=$'\033[1;32m' ;;
+    warn) color=$'\033[1;33m' ;;
+    error) color=$'\033[1;31m' ;;
   esac
-  inject_shellenv_block "$profile_file" "eval \"\$(${brew_bin} shellenv)\""
-  eval "$(${brew_bin} shellenv)"
-}
-# 执行已经拆分完成的独立业务步骤。
-run_brew_health_update() {
-  info_echo "正在执行 Homebrew 健康更新..."
-  brew update  || { error_echo "brew update 失败"; return 1; }
-  brew upgrade || { error_echo "brew upgrade 失败"; return 1; }
-  brew cleanup || { error_echo "brew cleanup 失败"; return 1; }
-  brew doctor  || warn_echo "brew doctor 有警告，请按输出处理"
-  brew -v      || warn_echo "打印 brew 版本失败，可忽略"
-  success_echo "Homebrew 健康更新完成"
-}
-# 执行对应的环境配置或同步处理。
-install_homebrew() {
-  local arch="$(get_cpu_arch)"
-  local brew_bin=""
-
-  if ! command -v brew >/dev/null 2>&1 && [[ ! -x "/opt/homebrew/bin/brew" && ! -x "/usr/local/bin/brew" ]]; then
-    warn_echo "未检测到 Homebrew，准备按架构安装：$arch"
-    if [[ "$arch" == "arm64" ]]; then
-      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || { error_echo "Homebrew 安装失败（arm64）"; return 1; }
-      brew_bin="/opt/homebrew/bin/brew"
-    else
-      arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || { error_echo "Homebrew 安装失败（x86_64）"; return 1; }
-      brew_bin="/usr/local/bin/brew"
-    fi
-    success_echo "Homebrew 安装完成"
-    activate_homebrew_shellenv || true
-    return 0
-  fi
-
-  activate_homebrew_shellenv || true
-  info_echo "Homebrew 已安装。"
-  if ask_run "是否执行 Homebrew 更新 / 升级 / 清理 / doctor？"; then
-    run_brew_health_update
+  [[ "$PLAIN_OUTPUT" == 1 ]] || rendered="${color}${message}"$'\033[0m'
+  if [[ "$LOG_READY" == 1 ]]; then
+    print -r -- "$rendered" | tee -a "$LOG_FILE"
   else
-    note_echo "已跳过 Homebrew 更新"
+    print -r -- "$rendered"
   fi
 }
-# 封装 brew_install_or_upgrade 对应的独立处理逻辑。
-brew_install_or_upgrade() {
-  local formula="$1"
-  [[ -z "$formula" ]] && return 1
-  install_homebrew || return 1
-  if ! brew list --formula "$formula" >/dev/null 2>&1 && ! command -v "$formula" >/dev/null 2>&1; then
-    note_echo "未检测到 $formula，正在安装..."
-    brew install "$formula" || { error_echo "$formula 安装失败"; return 1; }
-    success_echo "$formula 安装完成"
-  else
-    info_echo "$formula 已安装。"
-    if ask_run "是否升级 $formula？"; then
-      brew upgrade "$formula" || warn_echo "$formula 可能已是最新或升级失败，请检查输出"
-      brew cleanup || true
-    else
-      note_echo "已跳过 $formula 升级"
-    fi
-  fi
-}
-# 展示脚本用途和影响范围，并在执行前等待用户确认。
-show_readme_and_wait() {
-  if typeset -f is_sourcetree_runtime >/dev/null 2>&1 && is_sourcetree_runtime; then
-    IS_SOURCETREE_RUNTIME=1
-  fi
-  prepare_plain_output_context
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
-    clear
-  fi
-
-  highlight_echo "============================== 脚本内置自述 ==============================" | jobs_intro_style title
-  note_echo "脚本名称：${SCRIPT_BASENAME}.command" | jobs_intro_style title
-  note_echo "脚本路径：${SCRIPT_PATH}" | jobs_intro_style body
-  note_echo "运行入口：兼容系统终端双击运行和 Sourcetree 自定义动作运行。" | jobs_intro_style body
-  note_echo "核心行为：按脚本名称执行对应的 SourceTree 效率动作，运行前会先展示这段内置自述，避免误触。" | jobs_intro_style title
-  note_echo "环境策略：系统终端保留清屏、彩色输出和回车确认；Sourcetree 瘦身环境自动跳过清屏和等待，并输出纯文本日志。" | jobs_intro_style body
-  note_echo "文档关系：同目录 README.md 只作为外部说明文档保留，运行时自述不读取、不拼接、不依赖 README.md。" | jobs_intro_style body
-  warn_echo "继续前请确认 SourceTree 传入路径、当前仓库或拖入路径正确；按 Ctrl+C 可以取消。" | jobs_intro_style body
-  gray_echo "日志文件：${LOG_FILE}" | jobs_intro_style body
-  highlight_echo "=======================================================================" | jobs_intro_style title
-  echo "" | jobs_intro_style body
-
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
-    gray_echo "已识别为 Sourcetree 自定义动作，将跳过交互并连续执行。" | jobs_intro_style body
+info_echo() { log info "ℹ $1"; }
+success_echo() { log success "✔ $1"; }
+warn_echo() { log warn "⚠ $1"; }
+error_echo() { log error "✖ $1"; }
+# 自述失败必须终止，不能进入后面的重置逻辑。
+show_script_intro_and_wait() {
+  prepare_intro_context
+  print -r -- "============================== Git 提交回退 ==============================" | jobs_intro_style title
+  print -r -- "脚本名称：${SCRIPT_BASENAME}.command" | jobs_intro_style title
+  print -r -- "1、Sourcetree 仅 soft 回退未推送提交，改动保留在暂存区。" | jobs_intro_style body
+  print -r -- "2、终端支持 soft、hard、提交、tag 和 reflog 五种模式；传入仓库路径仍需确认。" | jobs_intro_style body
+  print -r -- "3、远端回退使用已配置的 upstream；未配置时才尝试 origin/当前分支，不自动 fetch。" | jobs_intro_style body
+  print -r -- "4、soft 只允许 upstream 为 HEAD 祖先；落后或分叉时停止，避免引入或覆盖远端历史。" | jobs_intro_style body
+  print -r -- "5、所有 hard 模式会舍弃已跟踪的未提交内容，必须输入 YES；不递归重置子模块。" | jobs_intro_style body
+  print -r -- "取消方式：Ctrl+C；日志位于 ${LOG_FILE}" | jobs_intro_style body
+  if [[ "$IS_SOURCETREE_RUNTIME" == 1 ]]; then
     return 0
   fi
   if [[ ! -t 0 ]]; then
-    error_echo "当前不是 Sourcetree，且没有可交互输入；请在终端中重新运行。"
+    print -u2 -r -- "当前不是 Sourcetree，且没有可交互输入；请在终端重新运行。"
+    exit 1
+  fi
+  read -r '?已了解用途与影响，按回车继续；Ctrl+C 取消：' _ || exit 1
+}
+initialize_script_runtime() {
+  emulate -R zsh
+  setopt NO_NOMATCH ERR_EXIT PIPE_FAIL
+  export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+  : > "$LOG_FILE"
+  LOG_READY=1
+  configure_output_mode
+}
+check_environment() {
+  command -v git >/dev/null && git --version >/dev/null || { error_echo "Git 不可用。"; return 1; }
+}
+# 拖入路径只做字符串解引用，不执行用户输入。
+resolve_repository() {
+  local candidate="${1:-${REPO:-}}" entered=""
+  if [[ -z "$candidate" ]]; then
+    if [[ "$IS_SOURCETREE_RUNTIME" == 1 ]]; then
+      error_echo '未收到仓库路径；请在动作参数栏填写 $REPO。'
+      return 1
+    fi
+    info_echo "输入或拖入仓库路径；直接回车使用当前目录：${PWD}"
+    read -r 'entered?仓库路径：' || return 1
+    candidate="${entered:-$PWD}"
+  fi
+  candidate="${candidate%$'\r'}"
+  [[ -e "$candidate" ]] || candidate="${(Q)candidate}"
+  [[ -f "$candidate" ]] && candidate="${candidate:h}"
+  [[ -d "$candidate" ]] || { error_echo "目标目录不存在：${candidate}"; return 1; }
+  REPO_ROOT="$(git -C "$candidate" rev-parse --show-toplevel 2>/dev/null)" || { error_echo "目标不在 Git 工作树中：${candidate}"; return 1; }
+  REPO_ROOT="${REPO_ROOT:A}"
+  info_echo "当前 Git 仓库：${REPO_ROOT}"
+}
+# 冲突、未完成操作或游离 HEAD 下不能把回退解释为未推送提交撤回。
+check_repository_state() {
+  local metadata="$(git -C "$REPO_ROOT" rev-parse --absolute-git-dir)" marker=""
+  if [[ -n "$(git -C "$REPO_ROOT" ls-files --unmerged)" ]]; then
+    error_echo "存在未解决冲突，请先处理。"
     return 1
   fi
-  read "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..."
+  for marker in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG rebase-merge rebase-apply sequencer index.lock; do
+    [[ ! -e "${metadata}/${marker}" ]] || { error_echo "存在未完成操作或锁：${marker}"; return 1; }
+  done
 }
-# 执行已经拆分完成的独立业务步骤。
-run_original_logic() {
-  # ============================= 原脚本业务逻辑区 =============================
-  set -euo pipefail
-
-  # ============================================================
-  # 🧰 Git 提交回退助手（双击+SourceTree 一套脚本）
-  #  - 双击 .command：交互式多模式
-  #  - SourceTree Custom Action：直接把未推送提交打回到“提交”面板
-  # ============================================================
-
-  SCRIPT_BASENAME="$(basename "$SCRIPT_PATH" | sed 's/\.[^.]*$//')"
-  SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-  LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"
-
-  # 运行模式：standalone / sourcetree
-  RUN_MODE="standalone"
-  REPO_FROM_ARG=""
-
-  # 如果第一个参数是一个 Git 仓库路径，认为是 SourceTree 调用
-  if [[ $# -ge 1 ]]; then
-    if [[ -d "$1" ]]; then
-      if git -C "$1" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        RUN_MODE="sourcetree"
-        REPO_FROM_ARG="$(cd "$1" && pwd)"
-      fi
-    fi
+# 只读取本地远端跟踪快照；有明确配置但引用丢失时不猜另一条线路。
+resolve_upstream_target() {
+  local branch="$(git -C "$REPO_ROOT" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+  local configured_remote=""
+  [[ -n "$branch" ]] || { error_echo "游离 HEAD 没有明确当前分支，不能回退到远端。"; return 1; }
+  configured_remote="$(git -C "$REPO_ROOT" config --get "branch.${branch}.remote" || true)"
+  UPSTREAM_REF="$(git -C "$REPO_ROOT" rev-parse --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+  if [[ -z "$UPSTREAM_REF" && -z "$configured_remote" ]]; then
+    UPSTREAM_REF="refs/remotes/origin/${branch}"
   fi
-  # =============== 彩色输出 ===============
-  log()            { echo -e "$1" | tee -a "$LOG_FILE"; }
-  # 按当前输出级别记录终端信息，并同步写入脚本日志。
-  info_echo()      { log "\033[1;34mℹ $1\033[0m"; }
-  # 按当前输出级别记录终端信息，并同步写入脚本日志。
-  success_echo()   { log "\033[1;32m✔ $1\033[0m"; }
-  # 按当前输出级别记录终端信息，并同步写入脚本日志。
-  warn_echo()      { log "\033[1;33m⚠ $1\033[0m"; }
-  # 按当前输出级别记录终端信息，并同步写入脚本日志。
-  warm_echo()      { log "\033[1;33m$1\033[0m"; }
-  # 按当前输出级别记录终端信息，并同步写入脚本日志。
-  note_echo()      { log "\033[1;36m📝 $1\033[0m"; }
-  # 按当前输出级别记录终端信息，并同步写入脚本日志。
-  error_echo()     { log "\033[1;31m❌ $1\033[0m"; }
-  # 按当前输出级别记录终端信息，并同步写入脚本日志。
-  debug_echo()     { log "\033[1;35m🐞 $1\033[0m"; }
-  # 按当前输出级别记录终端信息，并同步写入脚本日志。
-  highlight_echo() { log "\033[1;35m✨ $1\033[0m"; }
-  # 按当前输出级别记录终端信息，并同步写入脚本日志。
-  bold_echo()      { log "\033[1m$1\033[0m"; }
-  # =============== 自述 ===============
-  print_git_reset_intro() {
-    echo "" | jobs_intro_style body
-    bold_echo "===============================================" | jobs_intro_style title
-    bold_echo "  🧰 Git 提交回退助手（支持多种模式 & 子 Git）" | jobs_intro_style title
-    bold_echo "===============================================" | jobs_intro_style title
-    echo "" | jobs_intro_style body
-    info_echo "本工具支持：" | jobs_intro_style title
-    echo "  1️⃣ soft 回退到远端（提交打回到“待提交”，已暂存）" | jobs_intro_style body
-    echo "  2️⃣ hard 回退到远端（丢弃本地提交 + 修改）" | jobs_intro_style body
-    echo "  3️⃣ 通过 fzf 选择任意提交回退" | jobs_intro_style body
-    echo "  4️⃣ 通过 tag 回退" | jobs_intro_style body
-    echo "  5️⃣ 通过 reflog 回退到任意历史状态" | jobs_intro_style body
-    echo "" | jobs_intro_style body
-  }
-  # =============== 基础工具 ===============
-  get_cpu_arch() {
-    [[ "$(uname -m)" == "arm64" ]] && echo "arm64" || echo "x86_64"
-  }
-  # 封装 inject_shellenv_block 对应的独立处理逻辑。
-  inject_shellenv_block() {
-    local profile_file="$1"
-    local shellenv_cmd="$2"
-    local header="# >>> Homebrew 环境变量 >>>"
-    [[ -z "$profile_file" || -z "$shellenv_cmd" ]] && { error_echo "缺少参数：inject_shellenv_block <profile_file> <shellenv_cmd>"; return 1; }
-    mkdir -p "$(dirname "$profile_file")"
-    touch "$profile_file"
-    if grep -Fq "$shellenv_cmd" "$profile_file" 2>/dev/null; then
-      info_echo "已存在 Homebrew shellenv：$profile_file"
-    elif grep -Fq "$header" "$profile_file" 2>/dev/null; then
-      info_echo "已存在 Homebrew 环境变量块：$profile_file"
-    else
-      {
-        echo ""
-        echo "$header"
-        echo "$shellenv_cmd"
-      } >> "$profile_file"
-      success_echo "已写入 Homebrew shellenv：$profile_file"
-    fi
-    eval "$shellenv_cmd" || true
-  }
-  # =============== Homebrew（回车跳过） ===============
-  install_homebrew() {
-    local arch="$(get_cpu_arch)"
-    local shell_name="${SHELL##*/}"
-    local profile_file=""
-    local brew_bin=""
-
-    if ! command -v brew >/dev/null 2>&1 && [[ ! -x "/opt/homebrew/bin/brew" && ! -x "/usr/local/bin/brew" ]]; then
-      warn_echo "未检测到 Homebrew，准备安装（架构：$arch）"
-      if [[ "$arch" == "arm64" ]]; then
-        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || { error_echo "Homebrew 安装失败（arm64）"; return 1; }
-        brew_bin="/opt/homebrew/bin/brew"
-      else
-        arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || { error_echo "Homebrew 安装失败（x86_64）"; return 1; }
-        brew_bin="/usr/local/bin/brew"
-      fi
-      success_echo "Homebrew 安装完成"
-    else
-      command -v brew >/dev/null 2>&1 && brew_bin="$(command -v brew)"
-      [[ -z "$brew_bin" && -x "/opt/homebrew/bin/brew" ]] && brew_bin="/opt/homebrew/bin/brew"
-      [[ -z "$brew_bin" && -x "/usr/local/bin/brew" ]] && brew_bin="/usr/local/bin/brew"
-    fi
-
-    case "$shell_name" in
-      zsh) profile_file="$HOME/.zprofile" ;;
-      bash) profile_file="$HOME/.bash_profile" ;;
-      *) profile_file="$HOME/.profile" ;;
-    esac
-    inject_shellenv_block "$profile_file" "eval \"\$(${brew_bin} shellenv)\""
-    eval "$(${brew_bin} shellenv)" || true
-
-    info_echo "Homebrew 已安装。"
-    if ask_run "是否执行 Homebrew 更新 / 升级 / 清理 / doctor？"; then
-      brew update  || { error_echo "brew update 失败"; return 1; }
-      brew upgrade || { error_echo "brew upgrade 失败"; return 1; }
-      brew cleanup || { error_echo "brew cleanup 失败"; return 1; }
-      brew doctor  || warn_echo "brew doctor 有警告，请按输出处理"
-      brew -v      || warn_echo "打印 brew 版本失败，可忽略"
-      success_echo "Homebrew 健康更新完成"
-    else
-      note_echo "已跳过 Homebrew 更新"
-    fi
-  }
-  # =============== fzf（回车跳过） ===============
-  install_fzf() {
-    warm_echo "🔍 是否检查 / 安装 / 升级 fzf？"
-    warm_echo "👉 直接回车 = 跳过；输入任意字符再回车 = 执行 fzf 步骤。"
-    printf "选择："
-    local answer=""
-    read -r answer
-    if [[ -z "$answer" ]]; then
-      info_echo "⏭ 已跳过 fzf 检查 / 安装 / 升级。"
-      return 0
-    fi
-
-    if ! command -v fzf &>/dev/null; then
-      if ! command -v brew &>/dev/null; then
-        error_echo "❌ 未检测到 fzf，且系统未安装 Homebrew，无法自动安装 fzf。"
-        warm_echo "如需安装，请先手动安装 Homebrew 或在脚本中执行 Homebrew 安装步骤。"
-        return 1
-      fi
-      note_echo "📦 未检测到 fzf，正在通过 Homebrew 安装..."
-      brew install fzf || { error_echo "❌ fzf 安装失败"; exit 1; }
-      success_echo "✅ fzf 安装成功"
-    else
-      if command -v brew &>/dev/null; then
-        info_echo "🔄 fzf 已安装，正在通过 Homebrew 升级..."
-        brew upgrade fzf && brew cleanup
-        success_echo "✅ fzf 已是最新版"
-      else
-        info_echo "ℹ 检测到 fzf 已安装，且未使用 Homebrew 管理，跳过升级。"
-      fi
-    fi
-  }
-  # =============== 获取 Git 仓库路径（兼容子 git / 子目录） ===============
-  resolve_git_repo_path() {
-    while true; do
-      # 1️⃣ 尝试：脚本所在目录向上找最近的 Git 仓库
-      local script_dir="$SCRIPT_DIR"
-      local toplevel
-      toplevel=$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null || true)
-      if [[ -n "$toplevel" ]]; then
-        echo "$toplevel"
-        return
-      fi
-
-      # 2️⃣ 不在仓库里 → 让用户拖路径
-      warn_echo "📂 当前脚本目录不在任何 Git 仓库内。"
-      warm_echo "请将【Git 仓库文件夹】或其子目录拖入终端，然后按回车："
-      printf "👉 路径："
-
-      local input_path=""
-      if ! read -r input_path; then
-        error_echo "❌ 未读取到路径，已取消。"
-        exit 1
-      fi
-
-      # 去掉引号、首尾空白，并把 '\ ' 还原为空格
-      input_path="${input_path//\"/}"
-      input_path="${input_path#"${input_path%%[![:space:]]*}"}"
-      input_path="${input_path%"${input_path##*[![:space:]]}"}"
-      input_path="${input_path//\\ / }"
-
-      if [[ -z "$input_path" ]]; then
-        warn_echo "⚠ 路径为空，请重新拖入。"
-        continue
-      fi
-
-      local abs_path
-      if ! abs_path="$(cd "$input_path" 2>/dev/null && pwd)"; then
-        error_echo "❌ 无法进入路径：$input_path，请重新拖入。"
-        continue
-      fi
-
-      toplevel=$(git -C "$abs_path" rev-parse --show-toplevel 2>/dev/null || true)
-      if [[ -n "$toplevel" ]]; then
-        echo "$toplevel"
-        return
-      else
-        error_echo "❌ 该路径不在任何 Git 仓库内，请重新拖入。"
-      fi
+  [[ "$UPSTREAM_REF" == refs/remotes/* ]] || { error_echo "当前分支没有有效远端跟踪 upstream；请先核对跟踪配置。"; return 1; }
+  RESET_TARGET="$(git -C "$REPO_ROOT" rev-parse --verify "${UPSTREAM_REF}^{commit}" 2>/dev/null)" || { error_echo "远端跟踪引用不可用：${UPSTREAM_REF}"; return 1; }
+  info_echo "本地跟踪快照：${UPSTREAM_REF} [${RESET_TARGET}]"
+}
+# soft 不改变工作区，仅撤回已确定尚未进入 upstream 的线性历史。
+reset_soft_to_remote() {
+  resolve_upstream_target || return 1
+  if ! git -C "$REPO_ROOT" merge-base --is-ancestor "$RESET_TARGET" HEAD; then
+    error_echo "本地分支落后于 upstream 或历史已经分叉；请先 Fetch 并检查双方历史。"
+    return 1
+  fi
+  local ahead="$(git -C "$REPO_ROOT" rev-list --count "${RESET_TARGET}..HEAD")"
+  if [[ "$ahead" == 0 ]]; then
+    info_echo "没有需要撤回的未推送提交，保持现状。"
+    return 0
+  fi
+  info_echo "撤回 ${ahead} 个本地提交，保留工作区及已有暂存内容。"
+  run_git reset --soft "$RESET_TARGET" || return 1
+  success_echo "已 soft 回退；对应内容保留在暂存区。"
+}
+# 保留外部 Git 的原始退出码，任何重置失败都不能打印成功。
+run_git() {
+  local -a result_codes=()
+  if git -C "$REPO_ROOT" "$@" 2>&1 | strip_ansi_stream | tee -a "$LOG_FILE"; then
+    return 0
+  fi
+  result_codes=("${pipestatus[@]}")
+  [[ "${result_codes[1]}" != 0 ]] && return "${result_codes[1]}"
+  return 1
+}
+# hard 以已解析的提交号固定目标，防止 tag 名歧义和确认后引用变化。
+confirm_and_reset_hard() {
+  local target="$1" description="$2" answer="" commit=""
+  commit="$(git -C "$REPO_ROOT" rev-parse --verify "${target}^{commit}" 2>/dev/null)" || { error_echo "所选目标不是有效提交：${description}"; return 1; }
+  warn_echo "仓库：${REPO_ROOT}"
+  warn_echo "hard 回退目标：${description} [${commit}]；已跟踪的未提交内容会被舍弃。"
+  read -r 'answer?输入 YES 执行；其它输入取消：' || return 1
+  if [[ "$answer" != YES ]]; then
+    info_echo "已取消 hard 回退。"
+    return 0
+  fi
+  run_git -c submodule.recurse=false reset --hard --no-recurse-submodules "$commit" || return 1
+  success_echo "已 hard 回退到 ${commit}；子模块工作树保持原状。"
+}
+# fzf 已有则复用；没有时使用 zsh 原生编号选择，不引入包管理器安装副作用。
+choose_entry() {
+  local title="$1" entry="" reply=""
+  local -a entries=()
+  shift
+  for entry in "$@"; do
+    [[ -n "$entry" ]] && entries+=("$entry")
+  done
+  SELECTION=""
+  [[ "${#entries[@]}" -gt 0 ]] || { error_echo "没有可供选择的记录：${title}"; return 1; }
+  if command -v fzf >/dev/null 2>&1; then
+    SELECTION="$(printf '%s\n' "${entries[@]}" | fzf --no-sort --reverse --prompt="${title}：")" || return 0
+  else
+    info_echo "${title}（输入编号；输入 0 取消）"
+    local index=1
+    for entry in "${entries[@]}"; do
+      print -r -- "${index}、${entry}"
+      index=$((index + 1))
     done
-  }
-  # =============== 进入 Git 仓库目录（兼容 SourceTree） ===============
-  enter_git_repo_dir() {
-    local git_root=""
-
-    if [[ "$RUN_MODE" == "sourcetree" && -n "${REPO_FROM_ARG:-}" ]]; then
-      local toplevel
-      toplevel=$(git -C "$REPO_FROM_ARG" rev-parse --show-toplevel 2>/dev/null || true)
-      if [[ -z "$toplevel" ]]; then
-        error_echo "❌ SourceTree 传入的路径不是 Git 仓库：$REPO_FROM_ARG"
-        exit 1
-      fi
-      git_root="$toplevel"
-    else
-      git_root="$(resolve_git_repo_path)"
-    fi
-
-    cd "$git_root" || {
-      error_echo "❌ 进入 Git 仓库失败：$git_root"
-      exit 1
-    }
-    highlight_echo "当前 Git 仓库：$git_root"
-  }
-  # =============== 检查暂存区（仅交互模式用） ===============
-  check_staged_changes() {
-    if ! git diff --cached --quiet 2>/dev/null; then
-      warn_echo "⚠ 检测到暂存区存在变更（staged changes）。"
-      warm_echo "建议先处理这些变更再执行回退，以免混乱。"
-      read "ans?👉 仍要继续回退？(y/N)："
-      if [[ ! "$ans" =~ ^[Yy]$ ]]; then
-        info_echo "⏹ 已取消回退操作。"
-        exit 0
-      fi
-    fi
-  }
-  # =============== soft 回退到远端（你要的“推送打回提交”） ===============
-  reset_soft_to_remote() {
-    local branch
-    branch=$(git rev-parse --abbrev-ref HEAD)
-    local upstream="origin/${branch}"
-
-    if ! git rev-parse --verify "$upstream" &>/dev/null; then
-      error_echo "❌ 远端分支 $upstream 不存在，无法 soft 回退。"
-      return 1
-    fi
-
-    local ahead
-    ahead=$(git rev-list --count "${upstream}..HEAD" 2>/dev/null || echo "0")
-
-    info_echo "当前分支：$branch"
-    info_echo "远端分支：$upstream"
-    info_echo "本地比远端多了 ${ahead} 个提交。"
-    info_echo "执行：git reset --soft $upstream"
-
-    git reset --soft "$upstream"
-
-    success_echo "✅ 已 soft 回退到远端 $upstream"
-    note_echo "   - 所有未推送的提交已被撤销"
-    note_echo "   - 对应改动现在处于【已暂存】状态，会出现在提交面板里"
-  }
-  # =============== hard 回退到远端（交互模式可选） ===============
-  reset_hard_to_remote() {
-    local branch
-    branch=$(git rev-parse --abbrev-ref HEAD)
-    local upstream="origin/${branch}"
-
-    if ! git rev-parse --verify "$upstream" &>/dev/null; then
-      error_echo "❌ 远端分支 $upstream 不存在，无法 hard 回退。"
-      return 1
-    fi
-
-    warn_echo "⚠ 警告：即将硬回退到 $upstream，本地未提交变更会丢失！"
-    read "ans?👉 确认继续？(y/N)："
-    if [[ ! "$ans" =~ ^[Yy]$ ]]; then
-      info_echo "⏹ 已取消 hard 回退。"
-      return 0
-    fi
-
-    info_echo "🔁 执行：git reset --hard $upstream"
-    git reset --hard "$upstream"
-    success_echo "✅ 已 hard 回退到远端 $upstream"
-  }
-  # =============== 选择 Commit / Tag / Reflog 的几个函数（只在交互模式用） ===============
-  reset_to_selected_commit() {
-    local commits
-    commits=$(git log --oneline --decorate --graph --all | head -200)
-
-    if [[ -z "$commits" ]]; then
-      error_echo "❌ 没有可供选择的提交记录。"
-      return 1
-    fi
-
-    local selected
-    selected=$(printf "%s\n" "$commits" | fzf --no-sort --reverse --ansi \
-               --prompt="🔍 选择目标提交：" \
-               --header="↑↓ 移动，回车确认")
-    if [[ -z "$selected" ]]; then
-      info_echo "ℹ 未选择任何提交，已取消操作。"
-      return 0
-    fi
-
-    local target_hash
-    target_hash=$(echo "$selected" | awk '{print $2}')
-
-    warn_echo "⚠ 将要回退到提交：$selected"
-    read "ans?👉 确认回退到此提交？(y/N)："
-    if [[ ! "$ans" =~ ^[Yy]$ ]]; then
-      info_echo "⏹ 已取消回退。"
-      return 0
-    fi
-
-    git reset --hard "$target_hash"
-    success_echo "✅ 已回退到提交：$selected"
-  }
-  # 执行对应的清理操作，并保留必要的安全检查。
-  reset_to_tag() {
-    local tags
-    tags=$(git tag --sort=-creatordate)
-
-    if [[ -z "$tags" ]]; then
-      error_echo "❌ 当前仓库没有任何 tag。"
-      return 1
-    fi
-
-    local selected
-    selected=$(printf "%s\n" "$tags" | fzf \
-               --prompt="🏷 选择目标 tag：" \
-               --header="选择要回退到的 tag")
-    if [[ -z "$selected" ]]; then
-      info_echo "ℹ 未选择任何 tag，已取消操作。"
-      return 0
-    fi
-
-    warn_echo "⚠ 将要回退到 tag：$selected"
-    read "ans?👉 确认回退到该 tag 对应的提交？(y/N)："
-    if [[ ! "$ans" =~ ^[Yy]$ ]]; then
-      info_echo "⏹ 已取消回退。"
-      return 0
-    fi
-
-    git reset --hard "$selected"
-    success_echo "✅ 已回退到 tag：$selected"
-  }
-  # 执行对应的清理操作，并保留必要的安全检查。
-  reset_via_reflog() {
-    local reflogs
-    reflogs=$(git reflog --date=local | head -200)
-
-    if [[ -z "$reflogs" ]]; then
-      error_echo "❌ 没有可供选择的 reflog 记录。"
-      return 1
-    fi
-
-    local selected
-    selected=$(printf "%s\n" "$reflogs" | fzf --no-sort --reverse --ansi \
-               --prompt="🕰 选择目标位置：" \
-               --header="通过 reflog 回到任意历史状态")
-    if [[ -z "$selected" ]]; then
-      info_echo "ℹ 未选择任何记录，已取消操作。"
-      return 0
-    fi
-
-    local target_hash
-    target_hash=$(echo "$selected" | awk '{print $1}')
-
-    warn_echo "⚠ 将要通过 reflog 回退到：$selected"
-    read "ans?👉 确认回退到该状态？(y/N)："
-    if [[ ! "$ans" =~ ^[Yy]$ ]]; then
-      info_echo "⏹ 已取消回退。"
-      return 0
-    fi
-
-    git reset --hard "$target_hash"
-    success_echo "✅ 已通过 reflog 回退到：$selected"
-  }
-  # =============== 模式选择（交互用） ===============
-  select_reset_mode() {
-    local choice
-    choice=$(printf "%s\n" \
-      "1) soft 回退到远端（保留变更为暂存）" \
-      "2) hard 回退到远端（丢弃本地变更）" \
-      "3) 选择某个提交回退（git log + fzf）" \
-      "4) 选择某个 tag 回退" \
-      "5) 通过 reflog 回退到任意历史状态" \
-      | fzf --prompt="🎯 选择回退模式：" \
-            --header="↑↓ 选择，回车确认")
-
-    case "$choice" in
-      "1) "* ) reset_soft_to_remote ;;
-      "2) "* ) reset_hard_to_remote ;;
-      "3) "* ) reset_to_selected_commit ;;
-      "4) "* ) reset_to_tag ;;
-      "5) "* ) reset_via_reflog ;;
-      * ) info_echo "ℹ 未选择任何模式，已退出。";;
-    esac
-  }
-  # =============== 主流程 ===============
-  main() {
-    if [[ "$RUN_MODE" == "sourcetree" ]]; then
-      # 👉 SourceTree 调用：非交互，只做一件事：把未推送的提交打回提交面板
-      enter_git_repo_dir
-      reset_soft_to_remote
-    else
-      # 👉 双击 .command：完整交互模式
-      if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
-  clear
-fi
-      print_git_reset_intro
-      install_homebrew      # 回车跳过
-      install_fzf           # 回车跳过
-      enter_git_repo_dir
-      check_staged_changes
-      select_reset_mode
-    fi
-  }
-
-  main "$@"
-
-  # =========================== 原脚本业务逻辑区结束 ===========================
-}
-# 编排脚本的高层业务流程。
-# 初始化脚本运行环境，并集中承载原有的顶层执行逻辑。
-initialize_script_runtime() {
-  : > "$LOG_FILE"
-  is_sourcetree_runtime && IS_SOURCETREE_RUNTIME=1
-  prepare_plain_output_context
-  [[ -n "${TERM:-}" ]] || export TERM="dumb"
-  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" ]]; then
-    SOURCETREE_PLAIN_OUTPUT=1
-    export NO_COLOR="${NO_COLOR:-1}"
-    export FORCE_COLOR=0
-    export CLICOLOR="0"
-    export ANSI_COLORS_DISABLED="1"
-    export npm_config_color=false
+    read -r 'reply?编号：' || return 1
+    [[ "$reply" == <-> && "$reply" -gt 0 && "$reply" -le "${#entries[@]}" ]] || return 0
+    SELECTION="${entries[$reply]}"
   fi
 }
-# 编排脚本的高层业务流程。
+# 提交列表首列始终为完整 hash，不从图形线条里猜目标。
+run_interactive_reset() {
+  local -a records=()
+  choose_entry "选择回退模式" "soft 回退到 upstream" "hard 回退到 upstream" "选择提交 hard 回退" "选择 tag hard 回退" "选择 reflog hard 回退" || return 1
+  RESET_MODE="$SELECTION"
+  case "$RESET_MODE" in
+    'soft 回退到 upstream') reset_soft_to_remote ;;
+    'hard 回退到 upstream')
+      resolve_upstream_target || return 1
+      confirm_and_reset_hard "$RESET_TARGET" "$UPSTREAM_REF"
+      ;;
+    '选择提交 hard 回退')
+      records=("${(@f)$(git -C "$REPO_ROOT" log --all --format='%H %s' --max-count=200)}")
+      choose_entry "选择提交" "${records[@]}" || return 1
+      [[ -n "$SELECTION" ]] || return 0
+      confirm_and_reset_hard "${SELECTION%% *}" "$SELECTION"
+      ;;
+    '选择 tag hard 回退')
+      records=("${(@f)$(git -C "$REPO_ROOT" tag --sort=-creatordate)}")
+      choose_entry "选择 tag" "${records[@]}" || return 1
+      [[ -n "$SELECTION" ]] || return 0
+      confirm_and_reset_hard "refs/tags/${SELECTION}" "$SELECTION"
+      ;;
+    '选择 reflog hard 回退')
+      records=("${(@f)$(git -C "$REPO_ROOT" reflog --format='%H %gd %gs' --max-count=200)}")
+      choose_entry "选择 reflog" "${records[@]}" || return 1
+      [[ -n "$SELECTION" ]] || return 0
+      confirm_and_reset_hard "${SELECTION%% *}" "$SELECTION"
+      ;;
+    *) info_echo "已取消回退。" ;;
+  esac
+}
+run_reset_workflow() {
+  if [[ "$IS_SOURCETREE_RUNTIME" == 1 ]]; then
+    reset_soft_to_remote
+  else
+    run_interactive_reset
+  fi
+}
+print_completion() {
+  success_echo "提交回退流程结束；日志：${LOG_FILE}"
+}
 main() {
-  # 展示脚本内置自述，并按运行入口完成防误触确认。
-  show_readme_and_wait
-  # 初始化 Shell 选项、日志、依赖和入口运行状态。
-  initialize_script_runtime
-  # 执行 run_original_logic 对应的核心业务步骤。
-  run_original_logic "$@"
-  # 输出脚本执行结果、摘要和日志位置。
-  success_echo "脚本执行结束。日志：$LOG_FILE"
+  show_script_intro_and_wait # 首屏自述与确认，Sourcetree 仅跳过入口确认。
+  initialize_script_runtime # 确认后准备日志与 Shell 选项。
+  check_environment # 验证 Git 可用。
+  resolve_repository "$@" # 使用指定仓库或终端输入，避免误处理脚本所在仓库。
+  check_repository_state # 冲突、锁与未完成操作阻止重置。
+  run_reset_workflow # Sourcetree 执行安全 soft 模式，终端允许选择并确认 hard 模式。
+  print_completion # 业务成功后输出结果与日志位置。
 }
 
 main "$@"

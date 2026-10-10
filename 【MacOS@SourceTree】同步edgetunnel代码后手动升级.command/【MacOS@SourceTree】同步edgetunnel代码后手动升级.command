@@ -1,8 +1,8 @@
 #!/bin/zsh
 # 脚本自述：
 # - 脚本名称：【MacOS@SourceTree】同步edgetunnel代码后手动升级.command
-# - 核心用途：执行“同步edgetunnel代码后手动升级”对应的自动化任务。
-# - 影响范围：可能修改当前项目、用户环境或脚本指定的目标。
+# - 核心用途：验证 edgetunnel 仓库和 Cloudflare 账号，配置精确 KV 绑定并部署 Worker。
+# - 影响范围：生成本地部署配置、可能创建 Cloudflare KV 命名空间并更新 Worker；终端可补齐工具链。
 # - 运行提示：运行后会先打印内置自述；Sourcetree 模式无交互连续执行，终端模式确认后继续。
 
 # ============================== 基础路径 ==============================
@@ -29,15 +29,24 @@ jobs_intro_style() {
     }
   '
 }
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-${(%):-%x}}")" && pwd)"
-SCRIPT_PATH="${SCRIPT_DIR}/$(basename -- "$0")"
-SCRIPT_BASENAME="$(basename "$SCRIPT_PATH" | sed 's/\.[^.]*$//')"
-LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"
+readonly SCRIPT_ENTRY_SOURCE="$0"
+SCRIPT_DIR=""
+SCRIPT_PATH=""
+SCRIPT_BASENAME=""
+LOG_DIR=""
+LOG_FILE=""
+# 准备自述路径和日志名称，不在确认前写入文件。
+prepare_script_metadata() {
+  SCRIPT_PATH="${SCRIPT_ENTRY_SOURCE:A}"
+  SCRIPT_DIR="${SCRIPT_PATH:h}"
+  SCRIPT_BASENAME="${SCRIPT_PATH:t:r}"
+  LOG_DIR="${TMPDIR:-/tmp}"
+  LOG_DIR="${LOG_DIR%/}"
+  LOG_FILE="${LOG_DIR}/${SCRIPT_BASENAME}.log"
+}
 # 识别 Sourcetree 自定义动作的瘦身运行环境，系统终端双击运行不降级。
 is_sourcetree_runtime() {
   env | grep -Eqi '^SOURCETREE|^SOURCE_TREE' && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/SourceTree.command/"* ]] && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/Documents/Github/JobsGenesis/SourceTree.command/"* ]] && return 0
 
   local pid="$PPID"
   local command_name=""
@@ -73,11 +82,12 @@ WRANGLER_BIN=""
 WRANGLER_LABEL=""
 WRANGLER_CONFIG_FOR_DEPLOY=""
 PLAIN_OUTPUT=0
+RUNTIME_INITIALIZED=0
 # ============================== 输出模式 / 彩色日志 ==============================
 # 根据运行入口和终端能力预先切换纯文本输出，避免 SourceTree 显示 ANSI 转义码。
 prepare_plain_output_context() {
   [[ -n "${TERM:-}" ]] || export TERM="dumb"
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" || "${JOBS_PLAIN_OUTPUT:-0}" == "1" ]]; then
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR+x}" || "${JOBS_PLAIN_OUTPUT:-0}" == "1" ]]; then
     SOURCETREE_PLAIN_OUTPUT=1
     export NO_COLOR="${NO_COLOR:-1}"
     export CLICOLOR="0"
@@ -88,7 +98,7 @@ prepare_plain_output_context() {
 configure_output_mode() {
   prepare_plain_output_context
   # SourceTree 自定义操作窗口不完整支持 ANSI 颜色，非 TTY 输出统一降级为纯文本。
-  if [[ "${JOBS_PLAIN_OUTPUT:-0}" == "1" || -n "${NO_COLOR:-}" || "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
+  if [[ "${JOBS_PLAIN_OUTPUT:-0}" == "1" || -n "${NO_COLOR+x}" || "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
     PLAIN_OUTPUT=1
   elif [[ -t 1 ]]; then
     PLAIN_OUTPUT=0
@@ -115,33 +125,83 @@ strip_ansi_stream() {
   fi
 }
 # 按当前输出级别记录终端信息，并同步写入脚本日志。
-log()            { echo -e "$1" | strip_ansi_stream | tee -a "$LOG_FILE"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-color_echo()     { log "\033[1;32m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-info_echo()      { log "\033[1;34mℹ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-success_echo()   { log "\033[1;32m✔ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-warn_echo()      { log "\033[1;33m⚠ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-warm_echo()      { log "\033[1;33m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-note_echo()      { log "\033[1;35m➤ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-error_echo()     { log "\033[1;31m✖ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-err_echo()       { log "\033[1;31m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-debug_echo()     { log "\033[1;35m🐞 $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-highlight_echo() { log "\033[1;36m🔹 $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-gray_echo()      { log "\033[0;90m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-bold_echo()      { log "\033[1m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-underline_echo() { log "\033[4m$1\033[0m"; }
+render_log_stream() {
+  if [[ "$PLAIN_OUTPUT" == 1 ]]; then
+    strip_ansi_stream
+  else
+    cat
+  fi
+}
+# 确认前只输出屏幕，初始化后同时保存日志。
+log() {
+  local message="$1"
+  if [[ "$RUNTIME_INITIALIZED" == 1 ]]; then
+    printf "%s\n" "$message" | render_log_stream | tee -a "$LOG_FILE"
+  else
+    printf "%s\n" "$message" | render_log_stream
+  fi
+}
+# 仅转换固定颜色码，路径和工具输出始终按原文字面值记录。
+color_log() {
+  local color="$1" message="$2"
+  if [[ "$PLAIN_OUTPUT" == 1 ]]; then
+    log "$message"
+  else
+    log "$(printf '\033[%sm%s\033[0m' "$color" "$message")"
+  fi
+}
+# 输出正常信息。
+color_echo() {
+  color_log "1;32" "$1"
+}
+# 输出提示信息。
+info_echo() {
+  color_log "1;34" "ℹ $1"
+}
+# 输出成功信息。
+success_echo() {
+  color_log "1;32" "✔ $1"
+}
+# 输出警告信息。
+warn_echo() {
+  color_log "1;33" "⚠ $1"
+}
+# 输出温馨提示信息。
+warm_echo() {
+  color_log "1;33" "$1"
+}
+# 输出说明信息。
+note_echo() {
+  color_log "1;35" "➤ $1"
+}
+# 输出错误信息。
+error_echo() {
+  color_log "1;31" "✖ $1"
+}
+# 输出错误信息。
+err_echo() {
+  color_log "1;31" "$1"
+}
+# 输出调试信息。
+debug_echo() {
+  color_log "1;35" "🐞 $1"
+}
+# 输出高亮信息。
+highlight_echo() {
+  color_log "1;36" "🔹 $1"
+}
+# 输出次要信息。
+gray_echo() {
+  color_log "0;90" "$1"
+}
+# 输出加粗信息。
+bold_echo() {
+  color_log "1" "$1"
+}
+# 输出下划线信息。
+underline_echo() {
+  color_log "4" "$1"
+}
 # 封装 die 对应的独立处理逻辑。
 die() {
   error_echo "$1"
@@ -179,11 +239,12 @@ run_interactive_cmd() {
 }
 # 展示脚本用途和影响范围，并在执行前等待用户确认。
 show_readme_and_wait() {
+  prepare_script_metadata
   if typeset -f is_sourcetree_runtime >/dev/null 2>&1 && is_sourcetree_runtime; then
     IS_SOURCETREE_RUNTIME=1
   fi
   configure_output_mode
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
+  if [[ -z "${NO_COLOR+x}" && "$PLAIN_OUTPUT" != 1 && "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
     clear
   fi
 
@@ -205,19 +266,18 @@ show_readme_and_wait() {
   fi
   if [[ ! -t 0 ]]; then
     error_echo "当前不是 Sourcetree，且没有可交互输入；请在终端中重新运行。"
-    return 1
+    exit 1
   fi
-  read "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..."
+  read -r "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..." _ || exit 1
 }
 # 封装 strip_outer_quotes 对应的独立处理逻辑。
 strip_outer_quotes() {
   local value="$1"
-  value="${value%$'\r'}"
   value="${value%$'\n'}"
-  value="${value#\"}"
-  value="${value%\"}"
-  value="${value#\'}"
-  value="${value%\'}"
+  value="${value%$'\r'}"
+  if [[ "$value" == \"*\" || "$value" == \'*\' ]]; then
+    value="${value[2,-2]}"
+  fi
   print -r -- "$value"
 }
 # 收集并校验用户输入，决定后续执行路径。
@@ -244,10 +304,8 @@ normalize_user_input_path() {
   if [[ "$value" == "~" ]]; then
     value="$HOME"
   elif [[ "$value" == "~/"* ]]; then
-    value="${HOME}/${value#~/}"
+    value="${HOME}/${value#\~/}"
   fi
-  # 拖拽到终端的路径可能带有反斜杠转义；zsh 的 Q 标志负责还原。
-  value="${(Q)value}"
   print -r -- "$value"
 }
 # ============================== Homebrew / MacOS ==============================
@@ -289,13 +347,17 @@ ensure_brew() {
 
   if [[ -z "$BREW_BIN" ]]; then
     warn_echo "未检测到 Homebrew，开始安装最新版 Homebrew。"
-    run_cmd "安装 Homebrew" /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || die "Homebrew 安装失败。"
+    local installer_text=""
+    installer_text="$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || die "Homebrew 安装器下载失败。"
+    [[ -n "$installer_text" ]] || die "Homebrew 安装器为空，停止执行。"
+    run_cmd "安装 Homebrew" /bin/bash -c "$installer_text" || die "Homebrew 安装失败。"
     BREW_BIN="$(find_brew 2>/dev/null || true)"
     [[ -n "$BREW_BIN" ]] || die "Homebrew 安装后仍未找到 brew，请重新打开终端后再试。"
   else
     success_echo "已检测到 Homebrew：$BREW_BIN"
   fi
 
+  "$BREW_BIN" --version >/dev/null 2>&1 || die "Homebrew 健康检查失败。"
   activate_brew || die "Homebrew 环境激活失败。"
 
   if ask_any_to_run "是否刷新 Homebrew 索引：brew update"; then
@@ -307,7 +369,7 @@ ensure_brew() {
 }
 # ============================== Git 仓库定位与校验 ==============================
 ensure_git() {
-  if command -v git >/dev/null 2>&1; then
+  if command -v git >/dev/null 2>&1 && git --version >/dev/null 2>&1; then
     success_echo "已检测到 Git：$(command -v git)"
     return 0
   fi
@@ -316,7 +378,7 @@ ensure_git() {
   ensure_brew
   run_cmd "安装 Git" "$BREW_BIN" install git || die "Git 安装失败。"
   hash -r 2>/dev/null || true
-  command -v git >/dev/null 2>&1 || die "Git 安装后仍不可用。"
+  git --version >/dev/null 2>&1 || die "Git 安装后健康检查失败。"
 }
 # 封装 normalize_github_remote 对应的独立处理逻辑。
 normalize_github_remote() {
@@ -392,6 +454,10 @@ prompt_repo_path() {
     read -r "?👉 仓库文件夹路径（Ctrl+C 取消）：" input
 
     input="$(normalize_user_input_path "$input")"
+    if [[ ! -e "$input" ]]; then
+      local unescaped="${(Q)input}"
+      [[ -e "$unescaped" ]] && input="$unescaped"
+    fi
     if [[ -z "$input" ]]; then
       warn_echo "未输入路径，请重新拖入或输入仓库文件夹。"
       continue
@@ -414,7 +480,8 @@ resolve_target_repo_root() {
   local resolved=""
 
   if [[ $# -gt 0 ]]; then
-    candidate="$*"
+    (( $# == 1 )) || die "只接受一个仓库路径，请给含空格的路径加引号。"
+    candidate="$1"
     resolved="$(resolve_repo_root_from_candidate "$candidate" 2>/dev/null || true)"
     if [[ -n "$resolved" ]]; then
       REPO_INPUT_SOURCE="SourceTree 参数 / 命令行参数"
@@ -426,7 +493,7 @@ resolve_target_repo_root() {
     die "传入参数无法识别为 Git 仓库：${candidate}。SourceTree 自定义操作参数必须填写 \$REPO。"
   fi
 
-  if [[ -t 0 ]]; then
+  if [[ "$IS_SOURCETREE_RUNTIME" != 1 && -t 0 ]]; then
     prompt_repo_path
     success_echo "已从手动输入识别仓库根目录：$REPO_ROOT"
     return 0
@@ -468,27 +535,16 @@ validate_target_repo() {
 }
 # ============================== Node / npm / npx / Wrangler 支撑链 ==============================
 ensure_node_by_brew() {
-  ensure_brew
-
-  if "$BREW_BIN" list --formula node >/dev/null 2>&1; then
-    if ask_any_to_run "是否升级 Node.js（npm / npx 上游）：brew upgrade node"; then
-      run_cmd "升级 Node.js（npm / npx 上游）" "$BREW_BIN" upgrade node || die "Node.js 升级失败。"
-    else
-      warn_echo "已跳过 Node.js 升级，继续使用当前已安装版本。"
-    fi
-  else
-    if command -v node >/dev/null 2>&1; then
-      warn_echo "检测到已有 node：$(command -v node)"
-      warn_echo "但 Homebrew 未记录 node formula；为保证 npx 支撑链可控，将通过 Homebrew 安装最新版 node。"
-    fi
-    run_cmd "安装最新版 Node.js（包含 npm / npx）" "$BREW_BIN" install node || die "Node.js 安装失败。"
+  if node --version >/dev/null 2>&1 && npm --version >/dev/null 2>&1; then
+    success_echo "复用健康 Node.js / npm，不强制改用 Homebrew 来源。"
+    return 0
   fi
-
-  activate_brew || true
+  ensure_brew
+  "$BREW_BIN" --version >/dev/null 2>&1 || die "Homebrew 不可用，停止 Node.js 安装。"
+  run_cmd "安装 Node.js（包含 npm / npx）" "$BREW_BIN" install node || die "Node.js 安装失败。"
+  activate_brew || die "Homebrew 环境刷新失败。"
   hash -r 2>/dev/null || true
-
-  command -v node >/dev/null 2>&1 || die "Node.js 安装/升级后仍不可用。"
-  command -v npm >/dev/null 2>&1 || die "npm 安装/升级后仍不可用。"
+  node --version >/dev/null 2>&1 && npm --version >/dev/null 2>&1 || die "安装后 Node.js / npm 健康检查失败。"
 }
 # 封装 refresh_npm_global_bin 对应的独立处理逻辑。
 refresh_npm_global_bin() {
@@ -511,13 +567,13 @@ ensure_npm_npx_latest() {
     warn_echo "已跳过 npm 升级，继续使用当前 npm / npx。"
   fi
 
-  if ! command -v npx >/dev/null 2>&1; then
+  if ! npx --version >/dev/null 2>&1; then
     warn_echo "当前缺少 npx，必须补齐后才能继续执行 wrangler。"
     run_cmd "补齐 npx 支撑链" npm install -g npm@latest || die "npx 补齐失败。"
     refresh_npm_global_bin
   fi
 
-  command -v npx >/dev/null 2>&1 || die "npx 仍不可用。请检查 npm 全局 bin 是否在 PATH 内。"
+  npx --version >/dev/null 2>&1 || die "npx 健康检查失败，请检查 npm 全局 bin。"
 }
 # 封装 project_has_local_wrangler 对应的独立处理逻辑。
 project_has_local_wrangler() {
@@ -642,9 +698,9 @@ check_toolchain_ready_for_sourcetree() {
 
   refresh_npm_global_bin
 
-  command -v node >/dev/null 2>&1 || die "SourceTree 模式缺少 Node.js。请先双击/终端运行本脚本完成工具链安装。"
-  command -v npm >/dev/null 2>&1 || die "SourceTree 模式缺少 npm。请先双击/终端运行本脚本完成工具链安装。"
-  command -v npx >/dev/null 2>&1 || die "SourceTree 模式缺少 npx。请先双击/终端运行本脚本完成工具链安装。"
+  node --version >/dev/null 2>&1 || die "SourceTree 模式 Node.js 不可用。请先在终端修复工具链。"
+  npm --version >/dev/null 2>&1 || die "SourceTree 模式 npm 不可用。请先在终端修复工具链。"
+  npx --version >/dev/null 2>&1 || die "SourceTree 模式 npx 不可用。请先在终端修复工具链。"
 
   clear_wrangler_quarantine
   resolve_existing_wrangler || die "SourceTree 模式未找到已安装的 wrangler。请先双击/终端运行本脚本完成 wrangler 安装/升级。"
@@ -680,7 +736,7 @@ print_toolchain_versions() {
 }
 # ============================== Cloudflare / Wrangler 授权与部署 ==============================
 is_interactive_terminal() {
-  [[ -t 0 && -t 1 ]]
+  [[ "$IS_SOURCETREE_RUNTIME" != 1 && -t 0 && -t 1 ]]
 }
 # 封装 print_sourcetree_auth_hint 对应的独立处理逻辑。
 print_sourcetree_auth_hint() {
@@ -696,7 +752,7 @@ print_sourcetree_auth_hint() {
 }
 # 封装 wrangler_whoami_ok 对应的独立处理逻辑。
 wrangler_whoami_ok() {
-  local auth_log="/tmp/${SCRIPT_BASENAME}.wrangler-whoami.log"
+  local auth_log="${LOG_DIR}/${SCRIPT_BASENAME}.wrangler-whoami.log"
   : > "$auth_log"
 
   info_echo "检查 Cloudflare 登录状态"
@@ -842,12 +898,13 @@ function field(item, name) {
 function selectFromItems(items) {
   let item;
   if (mode === 'title') {
-    item = items.find(x => field(x, 'title') === value) ||
-           items.find(x => field(x, 'title').toLowerCase() === value.toLowerCase());
+    item = items.find(x => field(x, 'title') === value);
   } else if (mode === 'id') {
     item = items.find(x => field(x, 'id') === value);
   } else {
-    item = items.find(x => field(x, 'id'));
+    const ids = [...new Set(items.map(x => field(x, 'id')).filter(Boolean))];
+    if (ids.length !== 1) return '';
+    item = items.find(x => field(x, 'id') === ids[0]);
   }
   return field(item, output);
 }
@@ -864,44 +921,44 @@ function tryJsonParse(text) {
   for (const candidate of candidates) {
     // 兼容 Wrangler 输出中夹带说明文本时截取出的候选 JSON。
     try {
-      const result = selectFromItems(collect(JSON.parse(candidate)));
-      if (result) return result;
+      const parsed = JSON.parse(candidate);
+      const items = collect(parsed);
+      const shapeValid = Array.isArray(parsed) || (parsed && typeof parsed === 'object' &&
+        (parsed.id || ['result', 'results', 'namespaces', 'namespace', 'kv_namespaces', 'kv_namespace'].some(k => k in parsed)));
+      if (!shapeValid || parsed?.success === false) return { parsed: true, invalid: true, result: '' };
+      return { parsed: true, invalid: false, result: selectFromItems(items) };
     } catch (_) {}
   }
-  return '';
+  return { parsed: false, invalid: false, result: '' };
 }
 
 function tryTextParse(text) {
-  const idRe = /\b[a-f0-9]{32}\b/i;
-  const lines = text.split(/\r?\n/);
-
-  if (mode === 'id') {
-    const line = lines.find(x => x.includes(value));
-    if (!line) return '';
-    if (output === 'id') return value;
-    if (output === 'title') return '已存在';
-    return value;
-  }
-
-  if (mode === 'title') {
-    const matched = lines.find(x => x.toLowerCase().includes(value.toLowerCase()) && idRe.test(x));
-    const id = matched && matched.match(idRe)?.[0];
-    if (id && output === 'id') return id;
-    if (id && output === 'title') return value;
-  }
-
-  const id = text.match(idRe)?.[0] || '';
-  if (!id) return '';
-  if (output === 'id') return id;
-  if (output === 'title') return value || '已创建';
-  return id;
+  // 文本 ID 后备只接受创建命令的单一 ID；列表查找必须提供可解析 JSON。
+  if (mode !== 'any') return '';
+  const ids = [...new Set(text.match(/\b[a-f0-9]{32}\b/ig) || [])];
+  if (ids.length !== 1) return '';
+  if (output === 'id') return ids[0];
+  return output === 'title' ? '已创建' : '';
 }
 
-if (!raw) process.exit(1);
-const result = tryJsonParse(raw) || tryTextParse(raw);
+if (!raw) process.exit(2);
+const parsed = tryJsonParse(raw);
+if (parsed.invalid || (!parsed.parsed && mode !== 'any')) process.exit(2);
+const result = parsed.parsed ? parsed.result : tryTextParse(raw);
 if (!result) process.exit(1);
 process.stdout.write(result);
 NODE
+}
+# 严格查找列表；无匹配可继续创建，解析失败必须阻止部署。
+lookup_kv_in_list() {
+  local result="" code=0
+  result="$(kv_namespace_lookup_from_json "$@")" || code=$?
+  if (( code > 1 )); then
+    print -u2 -r -- "无法解析 KV 列表，请检查 Wrangler 版本及账户响应：$1"
+    return "$code"
+  fi
+  print -r -- "$result"
+  return 0
 }
 # 封装 extract_active_kv_binding_id_from_toml 对应的独立处理逻辑。
 extract_active_kv_binding_id_from_toml() {
@@ -969,6 +1026,7 @@ const fs = require('fs');
 const source = process.env.WRANGLER_TOML_SOURCE;
 const target = process.env.WRANGLER_TOML_TARGET;
 const namespaceId = process.env.KV_NAMESPACE_ID;
+if (!/^[a-f0-9]{32}$/i.test(namespaceId || "")) throw new Error("Invalid KV namespace ID");
 
 const text = fs.readFileSync(source, 'utf8').replace(/\r\n/g, '\n');
 let lines = text.split('\n');
@@ -1022,8 +1080,8 @@ ensure_edgetunnel_kv_binding() {
   local namespace_id=""
   local existing_id=""
   local existing_title=""
-  local list_log="/tmp/${SCRIPT_BASENAME}.kv-list.log"
-  local create_log="/tmp/${SCRIPT_BASENAME}.kv-create.log"
+  local list_log="${LOG_DIR}/${SCRIPT_BASENAME}.kv-list.log"
+  local create_log="${LOG_DIR}/${SCRIPT_BASENAME}.kv-create.log"
 
   namespace_title="$(resolve_edgetunnel_kv_namespace_title)"
   gray_echo "目标 KV 命名空间名称：$namespace_title"
@@ -1038,10 +1096,10 @@ ensure_edgetunnel_kv_binding() {
   fi
 
   if [[ -n "$existing_id" ]]; then
-    existing_title="$(kv_namespace_lookup_from_json "$list_log" id "$existing_id" title 2>/dev/null || true)"
+    existing_title="$(lookup_kv_in_list "$list_log" id "$existing_id" title)" || die "KV 列表解析失败，停止部署。"
     if [[ -n "$existing_title" ]]; then
       success_echo "已检测到有效 KV 绑定：KV -> ${existing_title} (${existing_id})"
-      generate_wrangler_config_with_kv_binding "$existing_id"
+      generate_wrangler_config_with_kv_binding "$existing_id" || die "KV 配置生成失败，停止部署。"
       return 0
     fi
 
@@ -1049,7 +1107,7 @@ ensure_edgetunnel_kv_binding() {
     warn_echo "将改用命名空间名称 ${namespace_title} 自动修复本次部署配置。"
   fi
 
-  namespace_id="$(kv_namespace_lookup_from_json "$list_log" title "$namespace_title" id 2>/dev/null || true)"
+  namespace_id="$(lookup_kv_in_list "$list_log" title "$namespace_title" id)" || die "KV 列表解析失败，停止部署。"
 
   if [[ -z "$namespace_id" ]]; then
     warn_echo "未找到 KV 命名空间：$namespace_title，将自动创建。"
@@ -1061,7 +1119,7 @@ ensure_edgetunnel_kv_binding() {
     if [[ -z "$namespace_id" ]]; then
       warn_echo "创建命令未直接返回可解析 id，将重新读取命名空间列表确认。"
       capture_wrangler_cmd_to_file "重新读取 Cloudflare KV 命名空间列表" "$list_log" kv namespace list || die "重新读取 Cloudflare KV 命名空间列表失败。"
-      namespace_id="$(kv_namespace_lookup_from_json "$list_log" title "$namespace_title" id 2>/dev/null || true)"
+      namespace_id="$(lookup_kv_in_list "$list_log" title "$namespace_title" id)" || die "KV 列表解析失败，停止部署。"
     fi
   else
     success_echo "已找到 KV 命名空间：$namespace_title (${namespace_id})"
@@ -1069,15 +1127,15 @@ ensure_edgetunnel_kv_binding() {
 
   [[ -n "$namespace_id" ]] || die "无法取得 KV 命名空间 id：$namespace_title"
 
-  generate_wrangler_config_with_kv_binding "$namespace_id"
+  generate_wrangler_config_with_kv_binding "$namespace_id" || die "KV 配置生成失败，停止部署。"
   success_echo "KV 绑定已就绪：binding = KV，namespace = ${namespace_title}，id = ${namespace_id}"
 }
 # 执行已经拆分完成的独立业务步骤。
 run_wrangler_deploy() {
   export npm_config_yes="true"
 
-  ensure_wrangler_auth
-  ensure_edgetunnel_kv_binding
+  ensure_wrangler_auth || die "Cloudflare 授权检查失败，停止部署。"
+  ensure_edgetunnel_kv_binding || die "KV 绑定准备失败，停止部署。"
 
   highlight_echo "============================== Wrangler Deploy ============================="
   if [[ -n "$WRANGLER_CONFIG_FOR_DEPLOY" ]]; then
@@ -1086,28 +1144,13 @@ run_wrangler_deploy() {
     run_wrangler_cmd "执行 Cloudflare 部署" deploy || die "wrangler deploy 执行失败。"
   fi
 }
-# 执行入口下沉后的完整业务流程和控制逻辑。
-run_main_business_flow() {
-  # 执行当前流程中的独立业务步骤：处理当前语句。
-  [[ "$(uname -s)" == "Darwin" ]] || die "当前脚本按 macOS / zsh / Homebrew 环境编写，请在 macOS 上执行。"
-
-  # 检查当前步骤所需的环境、路径或输入条件。
-  ensure_git
-  # 准备后续业务需要的配置、目录或运行上下文。
-  resolve_target_repo_root "$@"
-  # 检查当前步骤所需的环境、路径或输入条件。
-  validate_target_repo
-  # 准备后续业务需要的配置、目录或运行上下文。
-  prepare_toolchain_for_current_context
-  # 执行当前流程中的独立业务步骤：print_toolchain_versions。
-  print_toolchain_versions
-  # 执行当前流程中的独立业务步骤：run_wrangler_deploy。
-  run_wrangler_deploy
-
-  # 输出当前流程的完成状态、摘要和日志位置。
-  success_echo "全部完成。"
-  # 输出当前流程的完成状态、摘要和日志位置。
-  success_echo "日志文件：$LOG_FILE"
+# 检查系统平台，避免在其它平台写入部署配置。
+check_platform() {
+  [[ "$(uname -s)" == Darwin ]] || die "该脚本仅支持 macOS。"
+}
+# 输出部署成功和日志位置。
+finish_deployment() {
+  success_echo "部署完成。日志：$LOG_FILE"
 }
 # 编排脚本的高层业务流程。
 # 初始化脚本运行环境，并集中承载原有的顶层执行逻辑。
@@ -1116,17 +1159,22 @@ initialize_script_runtime() {
   set -u
   set -o pipefail 2>/dev/null || true
   : > "$LOG_FILE"
+  RUNTIME_INITIALIZED=1
   is_sourcetree_runtime && IS_SOURCETREE_RUNTIME=1
   configure_output_mode
 }
-# 编排脚本的高层业务流程。
+# 编排自述、仓库校验、工具链和部署。
 main() {
-  # 展示脚本内置自述，并按运行入口完成防误触确认。
-  show_readme_and_wait
-  # 初始化 Shell 选项、日志、依赖和入口运行状态。
-  initialize_script_runtime
-  # 执行入口下沉后的完整业务流程。
-  run_main_business_flow "$@"
+  show_readme_and_wait # 先展示用途并按真实入口确认。
+  initialize_script_runtime # 确认后初始化日志与 Shell。
+  check_platform # 校验 macOS 平台。
+  ensure_git # 验证可用 Git。
+  resolve_target_repo_root "$@" # 只解析明确目标仓库。
+  validate_target_repo # remote 合法后才进入项目。
+  prepare_toolchain_for_current_context # 按入口检查或修复工具链。
+  print_toolchain_versions # 记录真实参与部署的工具版本。
+  run_wrangler_deploy # 授权及 KV 配置通过后部署。
+  finish_deployment # 输出最终完成状态与日志。
 }
 
 main "$@"

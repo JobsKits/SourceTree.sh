@@ -1,8 +1,8 @@
 #!/bin/zsh
 # 脚本自述：
 # - 脚本名称：【MacOS@SourceTree】📦双击自动生成ipa文件.command
-# - 核心用途：执行“📦双击自动生成ipa文件”对应的移动端项目自动化任务。
-# - 影响范围：可能修改项目依赖、生成文件、构建产物或开发工具配置。
+# - 核心用途：把与选定工程匹配的现有真机 App，或明确指定的 App，重新封装为 IPA。
+# - 影响范围：不执行编译和重签名，不使用其它工程的最新 App；输出独立文件，保留已有 IPA。
 # - 运行提示：运行后会先打印内置自述；Sourcetree 模式无交互连续执行，终端模式确认后继续。
 # =====================================================================
 # Jobs 标准化脚本外壳
@@ -32,9 +32,10 @@ jobs_intro_style() {
     }
   '
 }
+# 按脚本源码路径和标准目录解析真实入口文件。
 resolve_script_path() {
-  local script_source="${BASH_SOURCE[0]:-${(%):-%x}}"
-  local script_name="$(basename -- "$0")"
+  local script_source="$SCRIPT_SOURCE"
+  local script_name="${SCRIPT_SOURCE:t}"
   local candidate=""
 
   for candidate in \
@@ -50,15 +51,15 @@ resolve_script_path() {
   printf "%s/%s\n" "$PWD" "$script_name"
 }
 
-SCRIPT_PATH="$(resolve_script_path)"
-SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd -P)"
-SCRIPT_BASENAME="$(basename "$SCRIPT_PATH" | sed 's/\.[^.]*$//')"
-LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"
+readonly SCRIPT_SOURCE="$0"
+SCRIPT_PATH=""
+SCRIPT_DIR=""
+SCRIPT_BASENAME=""
+LOG_FILE=""
+LOG_READY=0
 # 识别 Sourcetree 自定义动作的瘦身运行环境，系统终端双击运行不降级。
 is_sourcetree_runtime() {
   env | grep -Eqi '^SOURCETREE|^SOURCE_TREE' && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/SourceTree.command/"* ]] && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/Documents/Github/JobsGenesis/SourceTree.command/"* ]] && return 0
 
   local pid="$PPID"
   local command_name=""
@@ -81,53 +82,80 @@ strip_ansi_text() {
   perl -pe 's/\e\[[0-9;]*[[:alpha:]]//g'
 }
 # 根据运行入口和终端能力预先切换纯文本输出，避免 Sourcetree 显示 ANSI 转义码。
+# 在第一屏输出前确定纯文本模式，确认后再重复初始化输出环境。
 prepare_plain_output_context() {
-  [[ -n "${TERM:-}" ]] || export TERM="dumb"
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" || "${JOBS_PLAIN_OUTPUT:-0}" == "1" ]]; then
+  SOURCETREE_PLAIN_OUTPUT=0
+  PLAIN_OUTPUT=0
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == 1 || ! -t 1 || -z "${TERM:-}" || "${TERM:-}" == dumb || -n "${NO_COLOR+x}" || "${JOBS_PLAIN_OUTPUT:-0}" == 1 ]]; then
     SOURCETREE_PLAIN_OUTPUT=1
-    COLOR_ENABLED=0
-    export NO_COLOR="${NO_COLOR:-1}"
-    export FORCE_COLOR=0
-    export CLICOLOR="0"
-    export ANSI_COLORS_DISABLED="1"
-    export npm_config_color=false
+    PLAIN_OUTPUT=1
+    export NO_COLOR=1 FORCE_COLOR=0 CLICOLOR=0 ANSI_COLORS_DISABLED=1 npm_config_color=false
   fi
 }
+# 只准备自述所需路径和入口身份，尚不创建日志或执行工程操作。
+prepare_script_metadata() {
+  SCRIPT_PATH="$(resolve_script_path)"
+  SCRIPT_DIR="${SCRIPT_PATH:h}"
+  SCRIPT_BASENAME="${SCRIPT_PATH:t:r}"
+  LOG_FILE="${TMPDIR:-/tmp}/${SCRIPT_BASENAME}.log"
+  IS_SOURCETREE_RUNTIME=0
+  if is_sourcetree_runtime; then
+    IS_SOURCETREE_RUNTIME=1
+  fi
+  prepare_plain_output_context
+}
 # 按当前输出级别记录终端信息，并同步写入脚本日志。
-log() {
-  if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == "1" ]]; then
-    printf "%b\n" "$1" | strip_ansi_text | tee -a "$LOG_FILE"
+# 确认前仅显示文字，确认后将同一输出同步写入日志。
+write_log_output() {
+  if [[ "${LOG_READY:-0}" == 1 ]]; then
+    tee -a "$LOG_FILE"
   else
-    printf "%b\n" "$1" | tee -a "$LOG_FILE"
+    cat
   fi
 }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-color_echo()     { log "\033[1;32m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-info_echo()      { log "\033[1;34mℹ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-success_echo()   { log "\033[1;32m✔ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-warn_echo()      { log "\033[1;33m⚠ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-warm_echo()      { log "\033[1;33m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-note_echo()      { log "\033[1;35m➤ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-error_echo()     { log "\033[1;31m✖ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-err_echo()       { log "\033[1;31m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-debug_echo()     { log "\033[1;35m🐞 $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-highlight_echo() { log "\033[1;36m🔹 $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-gray_echo()      { log "\033[0;90m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-bold_echo()      { log "\033[1m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-underline_echo() { log "\033[4m$1\033[0m"; }
-# ============================= 标准工具函数 =============================
+# 保留路径和命令中的字面反斜杠，只过滤展示用 ANSI 控制码。
+log() {
+  if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == 1 ]]; then
+    printf '%s\n' "$1" | strip_ansi_text | write_log_output
+  else
+    printf '%s\n' "$1" | write_log_output
+  fi
+}
+# 颜色只作用于日志样式，正文始终按字面文字输出。
+color_log() {
+  if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == 1 ]]; then
+    log "$2"
+  else
+    log "$(printf '%b%s%b' "$1" "$2" '\033[0m')"
+  fi
+}
+# 输出一般完成信息。
+color_echo() { color_log '\033[1;32m' "$1"; }
+# 输出步骤与环境信息。
+info_echo() { color_log '\033[1;34m' "ℹ $1"; }
+# 输出已完成步骤。
+success_echo() { color_log '\033[1;32m' "✔ $1"; }
+# 输出需要关注的风险。
+warn_echo() { color_log '\033[1;33m' "⚠ $1"; }
+# 输出温馨提示。
+warm_echo() { color_log '\033[1;33m' "$1"; }
+# 输出操作说明。
+note_echo() { color_log '\033[1;35m' "➤ $1"; }
+# 输出带前缀的错误信息。
+error_echo() { color_log '\033[1;31m' "✖ $1"; }
+# 输出错误正文。
+err_echo() { color_log '\033[1;31m' "$1"; }
+# 输出诊断信息。
+debug_echo() { color_log '\033[1;35m' "🐞 $1"; }
+# 输出展示重点。
+highlight_echo() { color_log '\033[1;36m' "🔹 $1"; }
+# 输出次要信息。
+gray_echo() { color_log '\033[0;90m' "$1"; }
+# 输出加粗信息。
+bold_echo() { color_log '\033[1m' "$1"; }
+# 输出带下划线的信息。
+underline_echo() { color_log '\033[4m' "$1"; }
+# 识别当前 CPU 架构。
 get_cpu_arch() {
   [[ "$(uname -m)" == "arm64" ]] && echo "arm64" || echo "x86_64"
 }
@@ -273,12 +301,9 @@ brew_install_or_upgrade() {
   fi
 }
 # 展示脚本用途和影响范围，并在执行前等待用户确认。
-show_readme_and_wait() {
-  if typeset -f is_sourcetree_runtime >/dev/null 2>&1 && is_sourcetree_runtime; then
-    IS_SOURCETREE_RUNTIME=1
-  fi
-  prepare_plain_output_context
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
+show_script_intro_and_wait() {
+  prepare_script_metadata
+  if [[ -z "${NO_COLOR+x}" && "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" && "${PLAIN_OUTPUT:-0}" != 1 ]]; then
     clear
   fi
 
@@ -286,7 +311,8 @@ show_readme_and_wait() {
   note_echo "脚本名称：${SCRIPT_BASENAME}.command" | jobs_intro_style title
   note_echo "脚本路径：${SCRIPT_PATH}" | jobs_intro_style body
   note_echo "运行入口：兼容系统终端双击运行和 Sourcetree 自定义动作运行。" | jobs_intro_style body
-  note_echo "核心行为：按脚本名称执行对应的 SourceTree 效率动作，运行前会先展示这段内置自述，避免误触。" | jobs_intro_style title
+  note_echo "核心用途：把与选定工程匹配的现有真机 App，或明确指定的 App，重新封装为 IPA。" | jobs_intro_style body
+  warn_echo "影响范围：不执行编译和重签名，不使用其它工程的最新 App；输出独立文件，保留已有 IPA。" | jobs_intro_style body
   note_echo "环境策略：系统终端保留清屏、彩色输出和回车确认；Sourcetree 瘦身环境自动跳过清屏和等待，并输出纯文本日志。" | jobs_intro_style body
   note_echo "文档关系：同目录 README.md 只作为外部说明文档保留，运行时自述不读取、不拼接、不依赖 README.md。" | jobs_intro_style body
   warn_echo "继续前请确认 SourceTree 传入路径、当前仓库或拖入路径正确；按 Ctrl+C 可以取消。" | jobs_intro_style body
@@ -300,241 +326,186 @@ show_readme_and_wait() {
   fi
   if [[ ! -t 0 ]]; then
     error_echo "当前不是 Sourcetree，且没有可交互输入；请在终端中重新运行。"
-    return 1
+    exit 1
   fi
-  read "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..."
+  read -r "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..." _ || exit 1
 }
 # 执行已经拆分完成的独立业务步骤。
-run_original_logic() {
-  # ============================= 原脚本业务逻辑区 =============================
-  # shellcheck shell=zsh
 
-  set -euo pipefail
-
-  # ===============================================================
-  # 默认配置
-  # ===============================================================
-  CONFIG="Release"           # Debug / Release
-  OUT_DIR="${HOME}/Desktop"  # .ipa 输出目录
-  PROJECT_PATH=""            # 指定 .xcodeproj 或 .xcworkspace 的完整路径
-  LOG_FILE="/tmp/package_ipa.log"
-  # ===============================================================
-  # 语义化输出 & 日志
-  # ===============================================================
-  _color()        { local c="$1"; shift; printf "\033[%sm%s\033[0m\n" "$c" "$*"; }
-  # 按当前输出级别记录终端信息，并同步写入脚本日志。
-  info_echo()    { _color "34" "ℹ️  $*";  }
-  # 按当前输出级别记录终端信息，并同步写入脚本日志。
-  success_echo() { _color "32" "✅ $*";   }
-  # 按当前输出级别记录终端信息，并同步写入脚本日志。
-  warn_echo()    { _color "33" "⚠️  $*";  }
-  # 按当前输出级别记录终端信息，并同步写入脚本日志。
-  error_echo()   { _color "31" "❌ $*";   }
-  # 按当前输出级别记录终端信息，并同步写入脚本日志。
-  log()          { printf "%s %s\n" "$(date '+%F %T')" "$*" >> "$LOG_FILE"; }
-  # ===============================================================
-  # 帮助
-  # ===============================================================
-  usage() {
-    cat <<EOF
-用法:
-  $(basename "$0") [--config Debug|Release] [--out 输出目录] [--project 路径]
-
-参数:
-  --config   构建配置，默认 Release
-  --out      .ipa 输出目录，默认 \$HOME/Desktop
-  --project  指定 .xcodeproj 或 .xcworkspace 的完整路径
-
-示例:
-  $(basename "$0") --config Release --out ~/Desktop
-  $(basename "$0") --project ./MyApp.xcodeproj
-EOF
-  }
-  # ===============================================================
-  # 参数解析
-  # ===============================================================
-  parse_args() {
-    while [[ $# -gt 0 ]]; do
-      case "$1" in
-        --config)  CONFIG="${2:-Release}"; shift 2 ;;
-        --out)     OUT_DIR="${2:-$OUT_DIR}"; shift 2 ;;
-        --project) PROJECT_PATH="${2:-}"; shift 2 ;;
-        -h|--help) usage; exit 0 ;;
-        *)         warn_echo "忽略未知参数：$1"; shift ;;
-      esac
-    done
-  }
-  # ===============================================================
-  # 准备环境
-  # ===============================================================
-  prepare_env() {
-    mkdir -p "$OUT_DIR"
-    : > "$LOG_FILE"
-  }
-  # ===============================================================
-  # 获取仓库根目录（优先 git）
-  # ===============================================================
-  find_repo_root() {
-    if command -v git >/dev/null 2>&1 && git rev-parse --show-toplevel >/dev/null 2>&1; then
-      git rev-parse --show-toplevel
-    else
-      cd "$(dirname "$0")"
-      pwd
-    fi
-  }
-  # ===============================================================
-  # 选择工程文件（优先 .xcworkspace）
-  # ===============================================================
-  choose_project_path() {
-    local root="$1"
-    local target_path="$PROJECT_PATH"
-
-    if [[ -z "$target_path" ]]; then
-      set +e
-      local WORKSPACES=($(find "$root" -maxdepth 2 -name "*.xcworkspace" -print 2>/dev/null))
-      local PROJECTS=($(find "$root" -maxdepth 2 -name "*.xcodeproj"   -print 2>/dev/null))
-      set -e
-
-      if [[ ${#WORKSPACES[@]} -gt 0 ]]; then
-        target_path="${WORKSPACES[1]}"
-      elif [[ ${#PROJECTS[@]} -gt 0 ]]; then
-        target_path="${PROJECTS[1]}"
-      else
-        error_echo "未在 $root 找到 .xcworkspace / .xcodeproj"
-        exit 1
-      fi
-    fi
-
-    if [[ ! -e "$target_path" ]]; then
-      error_echo "--project 指定的路径不存在：$target_path"
-      exit 1
-    fi
-
-    echo "$target_path"
-  }
-  # ===============================================================
-  # 查找最新 .app（优先 CONFIG，再回退 Debug）
-  # ===============================================================
-  find_latest_app() {
-    local derived="${HOME}/Library/Developer/Xcode/DerivedData"
-    [[ -d "$derived" ]] || { error_echo "未找到 DerivedData：$derived。请先在 Xcode 做一次真机构建。"; exit 1; }
-
-    set +e
-    local app_path
-    app_path=$(ls -td "${derived}"/*/Build/Products/${CONFIG}-iphoneos/*.app 2>/dev/null | head -n 1)
-    set -e
-
-    if [[ -z "${app_path:-}" || ! -d "$app_path" ]]; then
-      warn_echo "未在 ${derived}/**/Build/Products/${CONFIG}-iphoneos/ 找到 .app，尝试使用 Debug..."
-      set +e
-      app_path=$(ls -td "${derived}"/*/Build/Products/Debug-iphoneos/*.app 2>/dev/null | head -n 1)
-      set -e
-    fi
-
-    if [[ -z "${app_path:-}" || ! -d "$app_path" ]]; then
-      error_echo "还是找不到 .app。请确认你已对真机目标完成构建（Product > Build）。"
-      exit 1
-    fi
-
-    echo "$app_path"
-  }
-  # ===============================================================
-  # 推断 IPA 名称（CFBundleDisplayName > CFBundleName > 工程名）
-  # ===============================================================
-  infer_ipa_name() {
-    local app_dir="$1"
-    local fallback="$2"
-    local plist="$app_dir/Info.plist"
-    local name=""
-
-    if [[ -f "$plist" ]]; then
-      name=$(/usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$plist" 2>/dev/null || true)
-      [[ -z "$name" ]] && name=$(/usr/libexec/PlistBuddy -c "Print :CFBundleName" "$plist" 2>/dev/null || true)
-    fi
-    [[ -n "$name" ]] || name="$fallback"
-    echo "$name"
-  }
-  # ===============================================================
-  # 打包 .ipa
-  # ===============================================================
-  package_ipa() {
-    local app_dir="$1"
-    local ipa_path="$2"
-
-    local tmp_dir payload_dir
-    tmp_dir="$(mktemp -d)"
-    payload_dir="${tmp_dir}/Payload"
-
-    mkdir -p "$payload_dir"
-    cp -R "$app_dir" "$payload_dir/"
-
-    info_echo "📦 正在打包为 .ipa ..."
-    (
-      cd "$tmp_dir"
-      /usr/bin/zip -qry "$ipa_path" "Payload"
-    )
-    rm -rf "$tmp_dir"
-  }
-  # ===============================================================
-  # main：统一调度
-  # ===============================================================
-  main() {
-    parse_args "$@"
-    prepare_env
-
-    local repo_root project_path project_base latest_app ipa_name ipa_path
-
-    repo_root="$(find_repo_root)"
-    info_echo "📂 工作目录：$repo_root"; log "repo_root=$repo_root"
-
-    project_path="$(choose_project_path "$repo_root")"
-    project_base="$(basename "$project_path")"
-    success_echo "发现工程：$project_base"
-    log "project=$project_path"
-
-    latest_app="$(find_latest_app)"
-    success_echo "✅ 最新 .app：$latest_app"
-    log "app=$latest_app"
-
-    ipa_name="$(infer_ipa_name "$latest_app" "${project_base%.*}")"
-    ipa_path="${OUT_DIR}/${ipa_name}.ipa"
-
-    package_ipa "$latest_app" "$ipa_path"
-    success_echo "🎉 打包完成：$ipa_path"
-    log "ipa=$ipa_path"
-
-    open -R "$ipa_path" 2>/dev/null || true
-  }
-
-  # ===============================================================
-  # 执行入口
-  # ===============================================================
-  main "$@"
-
-  # =========================== 原脚本业务逻辑区结束 ===========================
+IPA_TEMP_DIR=""
+# 只清理本流程创建的独立 IPA 临时目录。
+cleanup_ipa_staging() {
+  [[ -n "$IPA_TEMP_DIR" && -d "$IPA_TEMP_DIR" && "$IPA_TEMP_DIR" == "${TMPDIR:-/tmp}"/jobs_ipa.* ]] || return 0
+  rm -rf -- "$IPA_TEMP_DIR"
 }
-# 编排脚本的高层业务流程。
-# 初始化脚本运行环境，并集中承载原有的顶层执行逻辑。
-initialize_script_runtime() {
-  : > "$LOG_FILE"
-  is_sourcetree_runtime && IS_SOURCETREE_RUNTIME=1
-  prepare_plain_output_context
-  [[ -n "${TERM:-}" ]] || export TERM="dumb"
-  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" ]]; then
-    SOURCETREE_PLAIN_OUTPUT=1
-    export NO_COLOR="${NO_COLOR:-1}"
-    export FORCE_COLOR=0
-    export CLICOLOR="0"
-    export ANSI_COLORS_DISABLED="1"
-    export npm_config_color=false
+# 校验 IPA 配置、来源和输出参数。
+parse_ipa_options() {
+  IPA_CONFIG=Release
+  IPA_OUT_DIR="$HOME/Desktop"
+  IPA_PROJECT=""
+  IPA_APP=""
+  IPA_BASE=""
+  while (( $# > 0 )); do
+    case "$1" in
+      --config|--out|--project|--app)
+        (( $# >= 2 )) && [[ "$2" != --* ]] || { error_echo "$1 缺少参数值。"; return 2; }
+        case "$1" in
+          --config) IPA_CONFIG="$2" ;;
+          --out) IPA_OUT_DIR="$2" ;;
+          --project) IPA_PROJECT="$2" ;;
+          --app) IPA_APP="$2" ;;
+        esac
+        shift 2
+        ;;
+      -h|--help)
+        print -r -- '用法：脚本 [仓库目录] [--project 工程或工作区] [--app 已构建的真机.app] [--config Debug|Release] [--out 输出目录]'
+        return 3
+        ;;
+      --)
+        shift
+        (( $# <= 1 )) && [[ -z "$IPA_BASE" ]] || { error_echo '只能指定一个仓库目录。'; return 2; }
+        IPA_BASE="${1:-}"
+        break
+        ;;
+      -*) error_echo "未知参数：$1"; return 2 ;;
+      *) [[ -z "$IPA_BASE" ]] || { error_echo '只能指定一个仓库目录。'; return 2; }; IPA_BASE="$1"; shift ;;
+    esac
+  done
+  case "$IPA_CONFIG" in Debug|Release) ;; *) error_echo '构建配置必须是 Debug 或 Release。'; return 2 ;; esac
+}
+# 使用 NUL 分隔收集工程，多个工作区 / 工程不能任取第一个。
+resolve_ipa_project() {
+  local base="${IPA_BASE:-${REPO:-$PWD}}" found_project=""
+  local -a workspaces=() projects=()
+  if [[ -n "$IPA_PROJECT" ]]; then
+    [[ -d "$IPA_PROJECT" && ( "$IPA_PROJECT" == *.xcodeproj || "$IPA_PROJECT" == *.xcworkspace ) ]] || { error_echo "无效工程路径：$IPA_PROJECT"; return 1; }
+    IPA_PROJECT="${IPA_PROJECT:A}"
+    return 0
+  fi
+  [[ -d "$base" ]] || { error_echo "仓库目录不存在：$base"; return 1; }
+  base="${base:A}"
+  [[ "$base" != / && "$base" != "$HOME" ]] || { error_echo '请指定具体工程目录。'; return 1; }
+  while IFS= read -r -d '' found_project; do
+    case "$found_project" in
+      *.xcworkspace) workspaces+=("$found_project") ;;
+      *.xcodeproj) projects+=("$found_project") ;;
+    esac
+  done < <(find "$base" -maxdepth 3 \( -type d \( -name .git -o -name Pods -o -name PodsManual -o -name 'ManualBy*Pods*' -o -name .dart_tool -o -name build -o -name DerivedData -o -name node_modules \) -prune \) -o \( -type d \( -name '*.xcworkspace' -o -name '*.xcodeproj' \) -print0 -prune \))
+  if (( ${#workspaces[@]} == 1 )); then
+    IPA_PROJECT="${workspaces[1]}"
+  elif (( ${#workspaces[@]} > 1 )); then
+    error_echo '发现多个工作区，请用 --project 明确选择。'
+    return 1
+  elif (( ${#projects[@]} == 1 )); then
+    IPA_PROJECT="${projects[1]}"
+  else
+    error_echo "工程候选数量：${#projects[@]}，请用 --project 明确选择。"
+    return 1
   fi
 }
+# DerivedData 的 WorkspacePath 必须与选定工程匹配，禁止使用其它工程的最新产物。
+resolve_existing_device_app() {
+  if [[ -n "$IPA_APP" ]]; then
+    IPA_APP="${IPA_APP:A}"
+    return 0
+  fi
+  resolve_ipa_project || return $?
+  local derived_dir="$HOME/Library/Developer/Xcode/DerivedData" derived_entry="" workspace_path="" app_candidate=""
+  local -a app_candidates=()
+  for derived_entry in "$derived_dir"/*(N/); do
+    [[ -f "$derived_entry/Info.plist" ]] || continue
+    workspace_path="$(/usr/libexec/PlistBuddy -c 'Print :WorkspacePath' "$derived_entry/Info.plist" 2>/dev/null || true)"
+    [[ -n "$workspace_path" ]] || continue
+    workspace_path="${workspace_path:A}"
+    [[ "$workspace_path" == "$IPA_PROJECT" || ( "$IPA_PROJECT" == *.xcodeproj && "$workspace_path" == "$IPA_PROJECT/project.xcworkspace" ) ]] || continue
+    for app_candidate in "$derived_entry/Build/Products/$IPA_CONFIG-iphoneos"/*.app(N/); do
+      app_candidates+=("$app_candidate")
+    done
+  done
+  if (( ${#app_candidates[@]} != 1 )); then
+    error_echo "选定工程的 $IPA_CONFIG 真机 App 候选数量：${#app_candidates[@]}。请先完成对应构建，或用 --app 明确指定。"
+    for app_candidate in "${app_candidates[@]}"; do
+      gray_echo "候选：$app_candidate"
+    done
+    return 1
+  fi
+  IPA_APP="${app_candidates[1]}"
+}
+# 核对现有 App 的真机平台、类型和可执行文件。
+validate_device_app() {
+  [[ -d "$IPA_APP" && "$IPA_APP" == *.app && -f "$IPA_APP/Info.plist" ]] || { error_echo "无效 App：$IPA_APP"; return 1; }
+  local platform="" executable="" bundle_type=""
+  platform="$(/usr/libexec/PlistBuddy -c 'Print :DTPlatformName' "$IPA_APP/Info.plist" 2>/dev/null || true)"
+  if [[ "$platform" != iphoneos ]]; then
+    /usr/libexec/PlistBuddy -c 'Print :CFBundleSupportedPlatforms' "$IPA_APP/Info.plist" 2>/dev/null | grep -Fq iPhoneOS || { error_echo '只接受 iPhoneOS 真机 App，不能将模拟器 App 当作安装 IPA。'; return 1; }
+  fi
+  executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$IPA_APP/Info.plist" 2>/dev/null || true)"
+  [[ -n "$executable" && "$executable" != */* && -f "$IPA_APP/$executable" ]] || { error_echo 'App 缺少有效 CFBundleExecutable。'; return 1; }
+  bundle_type="$(/usr/libexec/PlistBuddy -c 'Print :CFBundlePackageType' "$IPA_APP/Info.plist" 2>/dev/null || true)"
+  [[ "$bundle_type" == APPL ]] || { error_echo '目标不是应用程序 App bundle。'; return 1; }
+}
+# 按已校验的工程和参数执行业务，逐步传播失败状态。
+run_original_logic() {
+  setopt NO_NOMATCH PIPE_FAIL
+  local parse_ec=0
+  parse_ipa_options "$@" || parse_ec=$?
+  (( parse_ec == 3 )) && return 0
+  (( parse_ec == 0 )) || return "$parse_ec"
+  command -v ditto >/dev/null 2>&1 || { error_echo '缺少 macOS ditto。'; return 1; }
+  resolve_existing_device_app || return $?
+  validate_device_app || return $?
+  mkdir -p "$IPA_OUT_DIR" || return $?
+  IPA_OUT_DIR="${IPA_OUT_DIR:A}"
+  local ipa_name="" ipa_destination=""
+  ipa_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$IPA_APP/Info.plist" 2>/dev/null || true)"
+  [[ -n "$ipa_name" ]] || ipa_name="${IPA_APP:t:r}"
+  ipa_name="${ipa_name//\//_}"
+  ipa_name="${ipa_name//:/_}"
+  ipa_name="${ipa_name//$'\n'/_}"
+  ipa_name="${ipa_name//$'\r'/_}"
+  [[ -n "$ipa_name" && "$ipa_name" != . && "$ipa_name" != .. ]] || { error_echo '无效 IPA 文件名。'; return 1; }
+  IPA_TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/jobs_ipa.XXXXXX")" || return $?
+  trap cleanup_ipa_staging EXIT
+  trap 'cleanup_ipa_staging; exit 130' INT
+  trap 'cleanup_ipa_staging; exit 143' TERM
+  mkdir -p "$IPA_TEMP_DIR/Payload" || return $?
+  ditto "$IPA_APP" "$IPA_TEMP_DIR/Payload/${IPA_APP:t}" || return $?
+  ipa_destination="$IPA_OUT_DIR/${ipa_name}_$(date '+%Y.%m.%d %H-%M-%S')_${IPA_TEMP_DIR:t}.ipa"
+  info_echo "真机 App：$IPA_APP"
+  info_echo "仅重新打包现有 App，不执行构建、重签名或 App Store 导出。"
+  (cd "$IPA_TEMP_DIR" && /usr/bin/zip -qry "$IPA_TEMP_DIR/output.ipa" Payload) || return $?
+  mv -n "$IPA_TEMP_DIR/output.ipa" "$ipa_destination" || return $?
+  [[ ! -e "$IPA_TEMP_DIR/output.ipa" && -s "$ipa_destination" ]] || { error_echo "IPA 发布失败或文件名冲突：$ipa_destination"; return 1; }
+  success_echo "IPA：$ipa_destination"
+  open -R "$ipa_destination" 2>/dev/null || true
+}
+
+# 初始化 Shell 和输出上下文。
+# 在用户确认后初始化 Shell、当前进程 PATH 和日志。
+initialize_script_runtime() {
+  setopt NO_NOMATCH PIPE_FAIL
+  export PATH="$HOME/.pub-cache/bin:$HOME/.fvm/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+  prepare_plain_output_context
+  : > "$LOG_FILE" || { print -r -- "日志不可写：$LOG_FILE" >&2; exit 1; }
+  LOG_READY=1
+}
 # 编排脚本的高层业务流程。
+# 业务失败时立即结束入口，避免后续成功提示掩盖错误。
+run_checked_business() {
+  local business_ec=0
+  if run_original_logic "$@"; then
+    success_echo "脚本执行结束。日志：$LOG_FILE"
+  else
+    business_ec=$?
+    error_echo "脚本执行失败，退出码：$business_ec。日志：$LOG_FILE"
+    exit "$business_ec"
+  fi
+}
+# 先完成自述确认，再准备运行环境并执行工程业务。
 main() {
-  show_readme_and_wait # 展示脚本内置自述，并按运行入口完成防误触确认。
-  initialize_script_runtime # 初始化 Shell 选项、日志、依赖和入口运行状态。
-  run_original_logic "$@" # 执行 run_original_logic 对应的核心业务步骤。
-  success_echo "脚本执行结束。日志：$LOG_FILE" # 输出脚本执行结果、摘要和日志位置。
+  show_script_intro_and_wait # 打印内置自述，终端模式确认后继续。
+  initialize_script_runtime # 确认后初始化 Shell、PATH 和日志。
+  run_checked_business "$@" # 执行业务，失败保留退出码并终止后续步骤。
 }
 
 main "$@"

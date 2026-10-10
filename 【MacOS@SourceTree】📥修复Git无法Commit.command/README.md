@@ -24,6 +24,7 @@
 
 ### 1.1、C01：工作树绑定错位为什么分两种处理 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
+- `.git` 文件中的绝对 gitdir 直接使用，相对 gitdir 按当前工作树解析；子模块元数据以父仓共用 Git 目录的 `modules/` 为基准，兼容 linked worktree。
 - 旧 `core.worktree` 路径已经不存在：通常是目录改名后元数据没有同步，脚本可以把 `core.worktree` 改为当前路径。
 - 旧 `core.worktree` 路径仍真实存在：说明当前目录可能是复制品或误绑定副本。脚本不会抢占原工作树，而是复制 Git 元数据，让当前目录成为独立工作树，并保留原 `.git` 指针作为备份。
 
@@ -31,17 +32,18 @@
 
 `index.lock` 可能代表 `git add`、`git commit`、`git checkout` 等索引写操作仍在进行。直接删除活锁会让两个写进程同时操作索引。脚本只在以下条件全部满足时归档残留锁：
 
-1. 锁是普通文件，不是目录或符号链接。
-2. `lsof` 没有发现锁文件持有者。
-3. 当前仓库没有仍可能写索引的 Git 进程。
-4. 检查前后锁的设备号与 inode 没有变化。
-5. 移动锁后 `git ls-files --stage` 仍能读取索引；失败时恢复原锁。
+1、锁是普通文件，不是目录或符号链接。
+2、`lsof` 没有发现锁文件持有者。
+3、当前仓库没有仍可能写索引的 Git 进程。
+4、检查前后锁的设备号与 inode 没有变化。
+5、移动锁后 `git ls-files --stage` 仍能读取索引；失败时恢复原锁。
 
 ### 1.3、C04 与 C05：脚本怎样保护子模块真实修改 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 - 父仓只提交 gitlink 指向的子模块提交，不会直接提交子模块工作区里的文件内容。
 - 已存在子模块有内部修改时，脚本列出状态并保持原样；它不会执行 `reset`、`clean` 或替用户提交子模块。
 - 缺失子模块会按 `.gitmodules` 尝试初始化，因此可能访问子模块远端。
+- 同源副本需要新的独立 gitdir 时，目标 gitdir 已存在则停止并保留已有元数据，不修改它的 `core.worktree`、分支或索引。
 - 父仓锁定提交已被远端历史重写移除时，脚本只保留本轮新克隆工作树的有效 clean `HEAD`；这可能形成依赖版本变化，提交前必须人工核对。
 
 ## 二、先分清“无法暂存”与“无法创建提交” <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
@@ -50,8 +52,8 @@
 
 Git 的提交链路不是一个动作：
 
-1. `git add` / `git rm` 把工作区的最终状态写入索引，也就是暂存区。
-2. `git commit` 读取索引，运行 Hook 和签名链路，再创建提交对象。
+1、`git add` / `git rm` 把工作区的最终状态写入索引，也就是暂存区。
+2、`git commit` 读取索引，运行 Hook 和签名链路，再创建提交对象。
 
 Sourcetree 的 Commit 界面会编排这两段流程，所以界面显示“Commit 失败”，根因可能只是前半段的某条 `git add` 或 `git rm` 失败。本脚本的 C01–C07 主要解锁工作树、Git 元数据、子模块、索引与暂存入口；它不会绕过提交后半段的身份、Hook、签名或冲突规则。
 
@@ -151,19 +153,19 @@ flowchart TD
 
 执行原则：
 
-1. 每个场景都有独立编号、独立函数、出现原因和通过日志。
-2. 前一项通过后才进入下一项；任何安全条件失败都会立即返回非零状态。
-3. C06 是唯一一次父仓全量索引刷新，不在多个场景里重复执行 `git add -A`。
-4. C07 负责最终“解锁”判定；通过后仍需回到 Sourcetree 人工核对暂存范围。
+1、每个场景都有独立编号、独立函数、出现原因和通过日志。
+2、前一项通过后才进入下一项；任何安全条件失败都会立即返回非零状态。
+3、C06 是唯一一次父仓全量索引刷新，不在多个场景里重复执行 `git add -A`。
+4、C07 负责最终“解锁”判定；通过后仍需回到 Sourcetree 人工核对暂存范围。
 
 ## 四、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 ### 4.1、Sourcetree 自定义动作 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-1. 在 Sourcetree 中选中目标仓库。
-2. 运行自定义动作 `📥修复Git无法Commit`。
-3. 脚本接收 `$REPO` 后无交互连续执行；场景编号、原因、处理结果和停止点会显示在输出窗口。
-4. 回到“文件状态”刷新，逐项核对暂存变更后再提交。
+1、在 Sourcetree 中选中目标仓库。
+2、运行自定义动作 `📥修复Git无法Commit`。
+3、脚本接收 `$REPO` 后无交互连续执行；场景编号、原因、处理结果和停止点会显示在输出窗口。
+4、回到“文件状态”刷新，逐项核对暂存变更后再提交。
 
 ### 4.2、终端独立运行 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
@@ -173,7 +175,7 @@ flowchart TD
 './【MacOS@SourceTree】📥修复Git无法Commit.command' '/path/to/repository'
 ```
 
-终端模式会先打印内置自述；按回车确认后才初始化日志并修改 Git 状态，按 `Ctrl+C` 可取消。
+终端模式会先打印内置自述；按回车确认后才初始化日志并修改 Git 状态，按 `Ctrl+C` 可取消。传入仓库参数或使用相对脚本路径均不绕过确认；非 Sourcetree 且无法交互或读取确认失败时直接停止。
 
 ## 五、执行后核对与手工回退边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
@@ -193,11 +195,11 @@ fi
 
 验收重点：
 
-1. `git status` 不再报告索引锁、工作树绑定或文件/目录暂存阻塞。
-2. `git diff --cached --name-status` 中每一项都是用户准备提交的变化。
-3. `.gitmodules` 和模式 `160000` 的 gitlink 变化相互匹配。
-4. 子模块内部真实修改仍留在子模块中，没有被脚本清理或替用户提交。
-5. 残留锁备份路径与日志一致；备份用于追溯，不需要在正常流程中自动恢复。
+1、`git status` 不再报告索引锁、工作树绑定或文件/目录暂存阻塞。
+2、`git diff --cached --name-status` 中每一项都是用户准备提交的变化。
+3、`.gitmodules` 和模式 `160000` 的 gitlink 变化相互匹配。
+4、子模块内部真实修改仍留在子模块中，没有被脚本清理或替用户提交。
+5、残留锁备份路径与日志一致；备份用于追溯，不需要在正常流程中自动恢复。
 
 如果暂存范围不正确，应在确认具体文件后使用 Sourcetree 或精确的 `git restore --staged -- <path>` 取消对应暂存，再重新核对。不要为了“回退脚本”执行 `git reset --hard` 或 `git clean`，它们会影响真实工作区内容。
 
@@ -212,6 +214,8 @@ fi
 - 执行后必须在 Sourcetree 检查暂存区；“流程解锁”不等于“所有暂存内容都应该提交”。
 
 ## 七、日志文件 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+
+确认前只展示内置自述，不清空或写入旧日志；确认后才初始化本次日志。业务正文和路径按原文记录，反斜杠不会被解释为转义。
 
 运行日志写入系统临时目录中的：
 
@@ -242,5 +246,9 @@ C07 只验证索引和暂存入口。Commit 后半段还可能被 Hook、作者�
 ### 8.5、为什么还要刷新 Sourcetree？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 Git 索引由外部脚本修改后，Sourcetree 界面可能仍缓存旧文件列表。刷新后才能看到真实暂存状态。
+
+### 8.6、验证范围 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+
+脚本通过 `zsh -n`；隔离临时仓库验证 C01–C07 完整流程、父仓暂存而脏子模块内容保留、绝对 gitdir 解析、linked worktree 共用 `modules/` 路径、已存在 alias gitdir 的保护、活锁保留、残留锁归档，以及非交互确认门禁。验证没有修复、暂存或提交用户的真实仓库；Hook、签名与生产远端初始化仍按实际错误另行处理。
 
 <a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>

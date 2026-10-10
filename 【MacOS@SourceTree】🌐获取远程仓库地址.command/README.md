@@ -13,6 +13,7 @@
 - 推荐参数：在 Sourcetree 自定义动作的参数栏填写 `$REPO`。
 - 核心结果：脚本会在输出窗口打印远程名称和地址，并把原始远程地址复制到 macOS 剪贴板。
 - 安全边界：不联网、不提交、不推送、不修改 Git 配置、索引或业务文件。
+- 依赖检查：实际执行 `git --version` 验证 Git 健康，命令存在但无法执行时停止。
 - 日志位置：系统临时目录中的 `【MacOS@SourceTree】🌐获取远程仓库地址.log`。
 
 ## 一、脚本用途 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
@@ -62,7 +63,7 @@
   './【MacOS@SourceTree】🌐获取远程仓库地址.command' '/path/to/repository' 'upstream'
   ```
 
-- 不传参数时，脚本会先展示内置自述，再让你拖入或输入目标仓库路径；直接回车会使用当前工作目录。
+- 不传参数时，脚本会先展示内置自述并等待回车确认，再让你拖入或输入目标仓库路径；直接回车会使用当前工作目录。
 
 ## 三、远程选择规则 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
@@ -78,11 +79,14 @@
 
 ## 四、安全与隐私 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
+确认前只展示内置自述，不清空或写入旧日志；确认后才初始化本次日志。业务正文和路径按原文记录，反斜杠不会被解释为转义。
+
 - 脚本只读取本地 Git 配置，不会执行 `fetch`、`pull`、`push` 或其它联网命令。
 - 脚本不会执行 `git add`、`git commit`、`git config`、`rm` 或 `sudo`。
-- 如果 HTTP 远程地址包含用户信息，终端输出和日志会把用户信息替换为 `***`。
+- 如果 HTTP 远程地址包含用户信息，终端输出和日志会把最后一个 `@` 前的用户信息整体替换为 `***`，避免凭据包含 `@` 时残留后半段；原始地址中的反斜杠按原值输出。
 - 剪贴板始终保留 Git 配置中的原始远程地址；粘贴到聊天、工单或公开文档前应确认其中不含凭据。
 - 如果系统缺少 `pbcopy`，脚本仍会打印结果，只跳过剪贴板复制。
+- 脚本通过 `zsh -n`，隔离验证多 `@` 用户信息脱敏和非交互确认门禁。未改写用户 Git 配置或以测试覆盖真实剪贴板。
 
 ## 五、流程图 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 

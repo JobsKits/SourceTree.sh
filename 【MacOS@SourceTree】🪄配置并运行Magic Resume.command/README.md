@@ -30,17 +30,19 @@
 
 - 已有同级官方仓库时立即切换并复用，不创建任何新目录。只有全部同级目录均未命中时，才选择 `magic-resume`、`magic-resume-JOYCEQL` 等安全候选创建空目录。
 
-- 只会复用 remote 正确的 Git 仓库或完全空的文件夹；不会覆盖、清空或改写已有非空目录。
+- 只会复用 remote 正确的 Git 仓库或完全空的文件夹；不会覆盖、清空或改写已有非空目录。候选目录枚举失败时停止，不能把权限或读取错误当作空目录。
+
+- 参数路径保留文件名中的反斜线和内部引号，仅去除完整成对外围引号、末尾换行并展开 `~/`。交互拖入的路径先按字面检查，只有该路径不存在时才尝试还原 shell 转义；输入结束时停止。
 
 ### 2.2、环境和依赖 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-- 需要 macOS 自带的 `git`、`curl`、`lsof`、`nohup` 和 `open`。
+- 需要 macOS 自带的 `git`、`curl`、`lsof`、`nohup` 和 `open`；`git --version` 必须健康，损坏 shim 会提前停止。
 
 - 优先复用现有 [**Node.js**](https://nodejs.org) 与 [**pnpm**](https://pnpm.io/)；缺少 Node.js 时只通过已经安装的 [**Homebrew**](https://brew.sh/) 补齐，不会自动安装 Homebrew。
 
-- 缺少 pnpm 时，通过 `npm install --global` 安装项目 `package.json` 声明的 pnpm 版本。
+- 缺少或损坏 pnpm 时，通过 `npm install --global` 安装项目 `package.json` 声明的 pnpm 版本，并重新验证可执行性。Node.js / npm 同样先健康检查，修复一次后仍失败则停止。
 
-- 按官方快速开始执行 `pnpm install` 和 `pnpm dev`，不自动执行 `git pull`、依赖升级、构建或部署。
+- 按 [官方快速开始](https://github.com/JOYCEQL/magic-resume#-quick-start) 安装依赖并启动 Vite；启动命令为 `pnpm dev --port 3000 --strictPort`，端口占用时失败，不自动漂移到其它端口。不自动执行 `git pull`、依赖升级、构建或部署。
 
 ### 2.3、后台服务 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
@@ -48,11 +50,11 @@
 
 - 3000 端口的实际监听进程 PID 写入系统临时目录中的 `【MacOS@SourceTree】🪄配置并运行Magic Resume-dev.pid`。
 
-- 如果 3000 端口由本脚本 PID 文件记录的当前仓库后台进程监听，直接复用。
+- 先核验 3000 端口的全部 IPv4 / IPv6 监听 PID，工作目录与 Vite dev 身份必须全部属于当前仓库；存在任何未知或其它仓库进程即停止。只有本脚本 PID 文件记录的当前仓库 Vite dev 通过全部身份检查后才直接复用。
 
 - 如果 3000 端口属于当前仓库未托管的 Vite dev，脚本只向该监听进程发送普通 `TERM`，等端口释放后重新后台启动；不会使用强制结束信号。
 
-- 如果 3000 端口属于其它目录或无法确认为 Vite dev，脚本报错退出，避免误停进程或打开错误页面。
+- 进程必须是 Node.js，并通过当前仓库实际 Vite 入口执行独立的 `dev` / `serve` 子命令。`preview` / `build`、其它目录及无法确认的非标准启动命令会报错退出，避免误停进程或打开错误页面。
 
 - 服务就绪后调用系统默认浏览器打开 `http://localhost:3000`，随后脚本退出，后台服务继续运行。
 
@@ -151,5 +153,11 @@ flowchart TD
 ### 7.4、关闭终端后页面是否还能访问？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 能。由该脚本新启动的服务已经通过 `nohup` 脱离终端；只要后台进程没有被主动停止，`http://localhost:3000` 就会继续提供服务。
+
+## 八、预演与回归验证 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+
+- 设置 `JOBS_MAGIC_RESUME_DRY_RUN=1` 可预演。已有目标仓库时需要预先可用 Node.js / npm / pnpm，只展示依赖安装和启动计划；未命中目标仓库时只展示克隆计划后退出，不创建目录。
+- 支持单个明确仓库路径，来源按参数、`SOURCETREE_REPO_PATH`、`REPO`、当前目录依次选择。显式错误路径会停止，不改用其它目录。
+- 已通过 `zsh -n`、非交互门禁、路径字面值与交互转义、目录枚举失败、Git 健康检查、预演禁止安装及 Vite 监听进程身份拒绝的隔离验证；未启动真实用户服务。
 
 <a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>

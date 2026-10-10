@@ -6,7 +6,6 @@
 # - 影响范围：修改 Git 索引；可归档确认无进程占用的残留锁并初始化缺失子模块，但不清理已有子模块的真实修改。
 # - 运行提示：Sourcetree 模式无交互连续执行；终端独立运行需先按回车确认。
 
-# 解析脚本真实路径，兼容 Sourcetree 只传入脚本名的运行环境。
 # 仅渲染自述：标题红色加粗，编号正文蓝色常规字重；非彩色终端输出纯文本。
 jobs_intro_style() {
   local intro_color=0
@@ -30,6 +29,7 @@ jobs_intro_style() {
     }
   '
 }
+# 解析脚本真实路径，兼容 Sourcetree 只传入脚本名的运行环境。
 resolve_script_path() {
   local script_source="${BASH_SOURCE[0]:-${(%):-%x}}"
   local script_name="${0:t}"
@@ -73,8 +73,7 @@ prepare_script_context() {
 }
 # 识别 Sourcetree 自定义动作的非交互运行环境。
 is_sourcetree_runtime() {
-  env | grep -Eqi '^SOURCETREE|^SOURCE_TREE' && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/SourceTree.command/"* ]] && return 0
+  env | grep -Ei '^SOURCETREE|^SOURCE_TREE' >/dev/null && return 0
 
   local pid="$PPID"
   local command_name=""
@@ -97,7 +96,7 @@ configure_output_mode() {
   if is_sourcetree_runtime; then
     IS_SOURCETREE_RUNTIME=1
   fi
-  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || -z "${TERM:-}" || "${TERM:-}" == "dumb" || -n "${NO_COLOR:-}" ]]; then
+  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || -z "${TERM:-}" || "${TERM:-}" == "dumb" || -n "${NO_COLOR+x}" ]]; then
     PLAIN_OUTPUT=1
     export NO_COLOR=1
     export FORCE_COLOR=0
@@ -106,33 +105,46 @@ configure_output_mode() {
     export npm_config_color=false
   fi
 }
-# 同步输出终端日志和本地日志文件。
+# 日志按原文输出；确认前只展示，确认后同步写入日志。
 log() {
   local message="$1"
   if [[ "$LOG_READY" != "1" ]]; then
-    [[ "$PLAIN_OUTPUT" == "1" ]] && printf '%b\n' "$message" | strip_ansi_text || printf '%b\n' "$message"
+    if [[ "$PLAIN_OUTPUT" == "1" ]]; then
+      printf '%s\n' "$message" | strip_ansi_text
+    else
+      printf '%s\n' "$message"
+    fi
     return 0
   fi
   if [[ "$PLAIN_OUTPUT" == "1" ]]; then
-    printf '%b\n' "$message" | strip_ansi_text | tee -a "$LOG_FILE"
+    printf '%s\n' "$message" | strip_ansi_text | /usr/bin/tee -a "$LOG_FILE"
   else
-    printf '%b\n' "$message" | tee -a "$LOG_FILE"
+    printf '%s\n' "$message" | /usr/bin/tee -a "$LOG_FILE"
   fi
 }
-# 输出信息级别日志。
-info_echo()    { log "\033[1;34mℹ $1\033[0m"; }
-# 输出成功级别日志。
-success_echo() { log "\033[1;32m✔ $1\033[0m"; }
-# 输出警告级别日志。
-warn_echo()    { log "\033[1;33m⚠ $1\033[0m"; }
-# 输出说明级别日志。
-note_echo()    { log "\033[1;35m➤ $1\033[0m"; }
-# 输出错误级别日志。
-error_echo()   { log "\033[1;31m✖ $1\033[0m"; }
-# 输出次要信息日志。
-gray_echo()    { log "\033[0;90m$1\033[0m"; }
-# 输出高亮分隔信息。
-highlight_echo() { log "\033[1;36m🔹 $1\033[0m"; }
+# 固定颜色码单独处理，用户路径与正文不做反斜杠转义。
+color_log() {
+  local color="$1" message="$2"
+  if [[ "$PLAIN_OUTPUT" == "1" ]]; then
+    log "$message"
+  else
+    log "${color}${message}"$'\033[0m'
+  fi
+}
+# 输出信息日志。
+info_echo() { color_log $'\033[1;34m' "ℹ $1"; }
+# 输出成功日志。
+success_echo() { color_log $'\033[1;32m' "✔ $1"; }
+# 输出警告日志。
+warn_echo() { color_log $'\033[1;33m' "⚠ $1"; }
+# 输出说明日志。
+note_echo() { color_log $'\033[1;35m' "➤ $1"; }
+# 输出错误日志。
+error_echo() { color_log $'\033[1;31m' "✖ $1"; }
+# 输出次要日志。
+gray_echo() { color_log $'\033[0;90m' "$1"; }
+# 输出高亮分隔日志。
+highlight_echo() { color_log $'\033[1;36m' "🔹 $1"; }
 # 输出一个独立 Commit 故障场景的开始标记和成因。
 begin_commit_scenario() {
   local scenario_id="$1"
@@ -164,7 +176,7 @@ initialize_script_runtime() {
 show_script_intro_and_wait() {
   prepare_script_context
   configure_output_mode
-  if [[ "$IS_SOURCETREE_RUNTIME" != "1" && -t 1 && -n "${TERM:-}" && "${TERM:-}" != "dumb" ]]; then
+  if [[ -z "${NO_COLOR+x}" && "${PLAIN_OUTPUT:-0}" != 1 && "$IS_SOURCETREE_RUNTIME" != "1" && -t 1 && -n "${TERM:-}" && "${TERM:-}" != "dumb" ]]; then
     clear
   fi
 
@@ -188,11 +200,11 @@ show_script_intro_and_wait() {
   fi
   if [[ ! -t 0 ]]; then
     error_echo "当前不是 Sourcetree，且没有可交互输入。"
-    return 1
+    exit 1
   fi
 
   echo "" | jobs_intro_style body
-  read -r "?👉 已阅读说明，按回车继续执行；按 Ctrl+C 取消：" _
+  read -r "?👉 已阅读说明，按回车继续执行；按 Ctrl+C 取消：" _ || exit 1
 }
 # 解析 .git 文件指向的真实 gitdir 路径。
 resolve_gitdir_from_git_file() {
@@ -204,7 +216,11 @@ resolve_gitdir_from_git_file() {
   [[ -f "$git_file" ]] || return 1
   gitdir_value="$(sed -n 's/^gitdir: //p' "$git_file" | head -n 1)"
   [[ -n "$gitdir_value" ]] || return 1
-  gitdir_path="${worktree_root}/${gitdir_value}"
+  if [[ "$gitdir_value" == /* ]]; then
+    gitdir_path="$gitdir_value"
+  else
+    gitdir_path="${worktree_root}/${gitdir_value}"
+  fi
   print -r -- "${gitdir_path:A}"
 }
 # 读取 gitdir/config 里登记的 core.worktree 绝对路径。
@@ -405,15 +421,20 @@ run_commit_scenario_c02_index_lock() {
 collect_gitlink_paths() {
   GITLINK_PATHS=()
   local entry=""
+  local entries=""
   local mode=""
   local submodule_path=""
 
+  entries="$(git -C "$REPO_ROOT" ls-files -s -z)" || {
+    error_echo "无法读取 gitlink 索引，已停止。"
+    return 1
+  }
   while IFS= read -r -d '' entry; do
     mode="${entry%% *}"
     [[ "$mode" == "160000" ]] || continue
     submodule_path="${entry#*$'\t'}"
     [[ -n "$submodule_path" ]] && GITLINK_PATHS+=("$submodule_path")
-  done < <(git -C "$REPO_ROOT" ls-files -s -z)
+  done < <(print -rn -- "$entries")
 }
 # 判断 gitlink 是否在 .gitmodules 中有可用的路径和 URL 配置。
 submodule_has_valid_config() {
@@ -465,10 +486,10 @@ submodule_gitdir_path() {
   local submodule_path="$1"
   local modules_root=""
 
-  modules_root="$(git -C "$REPO_ROOT" rev-parse --git-path modules 2>/dev/null || true)"
+  modules_root="$(git -C "$REPO_ROOT" rev-parse --git-common-dir 2>/dev/null || true)"
   [[ -n "$modules_root" ]] || return 1
   [[ "$modules_root" == /* ]] || modules_root="${REPO_ROOT}/${modules_root}"
-  print -r -- "${modules_root:A}/${submodule_path}"
+  print -r -- "${modules_root:A}/modules/${submodule_path}"
 }
 # 判断相对路径是否是父仓索引登记的 gitlink。
 is_index_gitlink_path() {
@@ -601,12 +622,16 @@ repair_migrated_submodule_worktree() {
   [[ -f "$git_file" ]] || return 1
   gitdir_value="$(sed -n 's/^gitdir: //p' "$git_file" | head -n 1)"
   [[ -n "$gitdir_value" ]] || return 1
-  gitdir_path="${child_root}/${gitdir_value}"
+  if [[ "$gitdir_value" == /* ]]; then
+    gitdir_path="$gitdir_value"
+  else
+    gitdir_path="${child_root}/${gitdir_value}"
+  fi
   gitdir_path="${gitdir_path:A}"
-  modules_root="$(git -C "$REPO_ROOT" rev-parse --git-path modules 2>/dev/null || true)"
+  modules_root="$(git -C "$REPO_ROOT" rev-parse --git-common-dir 2>/dev/null || true)"
   [[ -n "$modules_root" ]] || return 1
   [[ "$modules_root" == /* ]] || modules_root="${REPO_ROOT}/${modules_root}"
-  modules_root="${modules_root:A}"
+  modules_root="${modules_root:A}/modules"
   [[ "$gitdir_path" == "${modules_root}/"* && -f "${gitdir_path}/config" ]] || return 1
 
   git config --file "${gitdir_path}/config" core.worktree "$child_root" || return 1
@@ -653,6 +678,10 @@ repair_configured_submodule_alias_copy() {
   warn_echo "检测到 ${relative_path} 已登记到 .gitmodules，但仍借用旧 gitdir，正在创建独立 gitdir。"
   gray_echo "旧 gitdir：${borrowed_gitdir}"
   gray_echo "新 gitdir：${new_gitdir}"
+  if [[ -e "$new_gitdir" || -L "$new_gitdir" ]]; then
+    error_echo "目标 gitdir 已存在，保留已有元数据；请先人工核对归属：${new_gitdir}"
+    return 1
+  fi
   if [[ ! -d "$new_gitdir" ]]; then
     mkdir -p "${new_gitdir:h}" || return 1
     if ! rsync -a --exclude='fsmonitor--daemon*' "${borrowed_gitdir}/" "${new_gitdir}/" >> "$LOG_FILE" 2>&1; then

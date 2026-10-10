@@ -59,6 +59,10 @@ typeset -gA SYNC_REFS=()
 typeset -gA SYNC_UPSTREAMS=()
 typeset -gA PUSH_TARGETS=()
 typeset -ga RESOLVED_PUSH_TARGETS=()
+typeset -ga RESOLVED_PUSH_REFS=()
+typeset -gA PUSH_TARGET_REFS=()
+typeset -gA COMPLETED_REPOSITORIES=()
+typeset -gA GITEE_LINE_REPOSITORIES=()
 PUSHED_LINE_COUNT=0
 
 # 在解析中文路径和输出自述前统一当前进程的字符编码。
@@ -86,8 +90,8 @@ is_sourcetree_runtime() {
 resolve_script_path() {
   local filename="${RAW_SCRIPT_PATH:t}"
   local candidate="${RAW_SCRIPT_PATH:A}"
-  local runtime_candidate="/Users/jobs/SourceTree.command/${filename}/${filename}"
-  local backup_candidate="/Users/jobs/Documents/Github/JobsGenesis/SourceTree.command/${filename}/${filename}"
+  local runtime_candidate="${HOME}/SourceTree.command/${filename}/${filename}"
+  local backup_candidate="${HOME}/Documents/Github/JobsGenesis/SourceTree.command/${filename}/${filename}"
 
   if [[ ! -f "$candidate" && -f "$runtime_candidate" ]]; then
     candidate="$runtime_candidate"
@@ -105,7 +109,7 @@ configure_output_mode() {
   if is_sourcetree_runtime; then
     IS_SOURCETREE_RUNTIME=1
   fi
-  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || -z "${TERM:-}" || "${TERM:-}" == "dumb" || -n "${NO_COLOR:-}" ]]; then
+  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || -z "${TERM:-}" || "${TERM:-}" == "dumb" || -n "${NO_COLOR+x}" ]]; then
     PLAIN_OUTPUT=1
     export NO_COLOR=1
     export FORCE_COLOR=0
@@ -165,7 +169,7 @@ show_script_intro_and_wait() {
   configure_utf8_locale
   resolve_script_path
   configure_output_mode
-  if [[ "$IS_SOURCETREE_RUNTIME" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
+  if [[ -z "${NO_COLOR+x}" && "${PLAIN_OUTPUT:-0}" != 1 && "$IS_SOURCETREE_RUNTIME" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
     clear
   fi
 
@@ -192,7 +196,7 @@ show_script_intro_and_wait() {
     print -u2 -r -- "当前不是 Sourcetree，且没有可交互输入；请在终端中重新运行。"
     exit 1
   fi
-  read -r "?👉 已了解脚本用途与影响，按回车继续；按 Ctrl+C 取消：" _
+  read -r "?👉 已了解脚本用途与影响，按回车继续；按 Ctrl+C 取消：" _ || exit 1
 }
 # 在用户确认后初始化 zsh 选项和本次日志。
 initialize_script_runtime() {
@@ -234,19 +238,18 @@ error_echo() {
 highlight_echo() {
   log "${COLOR_CYAN}🔹 $1${COLOR_RESET}"
 }
-# 执行 Git 命令，同时保留退出码并同步日志。
+# Git 与日志管道任一失败都停止，不以成功的 Git 退出码掩盖日志失败。
 run_git() {
   local repository="$1"
-  local exit_code=0
+  local -a result_codes=()
   shift
-  if [[ "$PLAIN_OUTPUT" == "1" ]]; then
-    git -C "$repository" "$@" 2>&1 | strip_ansi_stream | tee -a "$LOG_FILE"
-    exit_code="${pipestatus[1]}"
-  else
-    git -C "$repository" "$@" 2>&1 | tee -a "$LOG_FILE"
-    exit_code="${pipestatus[1]}"
+  if git -C "$repository" "$@" 2>&1 | strip_ansi_stream | tee -a "$LOG_FILE"; then
+    return 0
   fi
-  return "$exit_code"
+  result_codes=("${pipestatus[@]}")
+  [[ "${result_codes[1]}" != 0 ]] && return "${result_codes[1]}"
+  error_echo "Git 输出写入失败：${repository}"
+  return 1
 }
 # 只将连接中断、超时及服务端临时不可用识别为可重试故障。
 is_transient_remote_error() {
@@ -689,13 +692,38 @@ commit_repository_changes() {
   COMMITTED_COUNT=$((COMMITTED_COUNT + 1))
   success_echo "已完成空白说明提交：${repository}"
 }
-# 收集主上游及 GitHub / 码云远端的全部 push URL，按地址去重。
+# JobsGenesis / JobsBaseConfig 范围内，码云线路使用固定 gitee 分支。
+uses_gitee_branch_policy() {
+  local repository="${1:A}" genesis="${HOME}/Documents/Github/JobsGenesis" base_config="${HOME}/Documents/Github/JobsBaseConfig"
+  [[ "$repository" == "${genesis:A}" || "$repository" == "${genesis:A}/"* || "$repository" == "${base_config:A}" || "$repository" == "${base_config:A}/"* ]]
+}
+# 全队列先阻断已确认的 OC 新工程独立快照例外，避免把两套历史合并。
+check_snapshot_repository_boundary() {
+  local repository="" snapshot_project="${HOME}/Documents/Github/JobsOCBaseConfigDemo@ByPods"
+  for repository in "${REPOSITORY_CHAIN[@]}"; do
+    if [[ "${repository:A}" == "${snapshot_project:A}" ]]; then
+      error_echo "OC 新工程采用 GitHub 完整历史与 Gitee 独立快照，通用逐层动作不能合并这两条历史：${repository}"
+      error_echo "请使用该工程原生推送窗口或明确的快照映射；当前队列尚未提交、恢复或推送。"
+      return 1
+    fi
+  done
+}
+# 收集主上游及 GitHub / 码云线路，地址和目标分支同时记录以避免错误映射。
 resolve_push_targets() {
   local repository="$1" primary="$2"
-  local remote="" target="" urls=""
+  local remote="" target="" urls="" branch="" primary_ref="" target_ref=""
   local -a remotes=("$primary")
   local -A seen=()
   RESOLVED_PUSH_TARGETS=()
+  RESOLVED_PUSH_REFS=()
+  GITEE_LINE_REPOSITORIES[$repository]=0
+  branch="$(git -C "$repository" symbolic-ref --quiet --short HEAD)" || return 1
+  primary_ref="$(git -C "$repository" config --get "branch.${branch}.merge" || true)"
+  [[ -n "$primary_ref" ]] || primary_ref="refs/heads/${branch}"
+  [[ "$primary" != '.' && "$primary_ref" == refs/heads/* ]] || {
+    error_echo "当前 upstream 不属于可推送的远端分支：${repository}"
+    return 1
+  }
   remotes+=("${(@f)$(git -C "$repository" remote)}")
   for remote in "${remotes[@]}"; do
     [[ -n "$remote" ]] || continue
@@ -707,9 +735,27 @@ resolve_push_targets() {
           *) continue ;;
         esac
       fi
-      [[ -n "$target" && -z "${seen[$target]:-}" ]] || continue
-      seen[$target]=1
+      [[ -n "$target" ]] || continue
+      target_ref="$primary_ref"
+      if uses_gitee_branch_policy "$repository"; then
+        case "${remote:l}:${target:l}" in
+          gitee:*|*://gitee.com/*|*@gitee.com:*|*://*@gitee.com/*)
+            target_ref="refs/heads/gitee"
+            GITEE_LINE_REPOSITORIES[$repository]=1
+            git -C "$repository" remote get-url gitee >/dev/null 2>&1 || {
+              error_echo "当前范围的码云远端须命名为 gitee；请核对远端配置后重试：${repository}"
+              return 1
+            }
+            ;;
+        esac
+      fi
+      if [[ -n "${seen[$target]:-}" ]]; then
+        [[ "${seen[$target]}" == "$target_ref" ]] || { error_echo "同一推送地址存在矛盾分支映射，已停止：${repository}"; return 1; }
+        continue
+      fi
+      seen[$target]="$target_ref"
       RESOLVED_PUSH_TARGETS+=("$target")
+      RESOLVED_PUSH_REFS+=("$target_ref")
     done
   done
   [[ "${#RESOLVED_PUSH_TARGETS[@]}" -gt 0 ]]
@@ -734,10 +780,12 @@ synchronize_repository_upstream() {
   SYNC_REMOTES[$repository]="$remote"
   SYNC_REFS[$repository]="$remote_ref"
   PUSH_TARGETS[$repository]="${(F)RESOLVED_PUSH_TARGETS}"
+  PUSH_TARGET_REFS[$repository]="${(F)RESOLVED_PUSH_REFS}"
   SYNC_UPSTREAMS[$repository]=""
   for target in "${RESOLVED_PUSH_TARGETS[@]}"; do
     index=$((index + 1))
-    info_echo "读取第 ${index}/${#RESOLVED_PUSH_TARGETS[@]} 条推送线路：${repository}"
+    remote_ref="${RESOLVED_PUSH_REFS[$index]}"
+    info_echo "读取第 ${index}/${#RESOLVED_PUSH_TARGETS[@]} 条推送线路：${repository} [${remote_ref#refs/heads/}]"
     read_remote_refs "$repository" --heads "$target" "$remote_ref" || {
       error_echo "无法读取第 ${index} 条线路的远端分支：${repository}"
       return 1
@@ -771,6 +819,54 @@ integrate_repository_upstream() {
     fi
   done
 }
+# 合并远端父仓可能快进回旧 gitlink；只重新暂存本次已完成推送的直接子仓。
+reconcile_completed_child_gitlinks() {
+  local repository="$1" entries="" entry="" relative_path="" child="" changed=0
+  entries="$(git -C "$repository" ls-files --stage -z)" || return 1
+  while IFS= read -r -d '' entry; do
+    [[ "$entry" == '160000 '* ]] || continue
+    relative_path="${entry#*$'\t'}"
+    child="${repository}/${relative_path}"
+    [[ "${COMPLETED_REPOSITORIES[${child:A}]:-0}" == 1 ]] || continue
+    run_git "$repository" add -- "$relative_path" || return 1
+    changed=1
+  done < <(print -rn -- "$entries")
+  [[ "$changed" == 1 ]] || return 0
+  if ! git -C "$repository" diff --cached --quiet; then
+    info_echo "远端整合后重新提交已上传的子仓 gitlink：${repository}"
+    run_git "$repository" commit --allow-empty-message --message="" || return 1
+    COMMITTED_COUNT=$((COMMITTED_COUNT + 1))
+  fi
+}
+# 同名本地 gitee 分支只允许快进到最终 HEAD，不覆盖独有历史或其它工作树。
+check_gitee_tracking_branch() {
+  local repository="$1" local_tip="" worktrees="" branch=""
+  [[ "${GITEE_LINE_REPOSITORIES[$repository]:-0}" == 1 ]] || return 0
+  local_tip="$(git -C "$repository" rev-parse --verify refs/heads/gitee 2>/dev/null || true)"
+  if [[ -n "$local_tip" ]] && ! git -C "$repository" merge-base --is-ancestor "$local_tip" HEAD; then
+    error_echo "本地 gitee 分支存在未整合历史，保留原状并停止推送：${repository}"
+    return 1
+  fi
+  branch="$(git -C "$repository" symbolic-ref --quiet --short HEAD)" || return 1
+  [[ "$branch" == gitee ]] && return 0
+  worktrees="$(git -C "$repository" worktree list --porcelain)" || return 1
+  if [[ $'\n'"$worktrees"$'\n' == *$'\n''branch refs/heads/gitee'$'\n'* ]]; then
+    error_echo "本地 gitee 分支被工作树占用，保持原状：${repository}"
+    return 1
+  fi
+}
+# 全线路成功后更新 gitee 跟踪分支，操作前已经核验不会丢弃独有提交。
+update_gitee_tracking_branch() {
+  local repository="$1" final_tip="$2" branch=""
+  [[ "${GITEE_LINE_REPOSITORIES[$repository]:-0}" == 1 ]] || return 0
+  branch="$(git -C "$repository" symbolic-ref --quiet --short HEAD)" || return 1
+  run_git "$repository" update-ref refs/remotes/gitee/gitee "$final_tip" || return 1
+  if [[ "$branch" != gitee ]]; then
+    run_git "$repository" branch --force gitee "$final_tip" || return 1
+  fi
+  run_git "$repository" config branch.gitee.remote gitee || return 1
+  run_git "$repository" config branch.gitee.merge refs/heads/gitee || return 1
+}
 # 逐条推送并核验实际 push 地址，全部成功后才标记本仓完成。
 push_repository() {
   local repository="$1"
@@ -778,9 +874,12 @@ push_repository() {
   local remote_tip="" local_tip="" advertised="" target="" index=0
   local branch="$(git -C "$repository" symbolic-ref --quiet --short HEAD)" || return 1
   local -a targets=("${(@f)PUSH_TARGETS[$repository]}")
+  local -a target_refs=("${(@f)PUSH_TARGET_REFS[$repository]}")
   local_tip="$(git -C "$repository" rev-parse HEAD)" || return 1
+  check_gitee_tracking_branch "$repository" || return 1
   for target in "${targets[@]}"; do
     index=$((index + 1))
+    remote_ref="${target_refs[$index]}"
     info_echo "正在推送第 ${index}/${#targets[@]} 条线路：${repository} [${remote_ref#refs/heads/}]"
     if ! run_remote_git "$repository" "第 ${index} 条线路远端推送" "" push "$target" "HEAD:${remote_ref}"; then
       error_echo "第 ${index} 条线路 push 失败，已成功线路保留，停止处理上层：${repository}"
@@ -798,7 +897,8 @@ push_repository() {
   done
   # 地址推送不改变 upstream，首次推送后仍只关联原来的主远端。
   run_git "$repository" config "branch.${branch}.remote" "$remote" || return 1
-  run_git "$repository" config "branch.${branch}.merge" "$remote_ref" || return 1
+  run_git "$repository" config "branch.${branch}.merge" "${SYNC_REFS[$repository]}" || return 1
+  update_gitee_tracking_branch "$repository" "$local_tip" || return 1
   PUSHED_COUNT=$((PUSHED_COUNT + 1))
   success_echo "全部 ${#targets[@]} 条线路已同步：${repository}"
 }
@@ -809,11 +909,12 @@ process_repository_chain() {
   for repository in "${REPOSITORY_CHAIN[@]}"; do
     highlight_echo "==================== 处理第 ${level}/${#REPOSITORY_CHAIN[@]} 个仓库 ===================="
     info_echo "仓库：${repository}"
-    if ! synchronize_repository_upstream "$repository" || ! commit_repository_changes "$repository" || ! integrate_repository_upstream "$repository" || ! push_repository "$repository"; then
+    if ! synchronize_repository_upstream "$repository" || ! commit_repository_changes "$repository" || ! integrate_repository_upstream "$repository" || ! reconcile_completed_child_gitlinks "$repository" || ! push_repository "$repository"; then
       error_echo "处理停止：总数 ${#REPOSITORY_CHAIN[@]}，已完成 ${PROCESSED_COUNT}，失败 1；剩余仓库未执行。"
       info_echo "日志文件：${LOG_FILE}"
       return 1
     fi
+    COMPLETED_REPOSITORIES[$repository]=1
     PROCESSED_COUNT=$((PROCESSED_COUNT + 1))
     level=$((level + 1))
   done
@@ -833,6 +934,7 @@ main() {
   check_environment # 验证 Git 与基础命令真实可用。
   resolve_start_repository "$@" # 从 Sourcetree 参数或当前目录解析起始 Git 仓库。
   build_repository_chain # 递归发现当前子树，按子仓优先排序并追加上层父仓。
+  check_snapshot_repository_boundary # 队列包含 OC 新工程独立快照例外时，在任何 Git 写入前停止。
   prepare_detached_repositories # 先验证全部仓库并 fetch 游离态目标，失败时不清理文件。
   restore_detached_repositories # 舍弃确认范围内的游离态内容，恢复到已获取的远端版本。
   preflight_repository_chain # 在写入前统一检查所有层的安全条件与推送目标。

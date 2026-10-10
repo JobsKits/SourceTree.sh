@@ -1,14 +1,13 @@
 #!/bin/zsh
 # 脚本自述：
-# - 脚本名称：【MacOS@SourceTree】🐦Flutter运行setup.command.command
-# - 核心用途：执行“🐦Flutter运行setup.command”对应的移动端项目自动化任务。
-# - 影响范围：可能修改项目依赖、生成文件、构建产物或开发工具配置。
+# - 脚本名称：【MacOS@SourceTree】🐦打开:运行Flutter项目.command
+# - 核心用途：定位工程 setup.command，或把标准 Flutter 模拟器运行交给系统 Terminal。
+# - 影响范围：可能补齐 setup.command 执行权限；标准回退先确认项目 SDK 和模拟器就绪，超时停止。
 # - 运行提示：运行后会先打印内置自述；Sourcetree 模式无交互连续执行，终端模式确认后继续。
 # =====================================================================
 # Jobs 标准化脚本外壳
 # 说明：Sourcetree 中优先定位 Flutter 工程 setup.command；没有 setup.command 时，回退到 flutter run。
 # =====================================================================
-
 # 仅渲染自述：标题红色加粗，编号正文蓝色常规字重；非彩色终端输出纯文本。
 jobs_intro_style() {
   local intro_color=0
@@ -32,11 +31,10 @@ jobs_intro_style() {
     }
   '
 }
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 # Sourcetree 自定义动作可能只传脚本名，不传绝对路径；这里兜底找回真实脚本位置。
 resolve_script_path() {
-  local script_source="${BASH_SOURCE[0]:-${(%):-%x}}"
-  local script_name="$(basename -- "$0")"
+  local script_source="$SCRIPT_SOURCE"
+  local script_name="${SCRIPT_SOURCE:t}"
   local candidate=""
 
   for candidate in \
@@ -52,18 +50,18 @@ resolve_script_path() {
   printf "%s/%s\n" "$PWD" "$script_name"
 }
 
-SCRIPT_PATH="$(resolve_script_path)"
-SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd -P)"
-SCRIPT_BASENAME="$(basename "$SCRIPT_PATH" | sed 's/\.[^.]*$//')"
-LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"
+readonly SCRIPT_SOURCE="$0"
+SCRIPT_PATH=""
+SCRIPT_DIR=""
+SCRIPT_BASENAME=""
+LOG_FILE=""
+LOG_READY=0
 
 PROJECT_ROOT=""
 SETUP_COMMAND_PATH=""
 # 识别 Sourcetree 自定义动作的瘦身运行环境，系统终端双击运行不降级。
 is_sourcetree_runtime() {
   env | grep -Eqi '^SOURCETREE|^SOURCE_TREE' && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/SourceTree.command/"* ]] && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/Documents/Github/JobsGenesis/SourceTree.command/"* ]] && return 0
 
   local pid="$PPID"
   local command_name=""
@@ -86,67 +84,83 @@ strip_ansi_text() {
   perl -pe 's/\e\[[0-9;]*[[:alpha:]]//g'
 }
 # 根据运行入口和终端能力预先切换纯文本输出，避免 Sourcetree 显示 ANSI 转义码。
+# 在第一屏输出前确定纯文本模式，确认后再重复初始化输出环境。
 prepare_plain_output_context() {
-  [[ -n "${TERM:-}" ]] || export TERM="dumb"
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" || "${JOBS_PLAIN_OUTPUT:-0}" == "1" ]]; then
+  SOURCETREE_PLAIN_OUTPUT=0
+  PLAIN_OUTPUT=0
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == 1 || ! -t 1 || -z "${TERM:-}" || "${TERM:-}" == dumb || -n "${NO_COLOR+x}" || "${JOBS_PLAIN_OUTPUT:-0}" == 1 ]]; then
     SOURCETREE_PLAIN_OUTPUT=1
-    COLOR_ENABLED=0
-    export NO_COLOR="${NO_COLOR:-1}"
-    export FORCE_COLOR=0
-    export CLICOLOR="0"
-    export ANSI_COLORS_DISABLED="1"
-    export npm_config_color=false
+    PLAIN_OUTPUT=1
+    export NO_COLOR=1 FORCE_COLOR=0 CLICOLOR=0 ANSI_COLORS_DISABLED=1 npm_config_color=false
   fi
 }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-log() {
-  if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == "1" ]]; then
-    printf "%b\n" "$1" | strip_ansi_text | tee -a "$LOG_FILE"
-  else
-    printf "%b\n" "$1" | tee -a "$LOG_FILE"
-  fi
-}
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-color_echo()     { log "\033[1;32m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-info_echo()      { log "\033[1;34mℹ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-success_echo()   { log "\033[1;32m✔ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-warn_echo()      { log "\033[1;33m⚠ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-warm_echo()      { log "\033[1;33m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-note_echo()      { log "\033[1;35m➤ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-error_echo()     { log "\033[1;31m✖ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-err_echo()       { log "\033[1;31m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-debug_echo()     { log "\033[1;35m🐞 $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-highlight_echo() { log "\033[1;36m🔹 $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-gray_echo()      { log "\033[0;90m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-bold_echo()      { log "\033[1m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-underline_echo() { log "\033[4m$1\033[0m"; }
-# 展示脚本用途和影响范围，并在系统终端中等待用户确认。
-show_readme_and_wait() {
-  if typeset -f is_sourcetree_runtime >/dev/null 2>&1 && is_sourcetree_runtime; then
+# 只准备自述所需路径和入口身份，尚不创建日志或执行工程操作。
+prepare_script_metadata() {
+  SCRIPT_PATH="$(resolve_script_path)"
+  SCRIPT_DIR="${SCRIPT_PATH:h}"
+  SCRIPT_BASENAME="${SCRIPT_PATH:t:r}"
+  LOG_FILE="${TMPDIR:-/tmp}/${SCRIPT_BASENAME}.log"
+  IS_SOURCETREE_RUNTIME=0
+  if is_sourcetree_runtime; then
     IS_SOURCETREE_RUNTIME=1
   fi
   prepare_plain_output_context
-  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || "${TERM:-}" == "dumb" || -n "${NO_COLOR:-}" ]]; then
-    SOURCETREE_PLAIN_OUTPUT=1
-    export NO_COLOR="${NO_COLOR:-1}"
-    export FORCE_COLOR=0
-    export CLICOLOR="0"
-    export ANSI_COLORS_DISABLED="1"
-    export npm_config_color=false
+}
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+# 确认前仅显示文字，确认后将同一输出同步写入日志。
+write_log_output() {
+  if [[ "${LOG_READY:-0}" == 1 ]]; then
+    tee -a "$LOG_FILE"
+  else
+    cat
   fi
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
+}
+# 保留路径和命令中的字面反斜杠，只过滤展示用 ANSI 控制码。
+log() {
+  if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == 1 ]]; then
+    printf '%s\n' "$1" | strip_ansi_text | write_log_output
+  else
+    printf '%s\n' "$1" | write_log_output
+  fi
+}
+# 颜色只作用于日志样式，正文始终按字面文字输出。
+color_log() {
+  if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == 1 ]]; then
+    log "$2"
+  else
+    log "$(printf '%b%s%b' "$1" "$2" '\033[0m')"
+  fi
+}
+# 输出一般完成信息。
+color_echo() { color_log '\033[1;32m' "$1"; }
+# 输出步骤与环境信息。
+info_echo() { color_log '\033[1;34m' "ℹ $1"; }
+# 输出已完成步骤。
+success_echo() { color_log '\033[1;32m' "✔ $1"; }
+# 输出需要关注的风险。
+warn_echo() { color_log '\033[1;33m' "⚠ $1"; }
+# 输出温馨提示。
+warm_echo() { color_log '\033[1;33m' "$1"; }
+# 输出操作说明。
+note_echo() { color_log '\033[1;35m' "➤ $1"; }
+# 输出带前缀的错误信息。
+error_echo() { color_log '\033[1;31m' "✖ $1"; }
+# 输出错误正文。
+err_echo() { color_log '\033[1;31m' "$1"; }
+# 输出诊断信息。
+debug_echo() { color_log '\033[1;35m' "🐞 $1"; }
+# 输出展示重点。
+highlight_echo() { color_log '\033[1;36m' "🔹 $1"; }
+# 输出次要信息。
+gray_echo() { color_log '\033[0;90m' "$1"; }
+# 输出加粗信息。
+bold_echo() { color_log '\033[1m' "$1"; }
+# 输出带下划线的信息。
+underline_echo() { color_log '\033[4m' "$1"; }
+# 展示脚本用途和影响范围，并在系统终端中等待用户确认。
+show_script_intro_and_wait() {
+  prepare_script_metadata
+  if [[ -z "${NO_COLOR+x}" && "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" && "${PLAIN_OUTPUT:-0}" != 1 ]]; then
     clear
   fi
 
@@ -169,9 +183,9 @@ show_readme_and_wait() {
   fi
   if [[ ! -t 0 ]]; then
     error_echo "当前不是 Sourcetree，且没有可交互输入；请在终端中重新运行。"
-    return 1
+    exit 1
   fi
-  read "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..."
+  read -r "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..." _ || exit 1
 }
 # 去掉用户拖入路径或 SourceTree 参数携带的引号、file:// 和换行。
 strip_outer_quotes() {
@@ -189,8 +203,11 @@ strip_outer_quotes() {
 abs_path() {
   local p="$1"
   [[ -z "$p" ]] && return 1
-  p="$(strip_outer_quotes "$p")"
-  p="${p/#\~/$HOME}"
+  if [[ ! -e "$p" ]]; then
+    p="$(strip_outer_quotes "$p")"
+    [[ "$p" == '~/'* ]] && p="$HOME/${p#\~/}"
+    [[ -e "$p" ]] || p="${(Q)p}"
+  fi
   [[ "$p" != "/" ]] && p="${p%/}"
 
   if [[ -d "$p" ]]; then
@@ -262,16 +279,18 @@ find_setup_command_under_dir() {
     return 0
   fi
 
-  while IFS= read -r -d $'\0' candidate; do
-    print -r -- "$candidate"
-    return 0
+  local -a candidates=()
+  while IFS= read -r -d '' candidate; do
+    candidates+=("$candidate")
   done < <(
     find "$root" \
-      \( -type d \( -name ".git" -o -name "Pods" -o -name ".dart_tool" -o -name "build" -o -name "DerivedData" -o -name "node_modules" \) -prune \) -o \
-      \( -type f -name "setup.command" -print0 \) 2>/dev/null
+      \( -type d \( -name .git -o -name Pods -o -name PodsManual -o -name 'ManualBy*Pods*' -o -name .dart_tool -o -name .fvm -o -name build -o -name DerivedData -o -name node_modules -o -name vendor -o -name third_party \) -prune \) -o \
+      \( -type f -name setup.command -print0 \)
   )
-
-  return 1
+  (( ${#candidates[@]} <= 1 )) || { error_echo "发现多个 setup.command，请传入具体工程目录。" >&2; return 2; }
+  (( ${#candidates[@]} == 1 )) || return 1
+  print -r -- "${candidates[1]}"
+  return 0
 }
 # 从 SourceTree 参数、当前目录或拖入路径中确定工程目录。
 resolve_project_root() {
@@ -294,6 +313,11 @@ resolve_project_root() {
       return 0
     fi
   done
+
+  if (( $# > 0 )); then
+    error_echo "传入路径没有可用的 Flutter / Git 工程，请确认目标。"
+    return 1
+  fi
 
   flutter_root="$(find_flutter_root_upwards "$PWD" 2>/dev/null || true)"
   if [[ -n "$flutter_root" ]]; then
@@ -327,8 +351,11 @@ resolve_project_root() {
 resolve_setup_command() {
   local candidate=""
 
-  candidate="$(find_setup_command_under_dir "$PROJECT_ROOT" 2>/dev/null || true)"
+  local setup_ec=0
+  candidate="$(find_setup_command_under_dir "$PROJECT_ROOT")" || setup_ec=$?
+  (( setup_ec != 2 )) || return 1
   if [[ -z "$candidate" ]]; then
+    [[ -f "$PROJECT_ROOT/pubspec.yaml" && -d "$PROJECT_ROOT/lib" ]] || { error_echo "没有 setup.command，当前目录也不是 Flutter 工程：$PROJECT_ROOT"; return 1; }
     SETUP_COMMAND_PATH=""
     warn_echo "未在当前工程中找到 setup.command：${PROJECT_ROOT}"
     warn_echo "将回退为在系统 Terminal 中先启动 iOS Simulator，再执行 flutter run。"
@@ -336,6 +363,10 @@ resolve_setup_command() {
   fi
 
   SETUP_COMMAND_PATH="$(abs_path "$candidate")"
+  if [[ ! -x "$SETUP_COMMAND_PATH" && "${JOBS_SOURCETREE_SETUP_DRY_RUN:-0}" == 1 ]]; then
+    warn_echo "Dry-run：setup.command 尚无执行权限；正式运行时会尝试补齐。"
+    return 0
+  fi
   if [[ ! -x "$SETUP_COMMAND_PATH" ]]; then
     chmod +x "$SETUP_COMMAND_PATH" 2>/dev/null || true
   fi
@@ -349,8 +380,30 @@ resolve_setup_command() {
 }
 # 生成标准 Flutter 工程的运行命令，先拉起 iOS Simulator 再进入 flutter run。
 build_flutter_run_command() {
-  local project_root_quoted="${(q)PROJECT_ROOT}"
-  print -r -- "cd ${project_root_quoted} && flutter emulators --launch apple_ios_simulator >/dev/null 2>&1 || open -a Simulator; for i in {1..60}; do xcrun simctl list devices booted 2>/dev/null | grep -q '(Booted)' && break; sleep 1; done; flutter run"
+  local wait_seconds="${SIMULATOR_WAIT_SECS:-60}"
+  [[ "$wait_seconds" == <1-> ]] || { error_echo 'SIMULATOR_WAIT_SECS 必须是正整数。' >&2; return 1; }
+  local terminal_script='export PATH="$HOME/.pub-cache/bin:$HOME/.fvm/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+if [[ -x .fvm/flutter_sdk/bin/flutter ]]; then
+  flutter_cmd=("$PWD/.fvm/flutter_sdk/bin/flutter")
+elif [[ -f .fvmrc || -f .fvm/fvm_config.json ]]; then
+  command -v fvm >/dev/null 2>&1 || { print "缺少项目 FVM，请先恢复 SDK。"; exit 1; }
+  flutter_cmd=(fvm flutter)
+else
+  command -v flutter >/dev/null 2>&1 || { print "未找到 Flutter。"; exit 1; }
+  flutter_cmd=(flutter)
+fi
+command -v xcrun >/dev/null 2>&1 || { print "缺少 Xcode / xcrun。"; exit 1; }
+"${flutter_cmd[@]}" emulators --launch apple_ios_simulator || open -a Simulator || exit 1
+boot_device=""
+for ((i=0; i<WAIT_SECONDS; i++)); do
+  boot_device="$(xcrun simctl list devices booted 2>/dev/null | /usr/bin/awk -F "[()]" '\''/\(Booted\)/ {print $(NF-3); exit}'\'')"
+  [[ -n "$boot_device" ]] && break
+  sleep 1
+done
+[[ -n "$boot_device" ]] || { print "模拟器等待超时，已停止 Flutter 运行。"; exit 1; }
+"${flutter_cmd[@]}" run -d "$boot_device"'
+  terminal_script="${terminal_script/WAIT_SECONDS/$wait_seconds}"
+  print -r -- "cd ${(q)PROJECT_ROOT} && ( ${terminal_script} )"
 }
 # 使用系统 Terminal 执行 setup.command 或标准 Flutter 运行命令，让后续人工选择回到完整终端。
 open_setup_in_terminal() {
@@ -358,7 +411,7 @@ open_setup_in_terminal() {
   if [[ -n "${SETUP_COMMAND_PATH:-}" ]]; then
     command_text="cd ${(q)PROJECT_ROOT} && ${(q)SETUP_COMMAND_PATH}"
   else
-    command_text="$(build_flutter_run_command)"
+    command_text="$(build_flutter_run_command)" || return $?
   fi
 
   if [[ "${JOBS_SOURCETREE_SETUP_DRY_RUN:-}" == "1" ]]; then
@@ -399,31 +452,31 @@ run_original_logic() {
 }
 # 编排脚本的高层业务流程。
 # 初始化脚本运行环境，并集中承载原有的顶层执行逻辑。
+# 在用户确认后初始化 Shell、当前进程 PATH 和日志。
 initialize_script_runtime() {
-  setopt NO_NOMATCH
-  : > "$LOG_FILE"
-  is_sourcetree_runtime && IS_SOURCETREE_RUNTIME=1
+  setopt NO_NOMATCH PIPE_FAIL
+  export PATH="$HOME/.pub-cache/bin:$HOME/.fvm/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
   prepare_plain_output_context
-  [[ -n "${TERM:-}" ]] || export TERM="dumb"
-  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" ]]; then
-    SOURCETREE_PLAIN_OUTPUT=1
-    export NO_COLOR="${NO_COLOR:-1}"
-    export FORCE_COLOR=0
-    export CLICOLOR="0"
-    export ANSI_COLORS_DISABLED="1"
-    export npm_config_color=false
-  fi
+  : > "$LOG_FILE" || { print -r -- "日志不可写：$LOG_FILE" >&2; exit 1; }
+  LOG_READY=1
 }
 # 编排脚本的高层业务流程。
+# 业务失败时立即结束入口，避免后续成功提示掩盖错误。
+run_checked_business() {
+  local business_ec=0
+  if run_original_logic "$@"; then
+    success_echo "脚本执行结束。日志：$LOG_FILE"
+  else
+    business_ec=$?
+    error_echo "脚本执行失败，退出码：$business_ec。日志：$LOG_FILE"
+    exit "$business_ec"
+  fi
+}
+# 先完成自述确认，再准备运行环境并执行工程业务。
 main() {
-  # 展示脚本内置自述，并按运行入口完成防误触确认。
-  show_readme_and_wait
-  # 初始化 Shell 选项、日志、依赖和入口运行状态。
-  initialize_script_runtime
-  # 执行 run_original_logic 对应的核心业务步骤。
-  run_original_logic "$@"
-  # 输出脚本执行结果、摘要和日志位置。
-  success_echo "脚本执行结束。日志：$LOG_FILE"
+  show_script_intro_and_wait # 打印内置自述，终端模式确认后继续。
+  initialize_script_runtime # 确认后初始化 Shell、PATH 和日志。
+  run_checked_business "$@" # 执行业务，失败保留退出码并终止后续步骤。
 }
 
 main "$@"

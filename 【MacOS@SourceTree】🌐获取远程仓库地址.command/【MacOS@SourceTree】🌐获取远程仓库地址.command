@@ -1,5 +1,4 @@
 #!/bin/zsh
-# shell: zsh
 # 脚本自述：
 # - 脚本名称：【MacOS@SourceTree】🌐获取远程仓库地址.command
 # - 核心用途：解析目标 Git 仓库，获取首选远程仓库地址并复制到 macOS 剪贴板。
@@ -29,9 +28,7 @@ jobs_intro_style() {
     }
   '
 }
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
-export LANG="${LANG:-zh_CN.UTF-8}"
-export LC_CTYPE="${LC_CTYPE:-UTF-8}"
+# shell: zsh
 
 # 解析脚本真实路径，兼容 Sourcetree 只传脚本名的运行环境。
 resolve_script_path() {
@@ -52,14 +49,15 @@ resolve_script_path() {
   printf "%s/%s\n" "$PWD" "$script_name"
 }
 
-SCRIPT_PATH="$(resolve_script_path)"
-SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd -P)"
-SCRIPT_BASENAME="$(basename "$SCRIPT_PATH" | sed 's/\.[^.]*$//')"
+SCRIPT_PATH=""
+SCRIPT_DIR=""
+SCRIPT_BASENAME=""
 LOG_DIR="${TMPDIR:-/tmp}"
 LOG_DIR="${LOG_DIR%/}"
-LOG_FILE="${LOG_DIR}/${SCRIPT_BASENAME}.log"
+LOG_FILE=""
 IS_SOURCETREE_RUNTIME=0
 PLAIN_OUTPUT=0
+LOG_READY=0
 TARGET_INPUT=""
 TARGET_INPUT_SOURCE=""
 REPOSITORY_ROOT=""
@@ -69,7 +67,7 @@ REMOTE_URL_DISPLAY=""
 
 # 识别脚本是否由 Sourcetree 自定义动作实际发起。
 is_sourcetree_runtime() {
-  env | grep -Eqi '^SOURCETREE|^SOURCE_TREE' && return 0
+  env | grep -Ei '^SOURCETREE|^SOURCE_TREE' >/dev/null && return 0
 
   local pid="$PPID"
   local command_name=""
@@ -87,61 +85,71 @@ is_sourcetree_runtime() {
 strip_ansi_text() {
   perl -pe 's/\e\[[0-9;]*[[:alpha:]]//g'
 }
-# 同步输出终端日志和本地日志文件。
+# 日志按原文输出；确认前只展示，确认后同步写入日志。
 log() {
+  local message="$1"
+  if [[ "$LOG_READY" != "1" ]]; then
+    if [[ "$PLAIN_OUTPUT" == "1" ]]; then
+      printf '%s\n' "$message" | strip_ansi_text
+    else
+      printf '%s\n' "$message"
+    fi
+    return 0
+  fi
   if [[ "$PLAIN_OUTPUT" == "1" ]]; then
-    printf "%b\n" "$1" | strip_ansi_text | tee -a "$LOG_FILE"
+    printf '%s\n' "$message" | strip_ansi_text | /usr/bin/tee -a "$LOG_FILE"
   else
-    printf "%b\n" "$1" | tee -a "$LOG_FILE"
+    printf '%s\n' "$message" | /usr/bin/tee -a "$LOG_FILE"
   fi
 }
-# 输出绿色成功信息。
-success_echo() {
-  log "\033[1;32m✔ $1\033[0m"
+# 固定颜色码单独处理，用户路径与正文不做反斜杠转义。
+color_log() {
+  local color="$1" message="$2"
+  if [[ "$PLAIN_OUTPUT" == "1" ]]; then
+    log "$message"
+  else
+    log "${color}${message}"$'\033[0m'
+  fi
 }
-# 输出黄色警告信息。
-warn_echo() {
-  log "\033[1;33m⚠ $1\033[0m"
-}
-# 输出紫色说明信息。
-note_echo() {
-  log "\033[1;35m➤ $1\033[0m"
-}
-# 输出红色错误信息。
-error_echo() {
-  log "\033[1;31m✖ $1\033[0m"
-}
-# 输出灰色次要信息。
-gray_echo() {
-  log "\033[0;90m$1\033[0m"
-}
-# 输出高亮分隔信息。
-highlight_echo() {
-  log "\033[1;36m🔹 $1\033[0m"
-}
+# 输出成功日志。
+success_echo() { color_log $'\033[1;32m' "✔ $1"; }
+# 输出警告日志。
+warn_echo() { color_log $'\033[1;33m' "⚠ $1"; }
+# 输出说明日志。
+note_echo() { color_log $'\033[1;35m' "➤ $1"; }
+# 输出错误日志。
+error_echo() { color_log $'\033[1;31m' "✖ $1"; }
+# 输出次要日志。
+gray_echo() { color_log $'\033[0;90m' "$1"; }
+# 输出高亮分隔日志。
+highlight_echo() { color_log $'\033[1;36m' "🔹 $1"; }
 # 输出错误并立即终止脚本。
 exit_with_error() {
   error_echo "$1"
   exit 1
 }
-# 准备 Sourcetree 输出模式和本次日志文件。
+# 自述前只计算路径和展示模式，不写入日志或项目文件。
 prepare_intro_output() {
-  : > "$LOG_FILE"
+  SCRIPT_PATH="$(resolve_script_path)"
+  SCRIPT_DIR="${SCRIPT_PATH:h}"
+  SCRIPT_BASENAME="${${SCRIPT_PATH:t}:r}"
+  LOG_FILE="${LOG_DIR}/${SCRIPT_BASENAME}.log"
   if is_sourcetree_runtime; then
     IS_SOURCETREE_RUNTIME=1
   fi
-  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || -z "${TERM:-}" || "${TERM:-}" == "dumb" || -n "${NO_COLOR:-}" ]]; then
+  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || -z "${TERM:-}" || "${TERM:-}" == "dumb" || -n "${NO_COLOR+x}" ]]; then
     PLAIN_OUTPUT=1
     export NO_COLOR="${NO_COLOR:-1}"
     export FORCE_COLOR=0
     export CLICOLOR="0"
     export ANSI_COLORS_DISABLED="1"
+    export npm_config_color=false
   fi
 }
 # 展示内置自述，终端模式等待确认，Sourcetree 模式直接继续。
 show_script_intro_and_wait() {
   prepare_intro_output
-  if [[ "$IS_SOURCETREE_RUNTIME" != "1" && -t 1 && -n "${TERM:-}" && "${TERM:-}" != "dumb" ]]; then
+  if [[ -z "${NO_COLOR+x}" && "${PLAIN_OUTPUT:-0}" != 1 && "$IS_SOURCETREE_RUNTIME" != "1" && -t 1 && -n "${TERM:-}" && "${TERM:-}" != "dumb" ]]; then
     clear
   fi
 
@@ -167,16 +175,22 @@ show_script_intro_and_wait() {
   echo "" | jobs_intro_style body
   read -r "?👉 已阅读说明，按回车继续执行；按 Ctrl+C 取消：" _ || exit_with_error "读取确认失败，已取消执行。"
 }
-# 初始化 zsh 选项，确保后续路径和数组处理行为稳定。
+# 用户确认后初始化 Shell 环境和本次日志。
 initialize_script_runtime() {
   emulate -R zsh
-  set -e
-  set -o pipefail
-  setopt NO_NOMATCH
+  setopt NO_NOMATCH ERR_EXIT PIPE_FAIL
+  export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+  export LANG="${LANG:-zh_CN.UTF-8}"
+  export LC_CTYPE="${LC_CTYPE:-UTF-8}"
+  if ! : > "$LOG_FILE"; then
+    print -u2 -r -- "无法创建日志文件：${LOG_FILE}；请检查系统临时目录。"
+    exit 1
+  fi
+  LOG_READY=1
 }
 # 检查获取远程仓库地址需要的基础命令。
 check_environment() {
-  command -v git >/dev/null 2>&1 || exit_with_error "未找到 git，无法读取远程仓库地址。"
+  command -v git >/dev/null 2>&1 && git --version >/dev/null 2>&1 || exit_with_error "Git 无法执行；请检查 Git、CLT 或当前 PATH。"
 }
 # 去掉用户拖入路径时可能带上的外层引号和换行。
 strip_outer_quotes() {
@@ -196,8 +210,8 @@ expand_user_path() {
     print -r -- "$HOME"
     return 0
   fi
-  if [[ "$input_path" == "~/"* ]]; then
-    print -r -- "${HOME}/${input_path#~/}"
+  if [[ "$input_path" == '~/'* ]]; then
+    print -r -- "${HOME}/${input_path#'~/'}"
     return 0
   fi
   print -r -- "$input_path"
@@ -323,7 +337,7 @@ resolve_remote_url() {
 # 对输出和日志里的 HTTP 用户信息脱敏，剪贴板仍保留 Git 配置原值。
 sanitize_remote_url_for_display() {
   if [[ "$REMOTE_URL" == http://*'@'* || "$REMOTE_URL" == https://*'@'* ]]; then
-    REMOTE_URL_DISPLAY="${REMOTE_URL%%://*}://***@${REMOTE_URL#*@}"
+    REMOTE_URL_DISPLAY="${REMOTE_URL%%://*}://***@${REMOTE_URL##*@}"
     warn_echo "远程地址包含 HTTP 用户信息；输出和日志已脱敏，剪贴板保留原始地址。"
     return 0
   fi
@@ -349,14 +363,14 @@ print_remote_summary() {
   note_echo "仓库根目录：${REPOSITORY_ROOT}"
   note_echo "远程名称：${REMOTE_NAME}"
   success_echo "远程仓库地址："
-  log "$REMOTE_URL_DISPLAY"
+  print -r -- "$REMOTE_URL_DISPLAY" | tee -a "$LOG_FILE"
   gray_echo "日志文件：${LOG_FILE}"
   highlight_echo "==========================================================================="
 }
 # 编排脚本说明、仓库解析、远程选择、剪贴板复制和结果输出。
 main() {
   show_script_intro_and_wait # 展示脚本内置自述，并按运行入口决定是否等待确认。
-  initialize_script_runtime # 初始化 zsh 运行选项，确保后续路径和数组处理行为稳定。
+  initialize_script_runtime # 确认后初始化 zsh、命令环境和本次日志。
   check_environment # 检查 git 命令是否可用。
   resolve_repository_root "$@" # 从参数、环境变量或终端输入解析 Git 仓库根目录。
   resolve_remote_name "$@" # 优先选择显式远程、origin 或唯一远程。

@@ -57,8 +57,7 @@ CONFLICT_BRANCHES=()
 
 # 识别脚本是否由 Sourcetree 自定义动作发起。
 is_sourcetree_runtime() {
-  /usr/bin/env | /usr/bin/grep -Eqi '^SOURCETREE|^SOURCE_TREE' && return 0
-  [[ "$0" != /* && -f "${HOME}/SourceTree.command/${SCRIPT_NAME}/${SCRIPT_NAME}" ]] && return 0
+  /usr/bin/env | /usr/bin/grep -Ei '^SOURCETREE|^SOURCE_TREE' >/dev/null && return 0
 
   local pid="$PPID"
   local command_name=""
@@ -80,7 +79,7 @@ configure_output_mode() {
   if is_sourcetree_runtime; then
     IS_SOURCETREE_RUNTIME=1
   fi
-  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || -z "${TERM:-}" || "${TERM:-}" == "dumb" || -n "${NO_COLOR:-}" ]]; then
+  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || -z "${TERM:-}" || "${TERM:-}" == "dumb" || -n "${NO_COLOR+x}" ]]; then
     PLAIN_OUTPUT=1
     export NO_COLOR=1
     export FORCE_COLOR=0
@@ -89,33 +88,46 @@ configure_output_mode() {
     export npm_config_color=false
   fi
 }
-# 同步输出终端日志和本地日志文件。
+# 日志按原文输出；确认前只展示，确认后同步写入日志。
 log() {
   local message="$1"
   if [[ "$LOG_READY" != "1" ]]; then
-    [[ "$PLAIN_OUTPUT" == "1" ]] && printf '%b\n' "$message" | strip_ansi_stream || printf '%b\n' "$message"
+    if [[ "$PLAIN_OUTPUT" == "1" ]]; then
+      printf '%s\n' "$message" | strip_ansi_stream
+    else
+      printf '%s\n' "$message"
+    fi
     return 0
   fi
   if [[ "$PLAIN_OUTPUT" == "1" ]]; then
-    printf '%b\n' "$message" | strip_ansi_stream | /usr/bin/tee -a "$LOG_FILE"
+    printf '%s\n' "$message" | strip_ansi_stream | /usr/bin/tee -a "$LOG_FILE"
   else
-    printf '%b\n' "$message" | /usr/bin/tee -a "$LOG_FILE"
+    printf '%s\n' "$message" | /usr/bin/tee -a "$LOG_FILE"
   fi
 }
-# 输出信息级别日志。
-info_echo() { log "\033[1;34mℹ $1\033[0m"; }
-# 输出成功级别日志。
-success_echo() { log "\033[1;32m✔ $1\033[0m"; }
-# 输出警告级别日志。
-warn_echo() { log "\033[1;33m⚠ $1\033[0m"; }
-# 输出说明级别日志。
-note_echo() { log "\033[1;35m➤ $1\033[0m"; }
-# 输出错误级别日志。
-error_echo() { log "\033[1;31m✖ $1\033[0m"; }
-# 输出次要信息日志。
-gray_echo() { log "\033[0;90m$1\033[0m"; }
-# 输出高亮分隔信息。
-highlight_echo() { log "\033[1;36m🔹 $1\033[0m"; }
+# 固定颜色码单独处理，用户路径与正文不做反斜杠转义。
+color_log() {
+  local color="$1" message="$2"
+  if [[ "$PLAIN_OUTPUT" == "1" ]]; then
+    log "$message"
+  else
+    log "${color}${message}"$'\033[0m'
+  fi
+}
+# 输出信息日志。
+info_echo() { color_log $'\033[1;34m' "ℹ $1"; }
+# 输出成功日志。
+success_echo() { color_log $'\033[1;32m' "✔ $1"; }
+# 输出警告日志。
+warn_echo() { color_log $'\033[1;33m' "⚠ $1"; }
+# 输出说明日志。
+note_echo() { color_log $'\033[1;35m' "➤ $1"; }
+# 输出错误日志。
+error_echo() { color_log $'\033[1;31m' "✖ $1"; }
+# 输出次要日志。
+gray_echo() { color_log $'\033[0;90m' "$1"; }
+# 输出高亮分隔日志。
+highlight_echo() { color_log $'\033[1;36m' "🔹 $1"; }
 # 输出一个独立 Fetch 故障场景的开始标记和成因。
 begin_fetch_scenario() {
   local scenario_id="$1"
@@ -165,10 +177,10 @@ show_script_intro_and_wait() {
   fi
   if [[ ! -t 0 ]]; then
     error_echo "当前不是 Sourcetree，且没有可交互输入；请在终端中重新运行。"
-    return 1
+    exit 1
   fi
   print "" | jobs_intro_style body
-  read -r "?👉 已了解脚本用途与影响，按回车继续；按 Ctrl+C 取消：" _
+  read -r "?👉 已了解脚本用途与影响，按回车继续；按 Ctrl+C 取消：" _ || exit 1
 }
 # 初始化 zsh 选项、命令路径、日志和输出策略。
 initialize_script_runtime() {
@@ -252,10 +264,17 @@ perform_fetch() {
   log_external_output "$FETCH_OUTPUT"
   return "$FETCH_STATUS"
 }
-# 判断 Fetch 输出是否命中远端跟踪引用的文件/目录冲突。
+# 兼容 Git 仅输出 unable to update local ref 的简略诊断；后续仍需核验实际路径阻塞。
 is_remote_ref_namespace_conflict() {
-  print -r -- "$FETCH_OUTPUT" | /usr/bin/grep -Eq 'refs/remotes/|logs/refs/remotes/' || return 1
-  print -r -- "$FETCH_OUTPUT" | /usr/bin/grep -Eqi 'Not a directory|Is a directory|exists; cannot create|cannot create.*directory|there are still logs under'
+  if print -r -- "$FETCH_OUTPUT" | /usr/bin/grep -E 'refs/remotes/|logs/refs/remotes/' >/dev/null &&
+     print -r -- "$FETCH_OUTPUT" | /usr/bin/grep -Ei 'Not a directory|Is a directory|exists; cannot create|cannot create.*directory|there are still logs under' >/dev/null; then
+    return 0
+  fi
+  JOBS_FETCH_REMOTE_FOR_PARSE="$REMOTE_NAME" /usr/bin/perl -ne '
+    my $remote = quotemeta($ENV{"JOBS_FETCH_REMOTE_FOR_PARSE"});
+    $found = 1 if /^\s*!\s+.*\s->\s+$remote\/\S+\s+\(unable to update local ref\)/;
+    END { exit($found ? 0 : 1) }
+  ' <<< "$FETCH_OUTPUT"
 }
 # 读取远端当前真实分支，作为判断本地阻塞项是否失效的依据。
 load_remote_branches() {
@@ -294,6 +313,9 @@ extract_conflict_branches() {
       while (/cannot (?:update (?:the )?ref|lock ref) '\''refs\/remotes\/$remote\/([^'\'']+)'\''/g) {
         print "$1\n";
       }
+      if (/^\s*!\s+.*\s->\s+$remote\/(\S+)\s+\(unable to update local ref\)/) {
+        print "$1\n";
+      }
     ' <<< "$FETCH_OUTPUT" | /usr/bin/sort -u
   )"
 
@@ -322,6 +344,28 @@ validate_conflict_branches_against_remote() {
     done
     if [[ "$matched" -ne 1 ]]; then
       error_echo "冲突分支已不在远端，为避免误修复已中止：${conflict_branch}"
+      return 1
+    fi
+  done
+}
+# 只有错误目标对应的实际文件/目录阻塞存在，才允许 prune 或移动元数据。
+validate_physical_conflict_blockers() {
+  local branch="" prefix="" root="" index=0 found=0
+  local -a segments=()
+  for branch in "${CONFLICT_BRANCHES[@]}"; do
+    found=0
+    for root in "$REMOTE_REFS_ROOT" "$REMOTE_LOGS_ROOT"; do
+      [[ -d "${root}/${branch}" ]] && found=1
+      segments=("${(@s:/:)branch}")
+      prefix=""
+      for ((index = 1; index < ${#segments[@]}; index++)); do
+        [[ -n "$prefix" ]] && prefix="${prefix}/"
+        prefix="${prefix}${segments[$index]}"
+        [[ -f "${root}/${prefix}" ]] && found=1
+      done
+    done
+    if [[ "$found" != 1 ]]; then
+      error_echo "错误分支没有可验证的 loose ref/reflog 路径阻塞，保留原状：${branch}"
       return 1
     fi
   done
@@ -476,6 +520,19 @@ refresh_remote_ref_conflict_context() {
   fi
   extract_conflict_branches
   validate_conflict_branches_against_remote
+  validate_physical_conflict_blockers
+}
+# 元数据修复仅适用于标准 branch -> remote-tracking 映射。
+validate_standard_fetch_mapping() {
+  local mapping="" mappings=""
+  mappings="$(git -C "$REPO_ROOT" config --get-all "remote.${REMOTE_NAME}.fetch" || true)"
+  [[ -n "$mappings" ]] || { error_echo "远端没有标准 fetch 映射；保留原状，请人工检查 refspec。"; return 1; }
+  for mapping in "${(@f)mappings}"; do
+    if [[ "$mapping" != "+refs/heads/*:refs/remotes/${REMOTE_NAME}/*" && "$mapping" != "refs/heads/*:refs/remotes/${REMOTE_NAME}/*" ]]; then
+      error_echo "检测到自定义 fetch refspec，拒绝按标准路径自动搬移元数据：${mapping}"
+      return 1
+    fi
+  done
 }
 # 首次命中受支持错误后读取远端真值，并建立后续逐场景修复上下文。
 prepare_supported_fetch_context() {
@@ -486,6 +543,7 @@ prepare_supported_fetch_context() {
     return "$FETCH_STATUS"
   fi
   warn_echo "已命中远端跟踪引用文件/目录冲突，开始逐场景修复。"
+  validate_standard_fetch_mapping
   load_remote_branches
   refresh_remote_ref_conflict_context
 }

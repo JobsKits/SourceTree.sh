@@ -1,14 +1,9 @@
 #!/bin/zsh
 # 脚本自述：
 # - 脚本名称：【MacOS@SourceTree】📘用Typora打开蓝皮书.command
-# - 核心用途：执行“📘用Typora打开蓝皮书”对应的快捷打开任务。
-# - 影响范围：主要影响应用启动与路径跳转，不主动改写业务文件。
-# - 运行提示：运行后会先打印内置自述；Sourcetree 模式无交互连续执行，终端模式确认后继续。
-# =====================================================================
-# Jobs 标准化脚本外壳
-# 说明：保留原脚本业务逻辑，补齐 README 防误触、彩色日志、zsh 入口、Homebrew 健康自检标准。
-# =====================================================================
-# Sourcetree 自定义动作可能只传脚本名，不传绝对路径；这里兜底找回真实脚本位置。
+# - 核心用途：使用 Typora 打开传入目录的 README.md，或明确指定的 Markdown 文件。
+# - 影响范围：启动 Typora/官网并记录日志；不下载软件仓库，不改写文档。
+# - 运行提示：终端先展示内置自述并等待回车；Sourcetree 实际发起时无交互执行。
 # 仅渲染自述：标题红色加粗，编号正文蓝色常规字重；非彩色终端输出纯文本。
 jobs_intro_style() {
   local intro_color=0
@@ -50,15 +45,14 @@ resolve_script_path() {
   printf "%s/%s\n" "$PWD" "$script_name"
 }
 
-SCRIPT_PATH="$(resolve_script_path)"
-SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd -P)"
-SCRIPT_BASENAME="$(basename "$SCRIPT_PATH" | sed 's/\.[^.]*$//')"
-LOG_FILE="/tmp/${SCRIPT_BASENAME}.log"
+SCRIPT_PATH=""
+SCRIPT_DIR=""
+SCRIPT_BASENAME=""
+LOG_FILE=""
+LOG_INITIALIZED=0
 # 识别 Sourcetree 自定义动作的瘦身运行环境，系统终端双击运行不降级。
 is_sourcetree_runtime() {
   env | grep -Eqi '^SOURCETREE|^SOURCE_TREE' && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/SourceTree.command/"* ]] && return 0
-  [[ "$0" != /* && "$SCRIPT_PATH" == "${HOME}/Documents/Github/JobsGenesis/SourceTree.command/"* ]] && return 0
 
   local pid="$PPID"
   local command_name=""
@@ -83,7 +77,7 @@ strip_ansi_text() {
 # 根据运行入口和终端能力预先切换纯文本输出，避免 Sourcetree 显示 ANSI 转义码。
 prepare_plain_output_context() {
   [[ -n "${TERM:-}" ]] || export TERM="dumb"
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" || "${JOBS_PLAIN_OUTPUT:-0}" == "1" ]]; then
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR+x}" || "${JOBS_PLAIN_OUTPUT:-0}" == "1" ]]; then
     SOURCETREE_PLAIN_OUTPUT=1
     COLOR_ENABLED=0
     export NO_COLOR="${NO_COLOR:-1}"
@@ -95,190 +89,151 @@ prepare_plain_output_context() {
 }
 # 按当前输出级别记录终端信息，并同步写入脚本日志。
 log() {
-  if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == "1" ]]; then
-    printf "%b\n" "$1" | strip_ansi_text | tee -a "$LOG_FILE"
-  else
-    printf "%b\n" "$1" | tee -a "$LOG_FILE"
-  fi
-}
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-color_echo()     { log "\033[1;32m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-info_echo()      { log "\033[1;34mℹ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-success_echo()   { log "\033[1;32m✔ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-warn_echo()      { log "\033[1;33m⚠ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-warm_echo()      { log "\033[1;33m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-note_echo()      { log "\033[1;35m➤ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-error_echo()     { log "\033[1;31m✖ $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-err_echo()       { log "\033[1;31m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-debug_echo()     { log "\033[1;35m🐞 $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-highlight_echo() { log "\033[1;36m🔹 $1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-gray_echo()      { log "\033[0;90m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-bold_echo()      { log "\033[1m$1\033[0m"; }
-# 按当前输出级别记录终端信息，并同步写入脚本日志。
-underline_echo() { log "\033[4m$1\033[0m"; }
-# ============================= 标准工具函数 =============================
-get_cpu_arch() {
-  [[ "$(uname -m)" == "arm64" ]] && echo "arm64" || echo "x86_64"
-}
-# 封装 abs_path 对应的独立处理逻辑。
-abs_path() {
-  local p="$1"
-  [[ -z "$p" ]] && return 1
-  p="${p//\"/}"
-  [[ "$p" != "/" ]] && p="${p%/}"
-  if [[ -d "$p" ]]; then
-    (cd "$p" 2>/dev/null && pwd -P)
-  elif [[ -f "$p" ]]; then
-    (cd "${p:h}" 2>/dev/null && printf "%s/%s\n" "$(pwd -P)" "${p:t}")
-  else
-    return 1
-  fi
-}
-# 收集并校验用户输入，决定后续执行路径。
-ask_run() {
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
-    gray_echo "Sourcetree 连续执行模式已跳过当前可选交互。"
-    return 1
-  fi
-  echo ""
-  note_echo "👉 $1"
-  gray_echo "【回车=跳过，输入任意字符后回车=执行】"
-  local input=""
-  IFS= read -r "input?➤ "
-  [[ -n "$input" ]]
-}
-# 收集并校验用户输入，决定后续执行路径。
-confirm_yes() {
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == "1" ]]; then
-    gray_echo "Sourcetree 连续执行模式已跳过当前可选交互。"
-    return 1
-  fi
-  echo ""
-  warn_echo "⚠ $1"
-  gray_echo "危险操作必须输入 YES 后回车；其它输入一律取消。"
-  local input=""
-  IFS= read -r "input?➤ "
-  [[ "$input" == "YES" ]]
-}
-# 封装 inject_shellenv_block 对应的独立处理逻辑。
-inject_shellenv_block() {
-  local profile_file="$1"
-  local shellenv_cmd="$2"
-  local header="# >>> Homebrew 环境变量 >>>"
-  [[ -z "$profile_file" || -z "$shellenv_cmd" ]] && { error_echo "缺少参数：inject_shellenv_block <profile_file> <shellenv_cmd>"; return 1; }
-  mkdir -p "$(dirname "$profile_file")"
-  touch "$profile_file"
-  if grep -Fq "$shellenv_cmd" "$profile_file" 2>/dev/null; then
-    info_echo "已存在 Homebrew shellenv：$profile_file"
-  elif grep -Fq "$header" "$profile_file" 2>/dev/null; then
-    info_echo "已存在 Homebrew 环境变量块：$profile_file"
-  else
-    {
-      echo ""
-      echo "$header"
-      echo "$shellenv_cmd"
-    } >> "$profile_file"
-    success_echo "已写入 Homebrew shellenv：$profile_file"
-  fi
-  eval "$shellenv_cmd" || true
-}
-# 封装 activate_homebrew_shellenv 对应的独立处理逻辑。
-activate_homebrew_shellenv() {
-  local arch="$(get_cpu_arch)"
-  local brew_bin=""
-  if command -v brew >/dev/null 2>&1; then
-    brew_bin="$(command -v brew)"
-  elif [[ "$arch" == "arm64" && -x "/opt/homebrew/bin/brew" ]]; then
-    brew_bin="/opt/homebrew/bin/brew"
-  elif [[ -x "/usr/local/bin/brew" ]]; then
-    brew_bin="/usr/local/bin/brew"
-  fi
-  [[ -z "$brew_bin" ]] && return 1
-
-  local shell_name="${SHELL##*/}"
-  local profile_file=""
-  case "$shell_name" in
-    zsh)  profile_file="$HOME/.zprofile" ;;
-    bash) profile_file="$HOME/.bash_profile" ;;
-    *)    profile_file="$HOME/.profile" ;;
-  esac
-  inject_shellenv_block "$profile_file" "eval \"\$(${brew_bin} shellenv)\""
-  eval "$(${brew_bin} shellenv)"
-}
-# 执行已经拆分完成的独立业务步骤。
-run_brew_health_update() {
-  info_echo "正在执行 Homebrew 健康更新..."
-  brew update  || { error_echo "brew update 失败"; return 1; }
-  brew upgrade || { error_echo "brew upgrade 失败"; return 1; }
-  brew cleanup || { error_echo "brew cleanup 失败"; return 1; }
-  brew doctor  || warn_echo "brew doctor 有警告，请按输出处理"
-  brew -v      || warn_echo "打印 brew 版本失败，可忽略"
-  success_echo "Homebrew 健康更新完成"
-}
-# 执行对应的环境配置或同步处理。
-install_homebrew() {
-  local arch="$(get_cpu_arch)"
-  local brew_bin=""
-
-  if ! command -v brew >/dev/null 2>&1 && [[ ! -x "/opt/homebrew/bin/brew" && ! -x "/usr/local/bin/brew" ]]; then
-    warn_echo "未检测到 Homebrew，准备按架构安装：$arch"
-    if [[ "$arch" == "arm64" ]]; then
-      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || { error_echo "Homebrew 安装失败（arm64）"; return 1; }
-      brew_bin="/opt/homebrew/bin/brew"
+  if [[ "${SOURCETREE_PLAIN_OUTPUT:-0}" == 1 ]]; then
+    if [[ "$LOG_INITIALIZED" == 1 ]]; then
+      printf '%s\n' "$1" | strip_ansi_text | tee -a "$LOG_FILE"
     else
-      arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || { error_echo "Homebrew 安装失败（x86_64）"; return 1; }
-      brew_bin="/usr/local/bin/brew"
+      printf '%s\n' "$1" | strip_ansi_text
     fi
-    success_echo "Homebrew 安装完成"
-    activate_homebrew_shellenv || true
-    return 0
-  fi
-
-  activate_homebrew_shellenv || true
-  info_echo "Homebrew 已安装。"
-  if ask_run "是否执行 Homebrew 更新 / 升级 / 清理 / doctor？"; then
-    run_brew_health_update
+  elif [[ "$LOG_INITIALIZED" == 1 ]]; then
+    printf '%s\n' "$1" | tee -a "$LOG_FILE"
   else
-    note_echo "已跳过 Homebrew 更新"
+    printf '%s\n' "$1"
   fi
 }
-# 封装 brew_install_or_upgrade 对应的独立处理逻辑。
-brew_install_or_upgrade() {
-  local formula="$1"
-  [[ -z "$formula" ]] && return 1
-  install_homebrew || return 1
-  if ! brew list --formula "$formula" >/dev/null 2>&1 && ! command -v "$formula" >/dev/null 2>&1; then
-    note_echo "未检测到 $formula，正在安装..."
-    brew install "$formula" || { error_echo "$formula 安装失败"; return 1; }
-    success_echo "$formula 安装完成"
-  else
-    info_echo "$formula 已安装。"
-    if ask_run "是否升级 $formula？"; then
-      brew upgrade "$formula" || warn_echo "$formula 可能已是最新或升级失败，请检查输出"
-      brew cleanup || true
-    else
-      note_echo "已跳过 $formula 升级"
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+color_echo()     { log $'\033[1;32m'"$1"$'\033[0m'; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+info_echo()      { log $'\033[1;34m'"ℹ $1"$'\033[0m'; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+success_echo()   { log $'\033[1;32m'"✔ $1"$'\033[0m'; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+warn_echo()      { log $'\033[1;33m'"⚠ $1"$'\033[0m'; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+warm_echo()      { log $'\033[1;33m'"$1"$'\033[0m'; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+note_echo()      { log $'\033[1;35m'"➤ $1"$'\033[0m'; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+error_echo()     { log $'\033[1;31m'"✖ $1"$'\033[0m'; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+err_echo()       { log $'\033[1;31m'"$1"$'\033[0m'; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+debug_echo()     { log $'\033[1;35m'"🐞 $1"$'\033[0m'; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+highlight_echo() { log $'\033[1;36m'"🔹 $1"$'\033[0m'; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+gray_echo()      { log $'\033[0;90m'"$1"$'\033[0m'; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+bold_echo()      { log $'\033[1m'"$1"$'\033[0m'; }
+# 按当前输出级别记录终端信息，并同步写入脚本日志。
+underline_echo() { log $'\033[4m'"$1"$'\033[0m'; }
+
+TARGET_PATH=""
+# 在自述前解析脚本路径、日志位置与输出模式；不执行打开或配置业务。
+prepare_script_context() {
+  SCRIPT_PATH="$(resolve_script_path)"
+  SCRIPT_DIR="${SCRIPT_PATH:h}"
+  SCRIPT_BASENAME="${SCRIPT_PATH:t:r}"
+  LOG_FILE="${TMPDIR:-/tmp/}"
+  LOG_FILE="${LOG_FILE%/}/${SCRIPT_BASENAME}.log"
+  is_sourcetree_runtime && IS_SOURCETREE_RUNTIME=1
+  prepare_plain_output_context
+  return 0
+}
+# 确认后固定 zsh 语义，并补齐 Sourcetree 精简 PATH。
+initialize_script_runtime() {
+  emulate -R zsh
+  setopt NO_NOMATCH PIPE_FAIL
+  : > "$LOG_FILE" || { error_echo "无法创建日志：$LOG_FILE"; exit 1; }
+  LOG_INITIALIZED=1
+  log "脚本：${SCRIPT_BASENAME}.command"
+  log "脚本路径：$SCRIPT_PATH"
+  log "核心用途：使用 Typora 打开传入目录的 README.md，或明确指定的 Markdown 文件。"
+  log "影响范围：启动 Typora/官网并记录日志；不下载软件仓库，不改写文档。"
+  export PATH="${PATH:-/usr/bin:/bin}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+  prepare_plain_output_context
+}
+# 保留用户路径原文，仅在原路径不存在时尝试去除配对外层引号。
+normalize_target_path() {
+  local candidate="$1"
+  if [[ ! -e "$candidate" ]]; then
+    candidate="${candidate%$'\r'}"
+    if [[ "$candidate" == \"*\" || "$candidate" == \'*\' ]]; then
+      candidate="${candidate[2,-2]}"
+    fi
+    if [[ ! -e "$candidate" ]]; then
+      candidate="${(Q)candidate}"
     fi
   fi
+  if [[ "$candidate" == '~' ]]; then
+    candidate="$HOME"
+  elif [[ "$candidate" == '~/'* ]]; then
+    candidate="$HOME/${candidate#\~/}"
+  fi
+  [[ -e "$candidate" ]] || return 1
+  if [[ -d "$candidate" ]]; then
+    (cd -- "$candidate" 2>/dev/null && pwd -P)
+  else
+    (cd -- "${candidate:h}" 2>/dev/null && printf '%s/%s\n' "$PWD" "${candidate:t}")
+  fi
+}
+# 参数优先于 REPO；Sourcetree 缺参数时停止，避免误开脚本所在目录。
+resolve_target_path() {
+  local candidate=""
+  if (( $# > 1 )); then
+    error_echo "本动作只接受一个文件或目录参数；含空格路径请整体加引号。"
+    return 2
+  elif (( $# == 1 )); then
+    candidate="$1"
+  elif [[ -n "${REPO:-}" ]]; then
+    candidate="$REPO"
+  elif [[ "$IS_SOURCETREE_RUNTIME" == 1 ]]; then
+    error_echo '未收到目标路径；Sourcetree 参数请填写 "$REPO"。'
+    return 2
+  else
+    candidate="$PWD"
+  fi
+  TARGET_PATH="$(normalize_target_path "$candidate")" || {
+    error_echo "目标不存在或不可访问：$candidate"
+    return 2
+  }
+  info_echo "目标路径：$TARGET_PATH"
+}
+# 外部命令输出同步落日志；保留真实命令退出码。
+run_logged() {
+  "$@" 2>&1 | strip_ansi_text | tee -a "$LOG_FILE"
+  local command_exit=${pipestatus[1]}
+  return "$command_exit"
+}
+# 无健康 CLI 时复用现有 app；缺应用时只打开官方页面。
+open_editor_target() {
+  local cli="$1"
+  local official_url="$2"
+  shift 2
+  local app=""
+  if [[ -n "$cli" ]] && command -v "$cli" >/dev/null 2>&1; then
+    if "$cli" --version >/dev/null 2>&1; then
+      info_echo "使用 CLI：$cli"
+      run_logged "$cli" "$TARGET_PATH"
+      return $?
+    fi
+    warn_echo "CLI 不可用：$cli，继续检查本机应用。"
+  fi
+  command -v open >/dev/null 2>&1 || { error_echo '缺少 macOS open 命令。'; return 127; }
+  for app in "$@"; do
+    [[ -d "$app" && -f "$app/Contents/Info.plist" ]] || continue
+    info_echo "使用应用：$app"
+    run_logged open -a "$app" "$TARGET_PATH"
+    return $?
+  done
+  warn_echo '未检测到可用应用，打开官方页面；本次目标尚未打开。'
+  run_logged open "$official_url" || return $?
+  return 3
 }
 # 展示脚本用途和影响范围，并在执行前等待用户确认。
 show_readme_and_wait() {
-  if typeset -f is_sourcetree_runtime >/dev/null 2>&1 && is_sourcetree_runtime; then
-    IS_SOURCETREE_RUNTIME=1
-  fi
-  prepare_plain_output_context
-  if [[ "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
+  prepare_script_context || exit 1
+  if [[ -z "${NO_COLOR+x}" && "${PLAIN_OUTPUT:-0}" != 1 && "${IS_SOURCETREE_RUNTIME:-0}" != "1" && -t 1 && -n "${TERM:-}" && "$TERM" != "dumb" ]]; then
     clear
   fi
 
@@ -286,7 +241,8 @@ show_readme_and_wait() {
   note_echo "脚本名称：${SCRIPT_BASENAME}.command" | jobs_intro_style title
   note_echo "脚本路径：${SCRIPT_PATH}" | jobs_intro_style body
   note_echo "运行入口：兼容系统终端双击运行和 Sourcetree 自定义动作运行。" | jobs_intro_style body
-  note_echo "核心行为：按脚本名称执行对应的 SourceTree 效率动作，运行前会先展示这段内置自述，避免误触。" | jobs_intro_style title
+  note_echo "核心行为：使用 Typora 打开传入目录的 README.md，或明确指定的 Markdown 文件。" | jobs_intro_style body
+  note_echo "影响范围：启动 Typora/官网并记录日志；不下载软件仓库，不改写文档。" | jobs_intro_style body
   note_echo "环境策略：系统终端保留清屏、彩色输出和回车确认；Sourcetree 瘦身环境自动跳过清屏和等待，并输出纯文本日志。" | jobs_intro_style body
   note_echo "文档关系：同目录 README.md 只作为外部说明文档保留，运行时自述不读取、不拼接、不依赖 README.md。" | jobs_intro_style body
   warn_echo "继续前请确认 SourceTree 传入路径、当前仓库或拖入路径正确；按 Ctrl+C 可以取消。" | jobs_intro_style body
@@ -300,63 +256,37 @@ show_readme_and_wait() {
   fi
   if [[ ! -t 0 ]]; then
     error_echo "当前不是 Sourcetree，且没有可交互输入；请在终端中重新运行。"
-    return 1
+    exit 1
   fi
-  read "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..."
+  read -r "?👉 已阅读脚本内置自述，按回车继续执行；按 Ctrl+C 取消..." _ || { error_echo "读取确认失败，已取消。"; exit 1; }
 }
-# 执行已经拆分完成的独立业务步骤。
-run_original_logic() {
-  # ============================= 原脚本业务逻辑区 =============================
-  # 功能：Typora 自动打开 README.md
-  # 1. 检查 Typora 是否存在
-  # 2. 存在则用 Typora 打开 README.md
-  # 3. 不存在则下载 JobsSoftware.MacOS.git 到当前目录，并打开 Finder
 
-  SCRIPT_DIR="$(pwd)"  # 当前目录
-  REPO_URL="https://github.com/295060456/JobsSoftware.MacOS.git"
-
-  # ========== 检查 Typora ==========
-  if command -v typora >/dev/null 2>&1 || [ -d "/Applications/Typora.app" ]; then
-    echo "✔ Typora 已安装，正在打开 README.md ..."
-    open -a Typora "$SCRIPT_DIR/README.md"
-  else
-    echo "⚠ Typora 未安装，准备下载 JobsSoftware.MacOS.git ..."
-    git clone "$REPO_URL" "$SCRIPT_DIR/JobsSoftware.MacOS" || {
-      echo "❌ 下载失败，请检查网络或仓库地址。"
-      exit 1
-    }
-    echo "✔ 下载完成，正在打开当前目录 ..."
-    open "$SCRIPT_DIR"
+# 目录对应顶层 README；明确文件参数只接受现有 Markdown 文件。
+resolve_readme_target() {
+  if [[ -d "$TARGET_PATH" ]]; then
+    TARGET_PATH="$TARGET_PATH/README.md"
   fi
-
-  # =========================== 原脚本业务逻辑区结束 ===========================
+  [[ -f "$TARGET_PATH" && "${TARGET_PATH:e:l}" == md ]] || {
+    error_echo "未找到可打开的 Markdown：$TARGET_PATH"
+    return 2
+  }
 }
-# 编排脚本的高层业务流程。
-# 初始化脚本运行环境，并集中承载原有的顶层执行逻辑。
-initialize_script_runtime() {
-  : > "$LOG_FILE"
-  is_sourcetree_runtime && IS_SOURCETREE_RUNTIME=1
-  prepare_plain_output_context
-  [[ -n "${TERM:-}" ]] || export TERM="dumb"
-  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || "$TERM" == "dumb" || -n "${NO_COLOR:-}" ]]; then
-    SOURCETREE_PLAIN_OUTPUT=1
-    export NO_COLOR="${NO_COLOR:-1}"
-    export FORCE_COLOR=0
-    export CLICOLOR="0"
-    export ANSI_COLORS_DISABLED="1"
-    export npm_config_color=false
-  fi
+# 打开目标文档；缺应用时打开官网，不克隆其它软件仓库。
+open_target() {
+  open_editor_target "typora" "https://typora.io/" "/Applications/Typora.app" "$HOME/Applications/Typora.app"
 }
-# 编排脚本的高层业务流程。
+# 校验目标并完成业务，集中传播退出码和记录最终结果。
+run_validated_open() {
+  resolve_target_path "$@" || return $? # 校验并保存唯一目标路径。
+  resolve_readme_target || return $? # 将目标目录映射为现有 README.md。
+  open_target || return $? # 通过 CLI 或本机 Typora 打开文档。
+  success_echo "操作完成。日志：$LOG_FILE" # 输出成功结果和日志位置。
+}
+# 编排自述、运行环境和目标打开流程。
 main() {
-  # 展示脚本内置自述，并按运行入口完成防误触确认。
-  show_readme_and_wait
-  # 初始化 Shell 选项、日志、依赖和入口运行状态。
-  initialize_script_runtime
-  # 执行 run_original_logic 对应的核心业务步骤。
-  run_original_logic "$@"
-  # 输出脚本执行结果、摘要和日志位置。
-  success_echo "脚本执行结束。日志：$LOG_FILE"
+  show_readme_and_wait # 展示内置自述，确认失败时停止。
+  initialize_script_runtime # 确认后固定环境并初始化日志。
+  run_validated_open "$@" # 校验目标并完成业务，返回真实结果。
 }
 
 main "$@"

@@ -1,5 +1,4 @@
 #!/bin/zsh
-# shell: zsh
 # 脚本自述：
 # - 脚本名称：【MacOS@SourceTree】用终端打开.command
 # - 核心用途：从 Sourcetree 参数、环境变量或终端输入解析目标目录，并让 macOS 终端进入该目录。
@@ -29,9 +28,6 @@ jobs_intro_style() {
     }
   '
 }
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
-export LANG="${LANG:-zh_CN.UTF-8}"
-export LC_CTYPE="${LC_CTYPE:-UTF-8}"
 
 # 解析脚本真实路径，兼容 Sourcetree 只传脚本名的运行环境。
 resolve_script_path() {
@@ -52,12 +48,11 @@ resolve_script_path() {
   printf "%s/%s\n" "$PWD" "$script_name"
 }
 
-SCRIPT_PATH="$(resolve_script_path)"
-SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd -P)"
-SCRIPT_BASENAME="$(basename "$SCRIPT_PATH" | sed 's/\.[^.]*$//')"
-LOG_DIR="${TMPDIR:-/tmp}"
-LOG_DIR="${LOG_DIR%/}"
-LOG_FILE="${LOG_DIR}/${SCRIPT_BASENAME}.log"
+SCRIPT_PATH=""
+SCRIPT_DIR=""
+SCRIPT_BASENAME=""
+LOG_FILE=""
+LOG_INITIALIZED=0
 IS_SOURCETREE_RUNTIME=0
 PLAIN_OUTPUT=0
 TARGET_INPUT=""
@@ -86,39 +81,45 @@ strip_ansi_text() {
 }
 # 同步输出终端日志和本地日志文件。
 log() {
-  if [[ "$PLAIN_OUTPUT" == "1" ]]; then
-    printf "%b\n" "$1" | strip_ansi_text | tee -a "$LOG_FILE"
+  if [[ "$PLAIN_OUTPUT" == 1 ]]; then
+    if [[ "$LOG_INITIALIZED" == 1 ]]; then
+      printf '%s\n' "$1" | strip_ansi_text | tee -a "$LOG_FILE"
+    else
+      printf '%s\n' "$1" | strip_ansi_text
+    fi
+  elif [[ "$LOG_INITIALIZED" == 1 ]]; then
+    printf '%s\n' "$1" | tee -a "$LOG_FILE"
   else
-    printf "%b\n" "$1" | tee -a "$LOG_FILE"
+    printf '%s\n' "$1"
   fi
 }
 # 输出蓝色提示类信息。
 info_echo() {
-  log "\033[1;34mINFO $1\033[0m"
+  log $'\033[1;34m'"INFO $1"$'\033[0m'
 }
 # 输出绿色成功信息。
 success_echo() {
-  log "\033[1;32mOK $1\033[0m"
+  log $'\033[1;32m'"OK $1"$'\033[0m'
 }
 # 输出黄色警告信息。
 warn_echo() {
-  log "\033[1;33mWARN $1\033[0m"
+  log $'\033[1;33m'"WARN $1"$'\033[0m'
 }
 # 输出紫色说明信息。
 note_echo() {
-  log "\033[1;35mNOTE $1\033[0m"
+  log $'\033[1;35m'"NOTE $1"$'\033[0m'
 }
 # 输出红色错误信息。
 error_echo() {
-  log "\033[1;31mERROR $1\033[0m"
+  log $'\033[1;31m'"ERROR $1"$'\033[0m'
 }
 # 输出灰色次要信息。
 gray_echo() {
-  log "\033[0;90m$1\033[0m"
+  log $'\033[0;90m'"$1"$'\033[0m'
 }
 # 输出高亮分隔信息。
 highlight_echo() {
-  log "\033[1;36m$1\033[0m"
+  log $'\033[1;36m'"$1"$'\033[0m'
 }
 # 输出错误并立即终止脚本。
 exit_with_error() {
@@ -127,11 +128,15 @@ exit_with_error() {
 }
 # 准备 Sourcetree 输出模式和本次日志文件。
 prepare_intro_output() {
-  : > "$LOG_FILE"
+  SCRIPT_PATH="$(resolve_script_path)"
+  SCRIPT_DIR="${SCRIPT_PATH:h}"
+  SCRIPT_BASENAME="${SCRIPT_PATH:t:r}"
+  local log_directory="${TMPDIR:-/tmp/}"
+  LOG_FILE="${log_directory%/}/${SCRIPT_BASENAME}.log"
   if is_sourcetree_runtime; then
     IS_SOURCETREE_RUNTIME=1
   fi
-  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || -z "${TERM:-}" || "${TERM:-}" == "dumb" || -n "${NO_COLOR:-}" ]]; then
+  if [[ "$IS_SOURCETREE_RUNTIME" == "1" || ! -t 1 || -z "${TERM:-}" || "${TERM:-}" == "dumb" || -n "${NO_COLOR+x}" ]]; then
     PLAIN_OUTPUT=1
     export NO_COLOR="${NO_COLOR:-1}"
     export FORCE_COLOR=0
@@ -142,8 +147,8 @@ prepare_intro_output() {
 }
 # 展示内置自述，终端模式等待确认，Sourcetree 模式直接继续。
 show_script_intro_and_wait() {
-  prepare_intro_output
-  if [[ "$IS_SOURCETREE_RUNTIME" != "1" && -t 1 && -n "${TERM:-}" && "${TERM:-}" != "dumb" ]]; then
+  prepare_intro_output || exit_with_error "无法创建日志。"
+  if [[ -z "${NO_COLOR+x}" && "${PLAIN_OUTPUT:-0}" != 1 && "$IS_SOURCETREE_RUNTIME" != "1" && -t 1 && -n "${TERM:-}" && "${TERM:-}" != "dumb" ]]; then
     clear
   fi
 
@@ -175,6 +180,14 @@ initialize_script_runtime() {
   set -e
   set -o pipefail
   setopt NO_NOMATCH
+  : > "$LOG_FILE" || exit_with_error "无法创建日志：$LOG_FILE"
+  LOG_INITIALIZED=1
+  log "脚本：${SCRIPT_BASENAME}.command"
+  log "脚本路径：$SCRIPT_PATH"
+  export PATH="${PATH:-/usr/bin:/bin}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+  export LANG="${LANG:-zh_CN.UTF-8}"
+  export LC_CTYPE="${LC_CTYPE:-UTF-8}"
+  prepare_intro_output || exit_with_error "无法准备输出环境。"
 }
 # 检查让终端进入目标目录所需的系统命令。
 check_environment() {
@@ -183,12 +196,15 @@ check_environment() {
 # 去掉用户拖入路径时可能带上的外层引号和换行。
 strip_outer_quotes() {
   local value="$1"
-  value="${value%$'\r'}"
-  value="${value%$'\n'}"
-  value="${value#\"}"
-  value="${value%\"}"
-  value="${value#\'}"
-  value="${value%\'}"
+  if [[ ! -e "$value" ]]; then
+    value="${value%$'\r'}"
+    if [[ "$value" == \"*\" || "$value" == \'*\' ]]; then
+      value="${value[2,-2]}"
+    fi
+    if [[ ! -e "$value" ]]; then
+      value="${(Q)value}"
+    fi
+  fi
   print -r -- "$value"
 }
 # 展开用户输入路径里的当前用户家目录缩写。
@@ -199,7 +215,7 @@ expand_user_path() {
     return 0
   fi
   if [[ "$input_path" == "~/"* ]]; then
-    print -r -- "${HOME}/${input_path#~/}"
+    print -r -- "${HOME}/${input_path#\~/}"
     return 0
   fi
   print -r -- "$input_path"
@@ -224,8 +240,11 @@ prompt_target_path() {
 }
 # 解析 Sourcetree 参数、环境变量或终端输入得到原始目标路径。
 resolve_target_input() {
+  if (( $# > 1 )); then
+    exit_with_error "本动作只接受一个路径；含空格路径请整体加引号。"
+  fi
   if [[ $# -gt 0 ]]; then
-    TARGET_INPUT="$*"
+    TARGET_INPUT="$1"
     TARGET_INPUT_SOURCE="Sourcetree 参数 / 命令行参数"
     return 0
   fi
@@ -289,7 +308,7 @@ on run argv
   set targetPath to item 1 of argv
   tell application "Terminal"
     activate
-    do script "cd " & quoted form of targetPath
+    do script "builtin cd -- " & quoted form of targetPath
   end tell
 end run
 APPLESCRIPT
@@ -297,7 +316,7 @@ APPLESCRIPT
 # 使用 macOS 终端打开目标目录，并确保命令行停在该目录。
 open_target_directory_in_terminal() {
   info_echo "准备打开终端并进入目录：${TARGET_DIRECTORY}"
-  if open_terminal_and_cd_target_directory >> "$LOG_FILE" 2>&1; then
+  if open_terminal_and_cd_target_directory 2>&1 | strip_ansi_text | tee -a "$LOG_FILE"; then
     success_echo "已打开 Terminal.app，命令行已进入目标目录。"
     return 0
   fi

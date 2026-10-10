@@ -8,153 +8,52 @@
 
 ## 🔥 <font id=前言>前言</font>
 
-- `【MacOS】安装SourceTree自定义菜单.command` 用于先发送 `SourceTree.command` 库，再维护 [**Sourcetree**](https://www.sourcetreeapp.com/) 自定义操作菜单的 `actions.plist`。
-- 第一阶段会把当前 `SourceTree.command` 库复制到目标目录。默认目标父目录是脚本运行时的 `$HOME`，也就是当前用户家目录；可以手动拖入或输入其它目录。
-- 第二阶段会先检查脚本包内是否已有 `actions.plist`：已有时使用 [**fzf**](https://formulae.brew.sh/formula/fzf) 选择同步方向；没有时自动从 Sourcetree 默认配置路径回收到脚本包目录，文件名仍为 `actions.plist`。
+先发送 `SourceTree.command` 脚本库，再维护 [**Sourcetree**](https://www.sourcetreeapp.com/) 的 `actions.plist`。安装时按稳定脚本路径合并动作，保留当前用户的标题、快捷键、显示设置及额外动作；所有覆盖都有可恢复备份。
 
-## 一、适用场景 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## 一、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-- 需要把当前 `SourceTree.command` 库发送到当前用户家目录下，形成 `~/SourceTree.command`。
-- 需要把 `SourceTree.command` 连同 Git 元数据一起带过去，让目标目录具备独立 `.git`。
-- 已经维护好脚本包内 `actions.plist`，需要写入 Sourcetree 当前用户配置。
-- 脚本包内还没有 `actions.plist`，需要从 Sourcetree 默认配置路径自动回收一份。
-- 在 Sourcetree 里手动调整了自定义操作，需要把当前配置同步回脚本包。
-- 需要保持多个等位脚本包里的 `actions.plist` 一致。
-
-## 二、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
-
-- 双击运行：
-
-  ```text
-  【MacOS】安装SourceTree自定义菜单.command
-  ```
-
-- 终端运行：
-
-  ```shell
-  zsh './【MacOS】安装SourceTree自定义菜单.command'
-  ```
-
-- 脚本会先展示内置自述，按回车后才进入真实业务。
-- 不要使用 `sudo` 执行，避免把配置写入 `root 用户家目录`。
-
-## 三、发送库阶段 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
-
-- 脚本会先询问目标目录：
-
-  ```text
-  请输入或拖入目标目录（直接回车使用 $HOME）
-  ```
-
-- 直接回车时，脚本会把当前 `SourceTree.command` 发送到：
-
-  ```text
-  ~/SourceTree.command
-  ```
-
-- 如果输入的是普通父目录，脚本会在该目录下生成 `SourceTree.command`。
-- 如果输入的路径本身已经叫 `SourceTree.command`，脚本会把它当成最终目标路径。
-- 如果目标库已经存在，直接回车会保留现有 `SourceTree.command`，并继续进入 Sourcetree 自定义菜单安装流程。
-- 如果目标库已经存在且输入 `YES` 后回车，脚本会把旧目录改名为：
-
-  ```text
-  SourceTree.command.bak.年月日_时分秒
-  ```
-
-- 源库如果是子 Git，脚本会把真实 Git 目录复制成目标库里的独立 `.git`，避免只复制 `.git` 指针后目标目录不可用。
-
-## 四、安装菜单阶段 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
-
-- 库发送阶段结束后，脚本才会进入 Sourcetree 自定义菜单安装流程。
-- 如果脚本包内没有 `actions.plist`，脚本会跳过 [**fzf**](https://formulae.brew.sh/formula/fzf) 选择，直接从默认路径 `~/Library/Application Support/SourceTree/actions.plist` 备份到各等位脚本包目录，文件名仍为 `actions.plist`。
-- 如果脚本包内已经存在 `actions.plist`，[**fzf**](https://formulae.brew.sh/formula/fzf) 菜单会提供三个选项：
-
-  ```text
-  将脚本包 actions.plist 同步到 Sourcetree 当前用户配置
-  将 Sourcetree 当前用户配置同步回所有脚本包 actions.plist
-  取消同步
-  ```
-
-- 同步方向说明：
-
-  | 菜单项 | 源文件 | 目标文件 |
-  | --- | --- | --- |
-  | `将脚本包 actions.plist 同步到 Sourcetree 当前用户配置` | 当前脚本包内 `actions.plist` | `~/Library/Application Support/SourceTree/actions.plist` |
-  | `将 Sourcetree 当前用户配置同步回所有脚本包 actions.plist` | `~/Library/Application Support/SourceTree/actions.plist` | 各等位脚本包内 `actions.plist` |
-  | `取消同步` | 不读取覆盖源 | 不覆盖目标 |
-
-- 从脚本包同步到 Sourcetree 时，如果 Sourcetree 正在运行，脚本会尝试重启 Sourcetree 让菜单重新加载。
-- 选择 `取消同步` 或在 [**fzf**](https://formulae.brew.sh/formula/fzf) 中按 Esc 时，脚本只结束流程，不覆盖任何 `actions.plist`，也不重启 Sourcetree。
-
-## 五、执行前检查 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
-
-- 当前用户需要能写入目标父目录。
-- 当前用户需要能写入 Sourcetree 配置目录：
-
-  ```text
-  ~/Library/Application Support/SourceTree/actions.plist
-  ```
-
-- 系统必须能找到 `git`、`ditto`、`plutil` 和 `cmp`。
-- 只有脚本包内已经存在 `actions.plist`、需要进入同步方向选择时，才需要 [**fzf**](https://formulae.brew.sh/formula/fzf)；如果缺少 `fzf`，可以先安装：
-
-  ```shell
-  brew install fzf
-  ```
-
-- 当前脚本目录没有 `actions.plist` 时，脚本会从 Sourcetree 默认配置路径自动回收；默认路径也缺失时才会报错退出。
-
-## 六、流程图 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
-
-```mermaid
-flowchart TD
-  A["启动脚本"] --> B["展示内置自述并等待确认"]
-  B --> C["检查 root 和基础命令"]
-  C --> D["询问 SourceTree.command 发送目标"]
-  D --> E{"目标库是否已存在？"}
-  E -->|否| F["复制工作树和独立 .git"]
-  E -->|是| G{"直接回车保留 / YES 替换？"}
-  G -->|回车| H["保留现有目标库并继续"]
-  G -->|YES| I["备份旧目标库"]
-  I --> F
-  F --> J["发送库阶段结束"]
-  H --> J
-  J --> K["检查 plutil / cmp"]
-  K --> L{"脚本包 actions.plist 是否存在？"}
-  L -->|否| M["从 Sourcetree 默认路径回收到所有脚本包"]
-  L -->|是| N["检查 fzf 并显示同步菜单"]
-  N --> O{"选择同步方向"}
-  O -->|脚本包 -> Sourcetree| P["备份并覆盖 Sourcetree actions.plist"]
-  P --> Q["同步等位脚本包 actions.plist"]
-  Q --> R["必要时重启 Sourcetree"]
-  O -->|Sourcetree -> 所有脚本包| S["备份并覆盖所有脚本包 actions.plist"]
-  O -->|取消同步| T["不覆盖 actions.plist"]
+```shell
+/bin/zsh './【MacOS】安装SourceTree自定义菜单.command'
 ```
 
-## 七、风险说明 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+需要可交互终端。先显示内置自述并等待回车，`Ctrl+C` 取消；不使用 `sudo`。此安装器不作为无交互 Sourcetree 动作挂载。
 
-- 发送库阶段可能替换目标目录下的 `SourceTree.command`；目标已存在时，直接回车会继续后续菜单安装但不替换目标库。
-- 只有输入 `YES` 后回车，脚本才会备份并替换已有目标库。
-- 替换目标库前会备份旧目录，不会直接删除旧目录。
-- 脚本包缺少 `actions.plist` 时，只会从 Sourcetree 默认配置路径单向回收到脚本包，不会进入 [**fzf**](https://formulae.brew.sh/formula/fzf) 选择。
-- 两个 `actions.plist` 同步方向都会覆盖目标文件，但覆盖前会自动备份；选择取消同步不会覆盖任何 `actions.plist`。
-- 脚本不会创建提交，不会推送远端，也不会主动切换 Git 分支。
+## 二、发送脚本库 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-## 八、日志文件 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+1、输入或拖入目标父目录，回车默认当前用户家目录；输入同名 `SourceTree.command` 路径时作为最终目录。
 
-- 日志会同步写入系统临时目录中的：
+2、目标已存在时回车保留并继续安装菜单；输入 `YES` 后才把旧目录移到同级 `SourceTree.command.bak.年月日_时分秒.PID` 并替换。
 
-  ```text
-  $TMPDIR/【MacOS】安装SourceTree自定义菜单.log
-  ```
+3、源目标相同则跳过复制；目标位于源目录内或为符号链接时停止。路径按已有祖先目录解析，防止通过软链接造成递归复制。
 
-- 失败时优先查看日志中的 `✖` 错误信息。
+4、子 Git 的真实元数据复制为目标独立 `.git`，只在暂存副本中去掉 `core.worktree` 并校验。共享对象的 linked worktree 或使用非空 `objects/info/alternates` 的仓库会停止发送，不替换目标；先建立完整独立克隆再部署。副本会验证 HEAD 对象及只读 Git 状态。
 
-## 九、常见问题 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## 三、菜单安装和回收 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-- 如果目标库已经存在但不想替换，直接回车即可，脚本会保留现有目标库并继续进入菜单安装流程。
-- 如果运行后目标库不是 Git 仓库，确认源 `SourceTree.command` 是否本身带有可读取的 Git 元数据。
-- 如果 Sourcetree 菜单没有刷新，手动退出并重新打开 Sourcetree。
-- 如果 `fzf` 菜单无法打开，请确认终端是可交互环境，并且 `fzf` 已安装。
+脚本包没有 `actions.plist` 时从当前用户 Sourcetree 配置回收到所有等位包；两处都缺失则报错。已有配置时由 [**fzf**](https://formulae.brew.sh/formula/fzf) 选择：
+
+| 方向 | 行为 |
+| --- | --- |
+| 脚本包 → Sourcetree | 按动作目标合并，保留当前标题、快捷键、显示设置及额外动作，补齐包内新动作 |
+| Sourcetree → 脚本包 | 将当前用户配置完整回收到等位包 |
+| 取消 / Esc | 不覆盖菜单文件 |
+
+安装方向使用 macOS 原生 Foundation 解档与重新归档，合并失败、重复目标、受管脚本缺失或不可执行会停止；旧终端 Pod Install 路径转换为现有入口。同路径匹配后保留当前标题、快捷键和显示设置，仅将脚本目标、仓库参数及动作类型与脚本包对齐。默认指向家目录运行库；指定其它发送目录后指向实际目标库。
+
+## 四、同步和重载 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+
+参与同步的等位包为当前库、当前用户家目录中的运行库、JobsGenesis 中的备份库，以及本次发送的目标库；仅同步实际存在的安装器目录。
+
+写入用户配置前先正常退出正在运行的 Sourcetree，等它保存当前配置后再合并；不强制终止。退出失败则不覆盖文件。安装成功后重新打开并检查进程运行。应用原本未运行时不主动启动。每个目标覆盖前生成 `actions.plist.bak.年月日_时分秒.PID`；内容一致为成功的无操作，复制失败会停止而不会继续报成功。
+
+## 五、依赖、风险与日志 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+
+需要系统 `ditto`、健康 [**Git**](https://git-scm.com/)、`plutil`、`cmp`、`osascript`；只在选择同步方向时需要 fzf，不自动安装或升级全局工具。发送库会复制工作树，包括未提交内容；暂存复制或 Git 校验失败会清理本次临时目录并保留现有目标，独立副本会复检 HEAD 和工作树状态；菜单安装可能正常重启 Sourcetree。不会创建提交、推送或切换用户仓库分支。
+
+日志位于系统临时目录，文件名 `【MacOS】安装SourceTree自定义菜单.log`。缺少 fzf 时在终端准备工具；Sourcetree 未退出时先结束正在进行的操作，再运行安装器。
+
+## 六、验证边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+
+已通过 `zsh -n`、归档解档、菜单标题保留、重复目标拒绝和内容相同不误报失败的隔离验证。库发送与替换的失败路径在临时目录验证；未实际替换用户仓库或克隆目录。
 
 <a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>
