@@ -38,7 +38,7 @@
 
 - 需要 macOS 自带的 `git`、`curl`、`lsof`、`nohup` 和 `open`；`git --version` 必须健康，损坏 shim 会提前停止。
 
-- 优先复用现有 [**Node.js**](https://nodejs.org) 与 [**pnpm**](https://pnpm.io/)；缺少 Node.js 时只通过已经安装的 [**Homebrew**](https://brew.sh/) 补齐，不会自动安装 Homebrew。
+- 优先复用现有 [**Node.js**](https://nodejs.org) 与 [**pnpm**](https://pnpm.io/)；缺少 Node.js 时通过当前脚本内嵌的 [**Homebrew**](https://brew.sh/) 自检、必要安装和激活函数补齐，不依赖外置模块。终端中缺少管理器时，精确输入 `YES` 选择系统目录，其他输入选择用户目录；Sourcetree 非交互入口缺少管理器时停止并提示改用终端，不发起安装路径交互。
 
 - 缺少或损坏 pnpm 时，通过 `npm install --global` 安装项目 `package.json` 声明的 pnpm 版本，并重新验证可执行性。Node.js / npm 同样先健康检查，修复一次后仍失败则停止。
 
