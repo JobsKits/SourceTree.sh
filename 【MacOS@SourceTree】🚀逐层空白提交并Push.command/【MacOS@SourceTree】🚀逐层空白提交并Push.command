@@ -3,6 +3,7 @@
 # - 脚本名称：【MacOS@SourceTree】🚀逐层空白提交并Push.command
 # - 核心用途：递归提交并推送当前仓库管理的子仓，再处理当前仓库及上层父仓。
 # - 影响范围：游离态先丢弃临时内容并恢复远端版本；每层执行 git add -A、必要时提交并向已配置的 GitHub / 码云线路推送。
+# - 分支规则：只复用已有本地工作分支，同一 HEAD 映射到两端目标分支，绝不新建或推送辅助本地分支。
 # - 网络策略：查询、fetch、push 的短暂传输故障最多尝试三次；鉴权、权限及推送拒绝直接停止。
 # - 运行提示：Sourcetree 动作打开 Terminal.app；终端回车确认后执行，游离态舍弃前列出仓库和恢复目标并要求 YES。
 
@@ -53,6 +54,7 @@ typeset -ga REPOSITORY_CHAIN=()
 typeset -gA DISCOVERED_REPOSITORIES=()
 typeset -gA DETACHED_BRANCHES=()
 typeset -gA DETACHED_REMOTES=()
+typeset -gA DETACHED_REMOTE_BRANCHES=()
 typeset -gA DETACHED_TARGETS=()
 typeset -gA SYNC_REMOTES=()
 typeset -gA SYNC_REFS=()
@@ -62,8 +64,15 @@ typeset -ga RESOLVED_PUSH_TARGETS=()
 typeset -ga RESOLVED_PUSH_REFS=()
 typeset -gA PUSH_TARGET_REFS=()
 typeset -gA COMPLETED_REPOSITORIES=()
-typeset -gA GITEE_LINE_REPOSITORIES=()
 PUSHED_LINE_COUNT=0
+CHECKPOINT_FILE=""
+PREVIOUS_LOG_FILE=""
+RESUME_FROM_LEGACY_LOG=0
+RESUMED_COUNT=0
+typeset -ga FULL_REPOSITORY_CHAIN=()
+typeset -gA COMPLETED_BRANCHES=()
+typeset -gA COMPLETED_HEADS=()
+typeset -gA COMPLETED_CONFIGS=()
 
 # 在解析中文路径和输出自述前统一当前进程的字符编码。
 configure_utf8_locale() {
@@ -179,10 +188,13 @@ show_script_intro_and_wait() {
   print -r -- "扫描边界：按 Git 索引中的 gitlink 发现子仓；跳过依赖及构建目录，不扫描上层兄弟仓。" | jobs_intro_style body
   print -r -- "影响范围：每层会执行 git add -A；无改动时不制造空提交，但仍尝试推送已有提交。" | jobs_intro_style body
   print -r -- "正常分支：先获取主上游及 GitHub / 码云各推送线路，提交并整合后逐条 push、核验同一提交；冲突时停止。" | jobs_intro_style body
+  print -r -- "分支规则：每仓复用已有本地工作分支；同一 HEAD 推送到两端各自目标分支，不创建或推送辅助本地分支。" | jobs_intro_style body
   print -r -- "网络重试：查询、fetch、push 的短暂传输故障最多尝试 3 次；鉴权、权限和推送拒绝直接停止。" | jobs_intro_style body
-  print -r -- "游离态策略：fetch 后舍弃游离态独有提交、未提交改动及未跟踪文件，恢复远端最新分支；保留忽略文件。" | jobs_intro_style body
+  print -r -- "网络代理：HTTP(S) 优先使用显式 Git / 环境配置，否则临时读取系统手动代理；SSH 沿用原配置。" | jobs_intro_style body
+  print -r -- "游离态策略：只恢复明确的已有本地分支；fetch 后舍弃游离态内容并快进到远端目标，保留忽略文件。" | jobs_intro_style body
   print -r -- "舍弃确认：输入 YES 前逐项列出游离仓库完整路径、恢复分支和目标提交号。" | jobs_intro_style body
   print -r -- "停止边界：冲突、未完成操作、恢复目标不明确、fetch 或 push 失败时停止；正常分支的改动保留。" | jobs_intro_style body
+  print -r -- "中断续跑：保留已完成仓库进度；下次可选从中断处继续或从头执行，变化的已完成仓库会重新处理。" | jobs_intro_style body
   print -r -- "运行策略：Sourcetree 打开独立终端；终端回车确认后执行，实时显示日志，按 Ctrl+C 取消。" | jobs_intro_style body
   print -r -- "日志文件：${LOG_FILE}" | jobs_intro_style body
   print -r -- "============================================================================" | jobs_intro_style title
@@ -203,6 +215,10 @@ initialize_script_runtime() {
   setopt ERR_EXIT
   setopt NO_NOMATCH
   setopt PIPE_FAIL
+  PREVIOUS_LOG_FILE="${LOG_FILE}.previous"
+  if [[ -s "$LOG_FILE" ]] && strip_ansi_stream < "$LOG_FILE" | grep -F '✖ 处理停止：' >/dev/null; then
+    cp -p -- "$LOG_FILE" "$PREVIOUS_LOG_FILE" || exit 1
+  fi
   if ! : > "$LOG_FILE"; then
     print -u2 -r -- "无法创建日志文件：${LOG_FILE}；请检查临时目录是否存在且可写。"
     exit 1
@@ -251,6 +267,158 @@ run_git() {
   error_echo "Git 输出写入失败：${repository}"
   return 1
 }
+# 原始 URL 仍保留所属 remote 的专用代理；同地址配置冲突时拒绝猜测。
+resolve_remote_http_proxy_setting() {
+  local repository="$1" remote_name="$2" remote_url="$3"
+  local candidate="" candidates="" urls="" url="" proxy_value="" selected_proxy="" matched=0
+  if [[ -n "$remote_name" ]]; then
+    candidates="$remote_name"
+  else
+    candidates="$(git -C "$repository" remote)" || return 1
+  fi
+  for candidate in "${(@f)candidates}"; do
+    [[ -n "$candidate" ]] || continue
+    if [[ -z "$remote_name" ]]; then
+      urls="$(git -C "$repository" remote get-url --all "$candidate")" || return 1
+      urls+=$'\n'"$(git -C "$repository" remote get-url --push --all "$candidate")" || return 1
+      local address_matches=0
+      for url in "${(@f)urls}"; do
+        [[ "$url" == "$remote_url" ]] && address_matches=1
+      done
+      [[ "$address_matches" == 1 ]] || continue
+    fi
+    if ! proxy_value="$(git -C "$repository" config --get "remote.${candidate}.proxy" 2>/dev/null)"; then
+      continue
+    fi
+    if [[ "$proxy_value" == *$'\n'* || "$proxy_value" == *$'\r'* || "$proxy_value" == *$'\t'* ]]; then
+      error_echo "远端 Git 代理配置含无效控制字符，请修正后重试。" >&2
+      return 1
+    fi
+    if [[ "$matched" == 1 && "$selected_proxy" != "$proxy_value" ]]; then
+      error_echo "同一远端地址匹配到不一致的 remote.proxy 配置，停止执行；请统一配置后重试。" >&2
+      return 1
+    fi
+    selected_proxy="$proxy_value"
+    matched=1
+  done
+  if [[ "$matched" == 1 ]]; then
+    print -r -- $'remote\t'"$selected_proxy"
+  fi
+}
+# macOS 旁路条目支持精确主机与通配符；CIDR 不能当作主机 glob 解释。
+is_macos_http_proxy_bypassed() {
+  local remote_url="$1" proxy_settings="$2"
+  local authority="${remote_url#*://}" host="" exception="" exceptions="" exclude_simple=""
+  authority="${authority%%[/?#]*}"
+  authority="${authority##*@}"
+  if [[ "$authority" == \[*\]* ]]; then
+    host="${authority#\[}"
+    host="${host%%\]*}"
+  else
+    host="${authority%%:*}"
+  fi
+  host="${${host:l}%.}"
+  [[ -n "$host" ]] || return 1
+  exclude_simple="$(print -r -- "$proxy_settings" | awk '$1 == "ExcludeSimpleHostnames" && $2 == ":" { print $3; exit }')"
+  if [[ "$exclude_simple" == 1 && "$host" != *.* && "$host" != *:* ]]; then
+    return 0
+  fi
+  exceptions="$(print -r -- "$proxy_settings" | awk '
+    $1 == "ExceptionsList" && $2 == ":" { inside = 1; next }
+    inside && $1 == "}" { inside = 0; next }
+    inside && $2 == ":" {
+      value = $0
+      sub(/^[[:space:]]*[0-9]+[[:space:]]*:[[:space:]]*/, "", value)
+      count = split(value, entries, ",")
+      for (i = 1; i <= count; i++) {
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", entries[i])
+        if (entries[i] != "") print entries[i]
+      }
+    }
+  ')"
+  for exception in "${(@f)exceptions}"; do
+    exception="${${exception:l}%.}"
+    [[ -n "$exception" && "$exception" != */* ]] || continue
+    if [[ "$exception" == \[*\] ]]; then
+      exception="${exception#\[}"
+      exception="${exception%\]}"
+    fi
+    [[ "$host" == "$exception" ]] && return 0
+    if [[ "$exception" != *[^a-z0-9._:*?-]* && "$host" == ${~exception} ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+# 返回来源与代理值，系统代理只在 Git、环境和系统旁路均未接管时补位。
+resolve_system_http_proxy_for_git() {
+  local repository="$1" subcommand="$2"
+  local argument="" target="" remote_name="" remote_url="" environment_name=""
+  local proxy_settings="" protocol="" proxy_enabled="" proxy_host="" proxy_port="" remote_proxy_record=""
+  shift 2
+  case "$subcommand" in
+    ls-remote|fetch|push) ;;
+    *) return 0 ;;
+  esac
+  for argument in "$@"; do
+    [[ "$argument" == -* ]] && continue
+    target="$argument"
+    break
+  done
+  [[ -n "$target" ]] || return 0
+  case "${target:l}" in
+    http://*|https://*) remote_url="$target" ;;
+    *)
+      remote_name="$target"
+      if [[ "$subcommand" == push ]]; then
+        remote_url="$(git -C "$repository" remote get-url --push "$target" 2>/dev/null)" || return 0
+      else
+        remote_url="$(git -C "$repository" remote get-url "$target" 2>/dev/null)" || return 0
+      fi
+      ;;
+  esac
+  case "${remote_url:l}" in
+    https://*) protocol=HTTPS ;;
+    http://*) protocol=HTTP ;;
+    *) return 0 ;;
+  esac
+  if ! remote_proxy_record="$(resolve_remote_http_proxy_setting "$repository" "$remote_name" "$remote_url")"; then
+    return 1
+  fi
+  if [[ -n "$remote_proxy_record" ]]; then
+    print -r -- "$remote_proxy_record"
+    return 0
+  fi
+  # 空代理值同样是用户显式选择，不能被系统代理覆盖。
+  if git -C "$repository" config --get-urlmatch http.proxy "$remote_url" >/dev/null 2>&1; then
+    return 0
+  fi
+  for environment_name in http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY no_proxy NO_PROXY; do
+    if (( ${+parameters[$environment_name]} )); then
+      return 0
+    fi
+  done
+  if ! proxy_settings="$(scutil --proxy 2>/dev/null)"; then
+    error_echo "无法读取 macOS 系统代理；请检查系统网络设置，当前请求未改为直连。" >&2
+    return 1
+  fi
+  proxy_enabled="$(print -r -- "$proxy_settings" | awk -v key="${protocol}Enable" '$1 == key && $2 == ":" { print $3; exit }')"
+  [[ "$proxy_enabled" == 1 ]] || return 0
+  if is_macos_http_proxy_bypassed "$remote_url" "$proxy_settings"; then
+    print -r -- $'bypass\t'
+    return 0
+  fi
+  proxy_host="$(print -r -- "$proxy_settings" | awk -v key="${protocol}Proxy" '$1 == key && $2 == ":" { print $3; exit }')"
+  proxy_port="$(print -r -- "$proxy_settings" | awk -v key="${protocol}Port" '$1 == key && $2 == ":" { print $3; exit }')"
+  if [[ -z "$proxy_host" || "$proxy_host" == *[[:space:]/@?#]* || "$proxy_port" != <1-65535> ]]; then
+    error_echo "macOS 系统 ${protocol} 代理已启用，但主机或端口无效；当前请求未改为直连。" >&2
+    return 1
+  fi
+  if [[ "$proxy_host" == *:* && "$proxy_host" != \[*\] ]]; then
+    proxy_host="[${proxy_host}]"
+  fi
+  print -r -- $'system\t'"http://${proxy_host}:${proxy_port}"
+}
 # 只将连接中断、超时及服务端临时不可用识别为可重试故障。
 is_transient_remote_error() {
   local error_text="${1:l}"
@@ -267,19 +435,47 @@ is_transient_remote_error() {
 # 重试网络操作；查询隔离引用数据，fetch / push 保持实时输出和原始退出码。
 run_remote_git() {
   local repository="$1" operation="$2" output_file="$3"
-  local attempt=1 exit_code=0 error_file="" error_text=""
-  local -a pipeline_codes=()
+  local attempt=1 exit_code=0 error_file="" error_text="" proxy_record="" proxy_source="" proxy_value=""
+  local -a pipeline_codes=() http_options=()
   shift 3
+  if ! proxy_record="$(resolve_system_http_proxy_for_git "$repository" "$@")"; then
+    return 1
+  fi
+  if [[ -n "$proxy_record" ]]; then
+    proxy_source="${proxy_record%%$'\t'*}"
+    proxy_value="${proxy_record#*$'\t'}"
+    case "$proxy_source" in
+      remote)
+        http_options=(-c "http.proxy=${proxy_value}")
+        if [[ -n "$proxy_value" ]]; then
+          info_echo "${operation}沿用对应远端的 Git 代理配置，仅对当前命令生效。" >&2 || return 1
+        else
+          info_echo "${operation}沿用对应远端的 Git 空代理配置，保持直连。" >&2 || return 1
+        fi
+        ;;
+      system)
+        http_options=(-c "http.proxy=${proxy_value}")
+        info_echo "${operation}使用 macOS 系统 HTTP(S) 代理，仅对当前命令生效。" >&2 || return 1
+        ;;
+      bypass)
+        info_echo "${operation}命中 macOS 系统代理旁路，保持直连。" >&2 || return 1
+        ;;
+      *)
+        error_echo "无法识别 HTTP(S) 代理来源，停止执行。" >&2
+        return 1
+        ;;
+    esac
+  fi
   error_file="$(mktemp "${LOG_ROOT%/}/jobs-remote-error.XXXXXX")" || return 1
   while [[ "$attempt" -le 3 ]]; do
     if [[ -n "$output_file" ]]; then
-      if git -C "$repository" "$@" >"$output_file" 2>"$error_file"; then
+      if git -C "$repository" "${http_options[@]}" "$@" >"$output_file" 2>"$error_file"; then
         exit_code=0
       else
         exit_code=$?
       fi
     else
-      if git -C "$repository" "$@" 2>&1 | tee "$error_file" | strip_ansi_stream | tee -a "$LOG_FILE"; then
+      if git -C "$repository" "${http_options[@]}" "$@" 2>&1 | tee "$error_file" | strip_ansi_stream | tee -a "$LOG_FILE"; then
         exit_code=0
       else
         pipeline_codes=("${pipestatus[@]}")
@@ -314,6 +510,9 @@ run_remote_git() {
     attempt=$((attempt + 1))
   done
   rm -f -- "$error_file"
+  if [[ "$proxy_source" == system ]]; then
+    warn_echo "macOS 系统代理线路执行失败；请结合 Git 错误检查代理服务、规则和远端权限，脚本未切换为直连。" >&2
+  fi
   return "$exit_code"
 }
 # 查询远端引用，引用数据与诊断日志分开保存，失败时不保留残余数据。
@@ -333,7 +532,7 @@ read_remote_refs() {
 # 检查 Git 和脚本依赖的 macOS 基础命令。
 check_environment() {
   local command_name=""
-  for command_name in git perl ps tr tee mktemp sleep rm; do
+  for command_name in git perl ps tr tee mktemp sleep rm cp mv cksum awk grep scutil; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
       error_echo "未找到必需命令：${command_name}"
       return 1
@@ -456,6 +655,195 @@ build_repository_chain() {
     index=$((index + 1))
   done
 }
+# 对有效 Git 配置求摘要，检查点不保存可能含凭据的远端地址。
+repository_config_fingerprint() {
+  git -C "$1" config --null --list --includes | cksum
+}
+# 将完整队列和已完成前缀写入同目录临时文件，再原子替换检查点。
+save_push_checkpoint() {
+  local temporary="" repository=""
+  temporary="$(mktemp "${CHECKPOINT_FILE}.XXXXXX")" || return 1
+  if ! (
+    umask 077
+    printf '%s\0' jobs-layered-push-v1 "$START_REPOSITORY" "${#FULL_REPOSITORY_CHAIN[@]}" "$PROCESSED_COUNT" || exit 1
+    printf '%s\0' "${FULL_REPOSITORY_CHAIN[@]}" || exit 1
+    for repository in "${FULL_REPOSITORY_CHAIN[@]}"; do
+      [[ "${COMPLETED_REPOSITORIES[$repository]:-0}" == 1 ]] || break
+      printf '%s\0' "${COMPLETED_BRANCHES[$repository]}" "${COMPLETED_HEADS[$repository]}" "${COMPLETED_CONFIGS[$repository]}" || exit 1
+    done
+  ) > "$temporary" || ! mv -f -- "$temporary" "$CHECKPOINT_FILE"; then
+    rm -f -- "$temporary"
+    error_echo "无法保存续跑进度，停止后续仓库：${CHECKPOINT_FILE}"
+    return 1
+  fi
+}
+# 只按固定字段读取状态，禁止将检查点作为 Shell 代码执行。
+read_push_checkpoint() {
+  local field="" repository="" branch="" head="" fingerprint="" index=0 cursor=0 count=0 completed=0
+  local -a fields=()
+  while IFS= read -r -d '' field; do
+    fields+=("$field")
+  done < "$CHECKPOINT_FILE"
+  [[ -z "$field" && "${fields[1]:-}" == jobs-layered-push-v1 && "${fields[2]:-}" == "$START_REPOSITORY" ]] || return 1
+  [[ "${fields[3]:-}" == <-> && "${fields[4]:-}" == <-> && ${#fields[3]} -le 6 && ${#fields[4]} -le 6 ]] || return 1
+  count=$((10#${fields[3]}))
+  completed=$((10#${fields[4]}))
+  [[ "$count" -eq "${#FULL_REPOSITORY_CHAIN[@]}" && "$completed" -le "$count" && "${#fields[@]}" -eq $((4 + count + completed * 3)) ]] || return 1
+  for ((index=1; index<=count; index++)); do
+    [[ "${fields[$((4 + index))]}" == "${FULL_REPOSITORY_CHAIN[$index]}" ]] || return 1
+  done
+  cursor=$((4 + count))
+  for ((index=1; index<=completed; index++)); do
+    repository="${FULL_REPOSITORY_CHAIN[$index]}"
+    branch="${fields[$((cursor + 1))]}"
+    head="${fields[$((cursor + 2))]}"
+    fingerprint="${fields[$((cursor + 3))]}"
+    [[ -n "$branch" && "$head" != *[^0-9a-f]* && ( ${#head} -eq 40 || ${#head} -eq 64 ) && -n "$fingerprint" ]] || return 1
+    COMPLETED_BRANCHES[$repository]="$branch"
+    COMPLETED_HEADS[$repository]="$head"
+    COMPLETED_CONFIGS[$repository]="$fingerprint"
+    cursor=$((cursor + 3))
+  done
+  RESUMED_COUNT="$completed"
+}
+# 从旧版失败日志提取候选前缀，只有队列完全一致才提供迁移选择。
+read_legacy_push_progress() {
+  local line="" saved_start="" tip="" stopped=0 repository="" index=0
+  local -a saved_queue=() completed_paths=() completed_tips=()
+  [[ -s "$PREVIOUS_LOG_FILE" ]] || return 1
+  while IFS= read -r line; do
+    case "$line" in
+      '✔ 起始 Git 仓库：'*|'ℹ 起始 Git 仓库：'*)
+        saved_start="${line#*：}"
+        saved_queue=()
+        completed_paths=()
+        completed_tips=()
+        tip=""
+        stopped=0
+        ;;
+      '✔ 第 '*' 条线路已核验一致：'*) tip="${line##*：}" ;;
+      '✔ 全部 '*' 条线路已同步：'*)
+        completed_paths+=("${line#*条线路已同步：}")
+        completed_tips+=("$tip")
+        tip=""
+        ;;
+      '✖ 处理停止：'*) stopped=1 ;;
+    esac
+    if [[ "$line" =~ '^ℹ [0-9]+、(.*)$' ]]; then
+      saved_queue+=("${match[1]}")
+    fi
+  done < <(strip_ansi_stream < "$PREVIOUS_LOG_FILE")
+  [[ "$stopped" == 1 && "$saved_start" == "$START_REPOSITORY" && "${#saved_queue[@]}" -eq "${#FULL_REPOSITORY_CHAIN[@]}" && "${#completed_paths[@]}" -gt 0 && "${#completed_paths[@]}" -lt "${#saved_queue[@]}" ]] || return 1
+  for ((index=1; index<=${#saved_queue[@]}; index++)); do
+    [[ "${saved_queue[$index]}" == "${FULL_REPOSITORY_CHAIN[$index]}" ]] || return 1
+  done
+  for ((index=1; index<=${#completed_paths[@]}; index++)); do
+    repository="${FULL_REPOSITORY_CHAIN[$index]}"
+    tip="${completed_tips[$index]}"
+    [[ "${completed_paths[$index]}" == "$repository" && "$tip" != *[^0-9a-f]* && ( ${#tip} -eq 40 || ${#tip} -eq 64 ) ]] || return 1
+    COMPLETED_BRANCHES[$repository]="$(git -C "$repository" symbolic-ref --quiet --short HEAD)" || return 1
+    COMPLETED_HEADS[$repository]="$tip"
+    COMPLETED_CONFIGS[$repository]="$(repository_config_fingerprint "$repository")" || return 1
+  done
+  RESUMED_COUNT="${#completed_paths[@]}"
+  RESUME_FROM_LEGACY_LOG=1
+}
+# 旧日志缺少配置快照，迁移时对当前全部推送目标只读核验提交号。
+verify_legacy_completed_repository() {
+  local repository="$1" branch="" primary="" target="" remote_ref="" tip="" index=0
+  branch="$(git -C "$repository" symbolic-ref --quiet --short HEAD)" || return 1
+  primary="$(git -C "$repository" config --get "branch.${branch}.remote" || true)"
+  [[ -n "$primary" ]] || primary="$(resolve_fallback_remote "$repository")" || return 1
+  resolve_push_targets "$repository" "$primary" || return 1
+  for target in "${RESOLVED_PUSH_TARGETS[@]}"; do
+    index=$((index + 1))
+    remote_ref="${RESOLVED_PUSH_REFS[$index]}"
+    read_remote_refs "$repository" --heads "$target" "$remote_ref" || return 1
+    tip="${REMOTE_REFS_OUTPUT%%$'\t'*}"
+    [[ "$tip" == "${COMPLETED_HEADS[$repository]}" ]] || return 1
+  done
+}
+# 本地状态发生变化的已完成仓库及其后续队列重新执行，避免漏交新改动。
+validate_resume_prefix() {
+  local repository="" branch="" head="" fingerprint="" changes="" index=0
+  local saved_count="$RESUMED_COUNT"
+  RESUMED_COUNT=0
+  for ((index=1; index<=saved_count; index++)); do
+    repository="${FULL_REPOSITORY_CHAIN[$index]}"
+    branch="$(git -C "$repository" symbolic-ref --quiet --short HEAD 2>/dev/null)" || break
+    head="$(git -C "$repository" rev-parse HEAD)" || break
+    fingerprint="$(repository_config_fingerprint "$repository")" || break
+    changes="$(git -C "$repository" status --porcelain --untracked-files=all --ignore-submodules=none)" || break
+    if [[ "$branch" != "${COMPLETED_BRANCHES[$repository]}" || "$head" != "${COMPLETED_HEADS[$repository]}" || "$fingerprint" != "${COMPLETED_CONFIGS[$repository]}" || -n "$changes" ]] || ! check_repository_operation "$repository"; then
+      break
+    fi
+    if [[ "$RESUME_FROM_LEGACY_LOG" == 1 ]] && ! verify_legacy_completed_repository "$repository"; then
+      warn_echo "旧日志的远端提交无法核验，重新处理：${repository}"
+      break
+    fi
+    COMPLETED_REPOSITORIES[$repository]=1
+    RESUMED_COUNT=$((RESUMED_COUNT + 1))
+  done
+  if [[ "$RESUMED_COUNT" -lt "$saved_count" ]]; then
+    warn_echo "已完成仓库状态变化，从第 $((RESUMED_COUNT + 1)) 个仓库重新处理：${FULL_REPOSITORY_CHAIN[$((RESUMED_COUNT + 1))]}"
+  fi
+}
+# 在任何 Git 写入前提供续跑或重来选择，并保存本轮可恢复队列。
+prepare_push_checkpoint() {
+  local git_directory="" choice="" index=0 checkpoint_valid=0
+  FULL_REPOSITORY_CHAIN=("${REPOSITORY_CHAIN[@]}")
+  git_directory="$(git -C "$START_REPOSITORY" rev-parse --absolute-git-dir)" || return 1
+  CHECKPOINT_FILE="${git_directory}/jobs-layered-push.state"
+  if [[ -f "$CHECKPOINT_FILE" ]]; then
+    read_push_checkpoint && checkpoint_valid=1
+  elif read_legacy_push_progress; then
+    checkpoint_valid=1
+    info_echo "检测到旧版失败日志；选择续跑后只读核验已完成仓库，迁移为持久检查点。"
+  fi
+  if [[ -f "$CHECKPOINT_FILE" || "$checkpoint_valid" == 1 ]]; then
+    if [[ "$checkpoint_valid" == 1 ]]; then
+      warn_echo "发现未结束任务：已完成 ${RESUMED_COUNT}/${#FULL_REPOSITORY_CHAIN[@]} 个仓库。"
+      if [[ "$RESUMED_COUNT" -lt "${#FULL_REPOSITORY_CHAIN[@]}" ]]; then
+        info_echo "中断位置：${FULL_REPOSITORY_CHAIN[$((RESUMED_COUNT + 1))]}"
+      fi
+    else
+      warn_echo "检查点无法解析或仓库队列已改变，不能自动续跑。"
+    fi
+    while true; do
+      if [[ "$checkpoint_valid" == 1 ]]; then
+        print -r -- '1、从中断处继续（跳过状态未变化的已完成仓库）'
+      fi
+      print -r -- '2、从头执行全部仓库；Ctrl+C 取消并保留检查点'
+      read -r 'choice?请选择 1 或 2：' || return 1
+      case "$choice" in
+        1) [[ "$checkpoint_valid" == 1 ]] && break ;;
+        2) RESUMED_COUNT=0; break ;;
+      esac
+    done
+    if [[ "$choice" == 1 ]]; then
+      validate_resume_prefix || return 1
+    fi
+  fi
+  PROCESSED_COUNT="$RESUMED_COUNT"
+  REPOSITORY_CHAIN=()
+  for ((index=RESUMED_COUNT + 1; index<=${#FULL_REPOSITORY_CHAIN[@]}; index++)); do
+    REPOSITORY_CHAIN+=("${FULL_REPOSITORY_CHAIN[$index]}")
+  done
+  if [[ "$RESUMED_COUNT" -gt 0 ]]; then
+    success_echo "复用上次已核验的 ${RESUMED_COUNT} 个仓库，剩余 ${#REPOSITORY_CHAIN[@]} 个；已完成仓库不重复 fetch / commit / push。"
+  fi
+  save_push_checkpoint
+}
+# 仓库全部线路完成后记录最终分支、提交和配置，再推进检查点。
+record_completed_repository() {
+  local repository="$1"
+  COMPLETED_BRANCHES[$repository]="$(git -C "$repository" symbolic-ref --quiet --short HEAD)" || return 1
+  COMPLETED_HEADS[$repository]="$(git -C "$repository" rev-parse HEAD)" || return 1
+  COMPLETED_CONFIGS[$repository]="$(repository_config_fingerprint "$repository")" || return 1
+  COMPLETED_REPOSITORIES[$repository]=1
+  PROCESSED_COUNT=$((PROCESSED_COUNT + 1))
+  save_push_checkpoint
+}
 # 选择未配置 upstream 时唯一可靠的推送远端。
 resolve_fallback_remote() {
   local repository="$1"
@@ -495,11 +883,12 @@ check_repository_operation() {
     fi
   done
 }
-# 优先读取父仓声明的子模块分支，没有声明时使用远端公布的默认分支。
+# 优先读取父仓声明和已有分支的上游映射，最后使用远端公布的默认分支。
 resolve_detached_branch() {
   local repository="$1" remote="$2"
   local parent="$(find_parent_repository "$repository" || true)"
-  local record="" key="" value="" branch="" advertised=""
+  local record="" key="" value="" branch="" advertised="" local_branch="" local_remote="" local_ref=""
+  local -A upstream_refs=()
   if [[ -n "$parent" && -f "$parent/.gitmodules" ]]; then
     while IFS= read -r -d '' record; do
       key="${record%%$'\n'*}"
@@ -514,6 +903,22 @@ resolve_detached_branch() {
     done < <(git -C "$parent" config -z -f .gitmodules --get-regexp '^submodule\..*\.path$' || true)
   fi
   if [[ -z "$branch" ]]; then
+    while IFS= read -r local_branch; do
+      [[ -n "$local_branch" ]] || continue
+      local_remote="$(git -C "$repository" config --get "branch.${local_branch}.remote" || true)"
+      [[ "$local_remote" == "$remote" ]] || continue
+      local_ref="$(git -C "$repository" config --get "branch.${local_branch}.merge" || true)"
+      [[ "$local_ref" == refs/heads/* ]] || continue
+      upstream_refs[$local_ref]=1
+    done < <(git -C "$repository" for-each-ref --format='%(refname:strip=2)' refs/heads/)
+    if [[ "${#upstream_refs}" -gt 1 ]]; then
+      return 1
+    elif [[ "${#upstream_refs}" -eq 1 ]]; then
+      local_ref="${(k)upstream_refs}"
+      branch="${local_ref#refs/heads/}"
+    fi
+  fi
+  if [[ -z "$branch" ]]; then
     read_remote_refs "$repository" --symref "$remote" HEAD || return 1
     advertised="$REMOTE_REFS_OUTPUT"
     for record in "${(@f)advertised}"; do
@@ -525,6 +930,43 @@ resolve_detached_branch() {
   [[ -n "$branch" ]] || return 1
   git check-ref-format "refs/heads/$branch" >/dev/null || return 1
   print -r -- "$branch"
+}
+# 按已配置上游或同名分支定位现有本地分支，禁止通过远端自动新建。
+resolve_detached_local_branch() {
+  local repository="$1" remote="$2" remote_branch="$3" branch="" local_remote="" local_ref=""
+  local -a matches=()
+  while IFS= read -r branch; do
+    [[ -n "$branch" ]] || continue
+    local_remote="$(git -C "$repository" config --get "branch.${branch}.remote" || true)"
+    local_ref="$(git -C "$repository" config --get "branch.${branch}.merge" || true)"
+    if [[ "$local_remote" == "$remote" && "$local_ref" == "refs/heads/${remote_branch}" ]]; then
+      matches+=("$branch")
+    fi
+  done < <(git -C "$repository" for-each-ref --format='%(refname:strip=2)' refs/heads/)
+  if [[ "${#matches[@]}" -eq 1 ]]; then
+    print -r -- "${matches[1]}"
+    return 0
+  fi
+  [[ "${#matches[@]}" -eq 0 ]] || return 1
+  git -C "$repository" show-ref --verify --quiet "refs/heads/${remote_branch}" || return 1
+  print -r -- "$remote_branch"
+}
+# 复查恢复分支仍存在、没有独有历史且未被其它工作树占用。
+check_detached_local_branch() {
+  local repository="$1" branch="$2" target="$3" local_tip="" worktrees=""
+  local_tip="$(git -C "$repository" rev-parse --verify "refs/heads/${branch}^{commit}" 2>/dev/null)" || {
+    error_echo "恢复所需的本地分支不存在，禁止自动新建：${repository} [${branch}]"
+    return 1
+  }
+  if ! git -C "$repository" merge-base --is-ancestor "$local_tip" "$target"; then
+    error_echo "目标本地分支含远端没有的提交，不覆盖正常分支历史：${repository} [${branch}]"
+    return 1
+  fi
+  worktrees="$(git -C "$repository" worktree list --porcelain)" || return 1
+  if [[ $'\n'"$worktrees"$'\n' == *$'\n'"branch refs/heads/$branch"$'\n'* ]]; then
+    error_echo "恢复分支被其它工作树占用：${repository} [${branch}]"
+    return 1
+  fi
 }
 # 拒绝会覆盖忽略文件或改变子仓路径的恢复，确保已发现的子仓内容不被清理。
 check_detached_restore_paths() {
@@ -550,9 +992,10 @@ check_detached_restore_paths() {
 }
 # 全量准备恢复计划并获取远端最新提交，全部成功后才允许清理游离工作区。
 prepare_detached_repositories() {
-  local repository="" remote="" branch="" target="" local_tip="" worktrees=""
+  local repository="" remote="" branch="" remote_branch="" target=""
   DETACHED_BRANCHES=()
   DETACHED_REMOTES=()
+  DETACHED_REMOTE_BRANCHES=()
   DETACHED_TARGETS=()
   export GIT_TERMINAL_PROMPT=0
   for repository in "${REPOSITORY_CHAIN[@]}"; do
@@ -562,23 +1005,19 @@ prepare_detached_repositories() {
       continue
     fi
     remote="$(resolve_fallback_remote "$repository")" || { error_echo "无法确定恢复远端：${repository}"; return 1; }
-    branch="$(resolve_detached_branch "$repository" "$remote")" || { error_echo "无法确定恢复分支：${repository}"; return 1; }
-    info_echo "准备游离态恢复：${repository} -> ${remote}/${branch}"
-    run_remote_git "$repository" "游离态远端获取" "" fetch --no-recurse-submodules --no-tags "$remote" "+refs/heads/${branch}:refs/remotes/${remote}/${branch}" || return 1
-    target="$(git -C "$repository" rev-parse --verify "refs/remotes/${remote}/${branch}^{commit}")" || return 1
-    local_tip="$(git -C "$repository" rev-parse --verify "refs/heads/${branch}" 2>/dev/null || true)"
-    if [[ -n "$local_tip" ]] && ! git -C "$repository" merge-base --is-ancestor "$local_tip" "$target"; then
-      error_echo "目标本地分支含远端没有的提交，不覆盖正常分支历史：${repository} [${branch}]"
+    remote_branch="$(resolve_detached_branch "$repository" "$remote")" || { error_echo "无法确定恢复目标分支：${repository}"; return 1; }
+    branch="$(resolve_detached_local_branch "$repository" "$remote" "$remote_branch")" || {
+      error_echo "无法唯一确定已有本地恢复分支，禁止自动新建：${repository} [${remote}/${remote_branch}]"
       return 1
-    fi
-    worktrees="$(git -C "$repository" worktree list --porcelain)" || return 1
-    if [[ $'\n'"$worktrees"$'\n' == *$'\n'"branch refs/heads/$branch"$'\n'* ]]; then
-      error_echo "恢复分支被其它工作树占用：${repository} [${branch}]"
-      return 1
-    fi
+    }
+    info_echo "准备游离态恢复：${repository} [本地 ${branch} -> ${remote}/${remote_branch}]"
+    run_remote_git "$repository" "游离态远端获取" "" fetch --no-recurse-submodules --no-tags "$remote" "+refs/heads/${remote_branch}:refs/remotes/${remote}/${remote_branch}" || return 1
+    target="$(git -C "$repository" rev-parse --verify "refs/remotes/${remote}/${remote_branch}^{commit}")" || return 1
+    check_detached_local_branch "$repository" "$branch" "$target" || return 1
     check_detached_restore_paths "$repository" "$target" || return 1
     DETACHED_BRANCHES[$repository]="$branch"
     DETACHED_REMOTES[$repository]="$remote"
+    DETACHED_REMOTE_BRANCHES[$repository]="$remote_branch"
     DETACHED_TARGETS[$repository]="$target"
   done
 }
@@ -591,12 +1030,12 @@ show_detached_restore_plan() {
     [[ -n "$target" ]] || continue
     index=$((index + 1))
     warn_echo "${index}、仓库：${repository}"
-    info_echo "   恢复目标：${DETACHED_REMOTES[$repository]}/${DETACHED_BRANCHES[$repository]} [${target}]"
+    info_echo "   恢复目标：本地 ${DETACHED_BRANCHES[$repository]} -> ${DETACHED_REMOTES[$repository]}/${DETACHED_REMOTE_BRANCHES[$repository]} [${target}]"
   done
 }
 # 清理已完成预检的游离工作区，禁止递归重置子模块和删除忽略文件。
 restore_detached_repositories() {
-  local repository="" branch="" remote="" target="" confirmation=""
+  local repository="" branch="" remote="" remote_branch="" target="" confirmation=""
   [[ ${#DETACHED_TARGETS} -gt 0 ]] || return 0
   show_detached_restore_plan
   if [[ "$IS_SOURCETREE_RUNTIME" != 1 ]]; then
@@ -608,16 +1047,20 @@ restore_detached_repositories() {
     [[ -n "$target" ]] || continue
     branch="${DETACHED_BRANCHES[$repository]}"
     remote="${DETACHED_REMOTES[$repository]}"
+    remote_branch="${DETACHED_REMOTE_BRANCHES[$repository]}"
     check_repository_operation "$repository" || return 1
     if git -C "$repository" symbolic-ref --quiet HEAD >/dev/null; then
       error_echo "仓库分支在预检后发生变化，停止清理：${repository}"
       return 1
     fi
-    warn_echo "舍弃游离态内容并恢复：${repository} -> ${remote}/${branch} [${target}]"
+    check_detached_local_branch "$repository" "$branch" "$target" || return 1
+    check_detached_restore_paths "$repository" "$target" || return 1
+    warn_echo "舍弃游离态内容并恢复：${repository} [本地 ${branch} -> ${remote}/${remote_branch}] [${target}]"
     run_git "$repository" -c submodule.recurse=false reset --hard --no-recurse-submodules HEAD || return 1
     run_git "$repository" clean -fd || return 1
-    run_git "$repository" -c submodule.recurse=false switch --no-recurse-submodules --no-overwrite-ignore -C "$branch" "$target" || return 1
-    run_git "$repository" branch --set-upstream-to="${remote}/${branch}" "$branch" || return 1
+    run_git "$repository" -c submodule.recurse=false switch --no-guess --no-recurse-submodules --no-overwrite-ignore "$branch" || return 1
+    run_git "$repository" -c submodule.recurse=false merge --ff-only --no-edit "$target" || return 1
+    run_git "$repository" branch --set-upstream-to="${remote}/${remote_branch}" "$branch" || return 1
     success_echo "已消除游离 HEAD：${repository}"
   done
 }
@@ -716,7 +1159,6 @@ resolve_push_targets() {
   local -A seen=()
   RESOLVED_PUSH_TARGETS=()
   RESOLVED_PUSH_REFS=()
-  GITEE_LINE_REPOSITORIES[$repository]=0
   branch="$(git -C "$repository" symbolic-ref --quiet --short HEAD)" || return 1
   primary_ref="$(git -C "$repository" config --get "branch.${branch}.merge" || true)"
   [[ -n "$primary_ref" ]] || primary_ref="refs/heads/${branch}"
@@ -741,7 +1183,6 @@ resolve_push_targets() {
         case "${remote:l}:${target:l}" in
           gitee:*|*://gitee.com/*|*@gitee.com:*|*://*@gitee.com/*)
             target_ref="refs/heads/gitee"
-            GITEE_LINE_REPOSITORIES[$repository]=1
             git -C "$repository" remote get-url gitee >/dev/null 2>&1 || {
               error_echo "当前范围的码云远端须命名为 gitee；请核对远端配置后重试：${repository}"
               return 1
@@ -838,35 +1279,6 @@ reconcile_completed_child_gitlinks() {
     COMMITTED_COUNT=$((COMMITTED_COUNT + 1))
   fi
 }
-# 同名本地 gitee 分支只允许快进到最终 HEAD，不覆盖独有历史或其它工作树。
-check_gitee_tracking_branch() {
-  local repository="$1" local_tip="" worktrees="" branch=""
-  [[ "${GITEE_LINE_REPOSITORIES[$repository]:-0}" == 1 ]] || return 0
-  local_tip="$(git -C "$repository" rev-parse --verify refs/heads/gitee 2>/dev/null || true)"
-  if [[ -n "$local_tip" ]] && ! git -C "$repository" merge-base --is-ancestor "$local_tip" HEAD; then
-    error_echo "本地 gitee 分支存在未整合历史，保留原状并停止推送：${repository}"
-    return 1
-  fi
-  branch="$(git -C "$repository" symbolic-ref --quiet --short HEAD)" || return 1
-  [[ "$branch" == gitee ]] && return 0
-  worktrees="$(git -C "$repository" worktree list --porcelain)" || return 1
-  if [[ $'\n'"$worktrees"$'\n' == *$'\n''branch refs/heads/gitee'$'\n'* ]]; then
-    error_echo "本地 gitee 分支被工作树占用，保持原状：${repository}"
-    return 1
-  fi
-}
-# 全线路成功后更新 gitee 跟踪分支，操作前已经核验不会丢弃独有提交。
-update_gitee_tracking_branch() {
-  local repository="$1" final_tip="$2" branch=""
-  [[ "${GITEE_LINE_REPOSITORIES[$repository]:-0}" == 1 ]] || return 0
-  branch="$(git -C "$repository" symbolic-ref --quiet --short HEAD)" || return 1
-  run_git "$repository" update-ref refs/remotes/gitee/gitee "$final_tip" || return 1
-  if [[ "$branch" != gitee ]]; then
-    run_git "$repository" branch --force gitee "$final_tip" || return 1
-  fi
-  run_git "$repository" config branch.gitee.remote gitee || return 1
-  run_git "$repository" config branch.gitee.merge refs/heads/gitee || return 1
-}
 # 逐条推送并核验实际 push 地址，全部成功后才标记本仓完成。
 push_repository() {
   local repository="$1"
@@ -876,7 +1288,6 @@ push_repository() {
   local -a targets=("${(@f)PUSH_TARGETS[$repository]}")
   local -a target_refs=("${(@f)PUSH_TARGET_REFS[$repository]}")
   local_tip="$(git -C "$repository" rev-parse HEAD)" || return 1
-  check_gitee_tracking_branch "$repository" || return 1
   for target in "${targets[@]}"; do
     index=$((index + 1))
     remote_ref="${target_refs[$index]}"
@@ -898,34 +1309,39 @@ push_repository() {
   # 地址推送不改变 upstream，首次推送后仍只关联原来的主远端。
   run_git "$repository" config "branch.${branch}.remote" "$remote" || return 1
   run_git "$repository" config "branch.${branch}.merge" "${SYNC_REFS[$repository]}" || return 1
-  update_gitee_tracking_branch "$repository" "$local_tip" || return 1
   PUSHED_COUNT=$((PUSHED_COUNT + 1))
   success_echo "全部 ${#targets[@]} 条线路已同步：${repository}"
 }
 # 严格按内到外顺序提交并推送整条仓库链。
 process_repository_chain() {
   local repository=""
-  local level=1
+  local level=$((RESUMED_COUNT + 1))
   for repository in "${REPOSITORY_CHAIN[@]}"; do
-    highlight_echo "==================== 处理第 ${level}/${#REPOSITORY_CHAIN[@]} 个仓库 ===================="
+    highlight_echo "==================== 处理第 ${level}/${#FULL_REPOSITORY_CHAIN[@]} 个仓库 ===================="
     info_echo "仓库：${repository}"
     if ! synchronize_repository_upstream "$repository" || ! commit_repository_changes "$repository" || ! integrate_repository_upstream "$repository" || ! reconcile_completed_child_gitlinks "$repository" || ! push_repository "$repository"; then
-      error_echo "处理停止：总数 ${#REPOSITORY_CHAIN[@]}，已完成 ${PROCESSED_COUNT}，失败 1；剩余仓库未执行。"
+      error_echo "处理停止：总数 ${#FULL_REPOSITORY_CHAIN[@]}，已完成 ${PROCESSED_COUNT}，失败 1；剩余仓库未执行。"
+      info_echo "进度已保留；处理问题后重新运行，可选择从当前仓库继续。"
       info_echo "日志文件：${LOG_FILE}"
       return 1
     fi
-    COMPLETED_REPOSITORIES[$repository]=1
-    PROCESSED_COUNT=$((PROCESSED_COUNT + 1))
+    record_completed_repository "$repository" || return 1
     level=$((level + 1))
   done
 }
-# 输出整条仓库链的成功统计和日志位置。
+# 输出整条仓库链的成功统计和日志位置，并结束成功流程。
 show_completion_summary() {
   highlight_echo "============================== 处理完成 =============================="
   success_echo "已由内到外处理 ${PROCESSED_COUNT} 个 Git 仓库。"
-  success_echo "新建空白说明提交：${COMMITTED_COUNT} 个；完整推送：${PUSHED_COUNT} 个仓库、${PUSHED_LINE_COUNT} 条线路；失败 0。"
+  success_echo "本轮新建空白说明提交：${COMMITTED_COUNT} 个；完整推送：${PUSHED_COUNT} 个仓库、${PUSHED_LINE_COUNT} 条线路；复用已完成进度 ${RESUMED_COUNT} 个；失败 0。"
   info_echo "日志文件：${LOG_FILE}"
   highlight_echo "======================================================================="
+  if ! rm -f -- "$CHECKPOINT_FILE" "$PREVIOUS_LOG_FILE"; then
+    error_echo "全部线路已完成，但无法清除进度或旧日志快照；请检查 Git 管理目录及临时目录权限。"
+    return 1
+  fi
+  # 运行中原脚本可能被同步覆盖，直接退出以免 zsh 按旧偏移继续解析文件尾。
+  exit 0
 }
 # 编排自述、环境检查、父仓发现、预检与逐层推送。
 main() {
@@ -935,6 +1351,7 @@ main() {
   resolve_start_repository "$@" # 从 Sourcetree 参数或当前目录解析起始 Git 仓库。
   build_repository_chain # 递归发现当前子树，按子仓优先排序并追加上层父仓。
   check_snapshot_repository_boundary # 队列包含 OC 新工程独立快照例外时，在任何 Git 写入前停止。
+  prepare_push_checkpoint # 选择续跑或重来，复查已完成前缀并持久保存本轮队列。
   prepare_detached_repositories # 先验证全部仓库并 fetch 游离态目标，失败时不清理文件。
   restore_detached_repositories # 舍弃确认范围内的游离态内容，恢复到已获取的远端版本。
   preflight_repository_chain # 在写入前统一检查所有层的安全条件与推送目标。
