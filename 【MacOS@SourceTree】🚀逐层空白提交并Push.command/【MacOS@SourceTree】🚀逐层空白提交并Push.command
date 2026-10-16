@@ -4,6 +4,7 @@
 # - 核心用途：递归提交并推送当前仓库管理的子仓，再处理当前仓库及上层父仓。
 # - 影响范围：游离态先丢弃临时内容并恢复远端版本；每层执行 git add -A、必要时提交并向已配置的 GitHub / 码云线路推送。
 # - 分支规则：只复用已有本地工作分支，同一 HEAD 映射到两端目标分支，绝不新建或推送辅助本地分支。
+# - 码云映射：固定 gitee 目标可由各仓本地 remote.gitee.jobsPushBranch 显式覆盖，非法分支名停止。
 # - 网络策略：查询、fetch、push 的短暂传输故障最多尝试三次；鉴权、权限及推送拒绝直接停止。
 # - 运行提示：Sourcetree 动作打开 Terminal.app；终端回车确认后执行，游离态舍弃前列出仓库和恢复目标并要求 YES。
 
@@ -189,6 +190,7 @@ show_script_intro_and_wait() {
   print -r -- "影响范围：每层会执行 git add -A；无改动时不制造空提交，但仍尝试推送已有提交。" | jobs_intro_style body
   print -r -- "正常分支：先获取主上游及 GitHub / 码云各推送线路，提交并整合后逐条 push、核验同一提交；冲突时停止。" | jobs_intro_style body
   print -r -- "分支规则：每仓复用已有本地工作分支；同一 HEAD 推送到两端各自目标分支，不创建或推送辅助本地分支。" | jobs_intro_style body
+  print -r -- "码云映射：各仓本地 remote.gitee.jobsPushBranch 可覆盖固定 gitee 目标；未配置或空值沿用原规则。" | jobs_intro_style body
   print -r -- "网络重试：查询、fetch、push 的短暂传输故障最多尝试 3 次；鉴权、权限和推送拒绝直接停止。" | jobs_intro_style body
   print -r -- "网络代理：HTTP(S) 优先使用显式 Git / 环境配置，否则临时读取系统手动代理；SSH 沿用原配置。" | jobs_intro_style body
   print -r -- "游离态策略：只恢复明确的已有本地分支；fetch 后舍弃游离态内容并快进到远端目标，保留忽略文件。" | jobs_intro_style body
@@ -1154,7 +1156,7 @@ check_snapshot_repository_boundary() {
 # 收集主上游及 GitHub / 码云线路，地址和目标分支同时记录以避免错误映射。
 resolve_push_targets() {
   local repository="$1" primary="$2"
-  local remote="" target="" urls="" branch="" primary_ref="" target_ref=""
+  local remote="" target="" urls="" branch="" primary_ref="" target_ref="" gitee_branch=""
   local -a remotes=("$primary")
   local -A seen=()
   RESOLVED_PUSH_TARGETS=()
@@ -1187,6 +1189,20 @@ resolve_push_targets() {
               error_echo "当前范围的码云远端须命名为 gitee；请核对远端配置后重试：${repository}"
               return 1
             }
+            if gitee_branch="$(git -C "$repository" config --local --null --get remote.gitee.jobsPushBranch 2>/dev/null)"; then
+              gitee_branch="${gitee_branch%$'\0'}"
+              if [[ -n "$gitee_branch" ]]; then
+                if ! git -C "$repository" check-ref-format --branch "$gitee_branch" >/dev/null 2>&1 ||
+                   ! git check-ref-format "refs/heads/${gitee_branch}" >/dev/null 2>&1; then
+                  error_echo "仓库本地 remote.gitee.jobsPushBranch 不是合法分支名：${repository} [${gitee_branch}]"
+                  return 1
+                fi
+                target_ref="refs/heads/${gitee_branch}"
+              fi
+            elif [[ "$?" -ne 1 ]]; then
+              error_echo "无法读取仓库本地 remote.gitee.jobsPushBranch：${repository}"
+              return 1
+            fi
             ;;
         esac
       fi

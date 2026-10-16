@@ -175,7 +175,15 @@ flowchart TD
 
 每个仓库按自己的 remote 配置识别线路，支持 [**GitHub**](https://github.com) 与 [**码云 Gitee**](https://gitee.com)：主上游的全部 push URL 始终纳入；其它远端的地址指向 `github.com` / `gitee.com`，或远端名为 `github` / `gitee` 时也纳入。相同地址去重，无关远端不会自动推送。也支持一个 remote 配置多个 push URL。
 
-通常使用主上游配置的目标分支名（未配置时使用当前本地分支名）。`JobsGenesis`、`JobsBaseConfig` 及其下属仓库采用固定码云规则：码云远端别名为 `gitee`，远端目标分支为 `gitee`；GitHub 仍使用主上游目标分支。例如当前 `main` 会分别同步到 GitHub 的 `main` 与码云的 `gitee`，两端最后提交号一致。其它范围沿用主上游分支名，不猜测码云默认分支。
+通常使用主上游配置的目标分支名（未配置时使用当前本地分支名）。`JobsGenesis`、`JobsBaseConfig` 及其下属仓库默认采用固定码云规则：码云远端别名为 `gitee`，远端目标分支为 `gitee`；GitHub 仍使用主上游目标分支。例如当前 `main` 会分别同步到 GitHub 的 `main` 与码云的 `gitee`，两端最后提交号一致。其它范围沿用主上游分支名，不猜测码云默认分支。
+
+需要把上述范围内某个仓库的码云目标改为 `main` 时，在该仓库目录执行：
+
+```shell
+git config --local remote.gitee.jobsPushBranch main
+```
+
+仅该仓库本地配置中的非空分支名覆盖固定 `gitee` 目标；全局同名配置不生效，不传给父仓或子仓，也不改变 GitHub 映射。填写分支名本身，例如 `main` 或 `release/stable`；非法值会在推送目标预检时明确报错并停止。未配置或空值沿用原规则，恢复默认可执行 `git config --local --unset-all remote.gitee.jobsPushBranch`。该配置不修改远端默认分支，也不删除原有远端分支；OC 新工程独立快照门禁保持有效。
 
 每条线路都显式使用 `HEAD:refs/heads/<远端目标分支>`，不依赖 `push.default`、`--all` 或 `--mirror`。本地始终沿用当前工作分支，不额外建立或维护本地 `gitee` 跟踪分支；已有额外分支保留原状，不自动删除，也不纳入推送。未配置 `gitee` 别名时先修正配置后重试；脚本不创建远端仓库。只有一条已配置线路的子仓继续单线运行。可在目标仓库配置：
 
@@ -200,6 +208,8 @@ Sourcetree 动作现在只负责打开 Terminal.app；实际 Git 流程在独立
 ### 8.11、验证范围 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 脚本双位置均通过 `zsh -n`，对应脚本和 README 逐字节一致。隔离临时仓库验证单本地分支同步 GitHub/main 与 Gitee/gitee、已有辅助分支保持原状且不上传、游离态复用已有分支、本地与远端异名映射、本地分支缺失或映射不明确时停止、确认后恢复分支缺失或出现独有提交时在清理前停止。验证对比运行前后全部本地分支名，并核对两端目标提交号；OC 快照例外门禁继续保留。既有父子仓 gitlink 收口、已解决 merge 续跑与网络重试行为未改动。验证未对用户仓库执行提交、推送、重置或清理；菜单仍指向原运行路径。
+
+仓库本地码云分支覆盖的隔离验证包括双端 `main` 同提交且不重建已删除的 `gitee`、合法多层分支名、空值回退、忽略全局同名配置、作用范围保持、非法分支名及配置读取失败停止；本地分支集合与原有 upstream 保持，OC 独立快照门禁仍阻断。
 
 退出码验证覆盖源码在运行中被覆盖、正常完成、Git hook 拒绝和无效路径。父仓及两个子模块的隔离验证覆盖中断后续跑、从头执行、已完成仓库的文件 / 分支 / HEAD / 配置变化、损坏状态及旧日志迁移，并核对被跳过仓库没有重复 fetch / push、最终父仓 gitlink 和各远端提交一致。代理逻辑通过隔离优先级验证，并对故障仓库进行只读 `ls-remote` 验证；未执行该业务仓库的提交或推送。
 
