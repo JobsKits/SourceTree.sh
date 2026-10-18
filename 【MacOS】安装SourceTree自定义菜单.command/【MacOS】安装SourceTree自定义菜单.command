@@ -335,12 +335,39 @@ confirm_replace_existing_package() {
 # 复制源库工作树到临时目录。
 copy_source_worktree_to_temp() {
   local temp_package="$1"
+  note_echo "发送 ${SOURCE_PACKAGE_NAME} 工作树。"
+  gray_echo "本地来源：${SOURCE_PACKAGE_ROOT}"
+  gray_echo "暂存目标：${temp_package}"
   ditto "$SOURCE_PACKAGE_ROOT" "$temp_package" || exit_with_error "复制工作树失败：${SOURCE_PACKAGE_ROOT} -> ${temp_package}"
+}
+# 直接修改暂存配置文件，避免 Git 先进入复制后已失效的旧工作树。
+clear_copied_git_worktree_config() {
+  local temp_package="$1" config_file="" unset_result=0
+  for config_file in "${temp_package}/.git/config" "${temp_package}/.git/config.worktree"; do
+    [[ -e "$config_file" || -L "$config_file" ]] || continue
+    [[ -f "$config_file" && ! -L "$config_file" ]] || exit_with_error "暂存 Git 配置不是独立普通文件，停止修改：${config_file}"
+    unset_result=0
+    git config --file "$config_file" --unset-all core.worktree >>"$LOG_FILE" 2>&1 || unset_result=$?
+    if [[ "$unset_result" != 0 && "$unset_result" != 5 ]]; then
+      exit_with_error "清理暂存 Git 工作树配置失败（退出码 ${unset_result}）：${config_file}；详见日志 ${LOG_FILE}"
+    fi
+  done
+}
+# 校验失败时同时记录 Git 原始诊断和业务错误，正常输出不刷屏。
+validate_deploy_git_command() {
+  local temp_package="$1" failure_message="$2" diagnostic="" git_result=0
+  shift 2
+  diagnostic="$(GIT_OPTIONAL_LOCKS=0 git -C "$temp_package" "$@" 2>&1)" || git_result=$?
+  if [[ "$git_result" != 0 ]]; then
+    [[ -z "$diagnostic" ]] || error_echo "$diagnostic"
+    exit_with_error "${failure_message}（Git 退出码 ${git_result}）：${temp_package}"
+  fi
 }
 # 把子 Git 的真实 Git 目录复制成目标库里的独立 .git。
 copy_git_metadata_to_temp() {
   local temp_package="$1"
   local source_git_dir=""
+  local copied_worktree=""
 
   source_git_dir="$(git -C "$SOURCE_PACKAGE_ROOT" rev-parse --absolute-git-dir 2>/dev/null || true)"
   if [[ -z "$source_git_dir" || ! -d "$source_git_dir" ]]; then
@@ -351,16 +378,22 @@ copy_git_metadata_to_temp() {
   local source_common_dir="$(git -C "$SOURCE_PACKAGE_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
   [[ "$source_common_dir" == "$source_git_dir" ]] || exit_with_error "源库是共享 Git 对象的 linked worktree，不能只复制私有 gitdir；请独立克隆后再部署。"
   [[ ! -s "$source_common_dir/objects/info/alternates" && -z "${GIT_ALTERNATE_OBJECT_DIRECTORIES:-}" ]] || exit_with_error "源库借用了外部 Git 对象，不能作为独立副本发送；请先建立完整独立克隆。"
+  gray_echo "Git 元数据来源：${source_git_dir}"
+  gray_echo "Git 元数据目标：${temp_package}/.git"
   rm -rf "${temp_package}/.git"
   ditto "$source_git_dir" "${temp_package}/.git" || exit_with_error "复制 Git 元数据失败：${source_git_dir}"
-  git -C "$temp_package" config --local --unset core.worktree 2>/dev/null || true
-  git -C "$temp_package" rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit_with_error "目标临时库 Git 元数据校验失败：${temp_package}"
-  if git -C "$temp_package" rev-parse --verify HEAD >/dev/null 2>&1; then
-    git -C "$temp_package" cat-file -e 'HEAD^{commit}' || exit_with_error "目标临时库缺少 HEAD 对象，停止替换。"
-  else
-    git -C "$temp_package" symbolic-ref -q HEAD >/dev/null || exit_with_error "目标临时库 HEAD 无效，停止替换。"
+  clear_copied_git_worktree_config "$temp_package"
+  if ! copied_worktree="$(git -C "$temp_package" rev-parse --show-toplevel 2>&1)"; then
+    error_echo "$copied_worktree"
+    exit_with_error "目标临时库 Git 元数据校验失败：${temp_package}"
   fi
-  GIT_OPTIONAL_LOCKS=0 git -C "$temp_package" status --porcelain >/dev/null || exit_with_error "目标临时库 Git 状态校验失败，停止替换。"
+  [[ "$copied_worktree" == "${temp_package:A}" ]] || exit_with_error "目标临时库仍绑定其它工作树：${copied_worktree}；预期 ${temp_package:A}"
+  if git -C "$temp_package" rev-parse --verify HEAD >/dev/null 2>&1; then
+    validate_deploy_git_command "$temp_package" "目标临时库缺少 HEAD 对象，停止替换" cat-file -e 'HEAD^{commit}'
+  else
+    validate_deploy_git_command "$temp_package" "目标临时库 HEAD 无效，停止替换" symbolic-ref -q HEAD
+  fi
+  validate_deploy_git_command "$temp_package" "目标临时库 Git 状态校验失败，停止替换" status --porcelain
   success_echo "已把 Git 元数据复制为目标库独立 .git。"
 }
 # 用临时目录替换最终目标库，并为旧目标生成备份。
