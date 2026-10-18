@@ -2,11 +2,24 @@
 
 ![Jobs出品，必属精品](https://picsum.photos/1500/400)
 
-[toc]
+<!-- jobs-toc:start -->
+<!-- jobs-toc:source {"v":2,"token":"[toc]"} -->
+<details>
+<summary>📚 目录（点击展开 / 收起）</summary>
+
+- [🔥 前言](#jobs-toc-heading-1)
+- [一、运行方式](#usage)
+- [二、执行流程与来源](#flow)
+- [三、清理边界与失败处理](#boundaries)
+- [四、日志和常见问题](#logs)
+- [五、验证范围](#validation)
+
+</details>
+<!-- jobs-toc:end -->
 
 ---
 
-## 🔥 <font id=前言>前言</font>
+## <span id="jobs-toc-heading-1" data-jobs-toc="v2">🔥 <font id=前言>前言</font></span><!-- jobs-toc:heading-end -->
 
 适用于本地收藏、只能拉取、无推送权限的 [**Git**](https://git-scm.com/) 仓库。从 [**Sourcetree**](https://www.sourcetreeapp.com/) 菜单打开独立终端，将当前分支同步到已配置的远程上游。脚本不提交、不推送、不合并本地独有历史，不创建分支。
 

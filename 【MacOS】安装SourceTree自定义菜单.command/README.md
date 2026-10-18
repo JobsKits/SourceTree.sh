@@ -2,11 +2,25 @@
 
 ![Jobs出品，必属精品](https://picsum.photos/1500/400)
 
-[toc]
+<!-- jobs-toc:start -->
+<!-- jobs-toc:source {"v":2,"token":"[toc]"} -->
+<details>
+<summary>📚 目录（点击展开 / 收起）</summary>
+
+- [🔥 前言](#jobs-toc-heading-1)
+- [一、运行方式](#jobs-toc-heading-2)
+- [二、发送脚本库](#jobs-toc-heading-3)
+- [三、菜单安装和回收](#jobs-toc-heading-4)
+- [四、同步和重载](#jobs-toc-heading-5)
+- [五、依赖、风险与日志](#jobs-toc-heading-6)
+- [六、验证边界](#jobs-toc-heading-7)
+
+</details>
+<!-- jobs-toc:end -->
 
 ---
 
-## 🔥 <font id=前言>前言</font>
+## <span id="jobs-toc-heading-1" data-jobs-toc="v2">🔥 <font id=前言>前言</font></span><!-- jobs-toc:heading-end -->
 
 先发送 `SourceTree.command` 脚本库，再维护 [**Sourcetree**](https://www.sourcetreeapp.com/) 的 `actions.plist`。安装时按稳定脚本路径合并动作，保留当前用户的标题、快捷键、显示设置及额外动作；所有覆盖都有可恢复备份。
 
@@ -21,7 +35,7 @@
 
 典型子模块配置 `core.worktree=../../../SourceTree.command` 相对于原 Git 元数据目录解析；复制为独立 `.git` 后，这个相对位置已经改变。清理配置必须先于工作树校验，源库配置保持原样。路径解析规则见 [**Git**](https://git-scm.com/docs/git-config#Documentation/git-config.txt-coreworktree) 官方说明。
 
-## 一、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-2" data-jobs-toc="v2">一、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 ```shell
 /bin/zsh './【MacOS】安装SourceTree自定义菜单.command'
@@ -29,7 +43,7 @@
 
 需要可交互终端。先显示内置自述并等待回车，`Ctrl+C` 取消；不使用 `sudo`。此安装器不作为无交互 Sourcetree 动作挂载。
 
-## 二、发送脚本库 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-3" data-jobs-toc="v2">二、发送脚本库 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 1、输入或拖入目标父目录，回车默认当前用户家目录；输入同名 `SourceTree.command` 路径时作为最终目录。
 
@@ -39,7 +53,7 @@
 
 4、复制前显示工作树与 Git 元数据的本地来源、暂存目标。子 Git 的真实元数据复制为目标独立 `.git`，直接通过配置文件路径去掉暂存 `.git/config` 和已有 `.git/config.worktree` 中的全部 `core.worktree`；未设置此键属于正常情况，其它清理失败会停止。随后核对工作树根目录、HEAD 对象及只读 Git 状态。共享对象的 linked worktree 或使用非空 `objects/info/alternates` 的仓库会停止发送，不替换目标；先建立完整独立克隆再部署。
 
-## 三、菜单安装和回收 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-4" data-jobs-toc="v2">三、菜单安装和回收 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 脚本包没有 `actions.plist` 时从当前用户 Sourcetree 配置回收到所有等位包；两处都缺失则报错。已有配置时由 [**fzf**](https://formulae.brew.sh/formula/fzf) 选择：
 
@@ -53,13 +67,13 @@
 
 `⏬只拉取远程代码（终端）` 同时登记在安装脚本与 `actions.plist` 模板中。即使旧模板尚未包含该动作，安装方向也会按稳定脚本路径补齐；目标为运行库中的同名可执行 `.command`，参数为 `$REPO`，仓库动作启用、文件动作关闭。默认不打开 Sourcetree 输出窗口，脚本负责启动独立 `Terminal.app` 承接交互；更新已有动作时仍保留用户的标题和窗口设置。终端启动失败或无法交互时停止，不能跳过 `YES` 门禁。
 
-## 四、同步和重载 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-5" data-jobs-toc="v2">四、同步和重载 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 参与同步的等位包为当前库、当前用户家目录中的运行库、JobsGenesis 中的备份库，以及本次发送的目标库；仅同步实际存在的安装器目录。
 
 写入用户配置前先正常退出正在运行的 Sourcetree，等它保存当前配置后再合并；不强制终止。退出失败则不覆盖文件。安装成功后重新打开并检查进程运行。应用原本未运行时不主动启动。每个目标覆盖前生成 `actions.plist.bak.年月日_时分秒.PID`；内容一致为成功的无操作，复制失败会停止而不会继续报成功。
 
-## 五、依赖、风险与日志 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-6" data-jobs-toc="v2">五、依赖、风险与日志 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 需要系统 `ditto`、健康 [**Git**](https://git-scm.com/)、`plutil`、`cmp`、`osascript`；只在选择同步方向时需要 fzf，不自动安装或升级全局工具。发送库会复制工作树，包括未提交内容；暂存复制或 Git 校验失败会清理本次临时目录并保留现有目标，独立副本会复检 HEAD 和工作树状态；菜单安装可能正常重启 Sourcetree。不会创建提交、推送或切换用户仓库分支。
 
@@ -67,7 +81,7 @@
 
 出现“目标临时库 Git 元数据校验失败”时，先查看同时显示的 Git 原始错误与日志。旧版安装器在子模块复制后可能因 `core.worktree` 失效触发此错，使用完整更新后的同名脚本包重新运行。若仍出现 `Permission denied` 或 `dubious ownership`，按实际目标目录权限或仓库所有者排查；不使用 `sudo`、不关闭全局 Git 所有权检查。
 
-## 六、验证边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-7" data-jobs-toc="v2">六、验证边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 已通过 `zsh -n`、归档解档、菜单标题保留、重复目标拒绝和内容相同不误报失败的隔离验证。库发送与替换的失败路径在临时目录验证；未实际替换用户仓库或克隆目录。
 

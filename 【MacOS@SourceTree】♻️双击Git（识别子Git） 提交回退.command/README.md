@@ -2,15 +2,28 @@
 
 ![Jobs出品，必属精品](https://picsum.photos/1500/400)
 
-[toc]
+<!-- jobs-toc:start -->
+<!-- jobs-toc:source {"v":2,"token":"[toc]"} -->
+<details>
+<summary>📚 目录（点击展开 / 收起）</summary>
+
+- [🔥 前言](#jobs-toc-heading-1)
+- [一、功能与运行边界](#jobs-toc-heading-2)
+- [二、运行方式](#jobs-toc-heading-3)
+- [三、upstream 与 soft 的安全判据](#jobs-toc-heading-4)
+- [四、执行流程](#jobs-toc-heading-5)
+- [五、风险、日志与验证](#jobs-toc-heading-6)
+
+</details>
+<!-- jobs-toc:end -->
 
 ---
 
-## 🔥 <font id=前言>前言</font>
+## <span id="jobs-toc-heading-1" data-jobs-toc="v2">🔥 <font id=前言>前言</font></span><!-- jobs-toc:heading-end -->
 
 > 将尚未推送的 [**Git**](https://git-scm.com/) 提交退回暂存区，或在终端中选择明确的历史提交执行回退。[**Sourcetree**](https://www.sourcetreeapp.com/) 自定义动作只执行保留内容的 `soft` 模式；破坏性的 `hard` 模式仅在终端输入 `YES` 后执行。
 
-## 一、功能与运行边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-2" data-jobs-toc="v2">一、功能与运行边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 | 模式 | 目标 | 内容处理 |
 | --- | --- | --- |
@@ -25,7 +38,7 @@
 - 冲突、未完成的 merge / rebase / cherry-pick / revert / bisect、sequencer 或 `index.lock` 会阻止回退。
 - 不提交、不推送、不执行 `clean`，不自动 Fetch。远端目标代表本地已有的跟踪快照，需要最新远端状态时应先在 Sourcetree Fetch 并核对。
 
-## 二、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-3" data-jobs-toc="v2">二、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 Sourcetree 动作传入 `$REPO`，打印内置自述后无交互执行 `soft`；缺少仓库路径直接失败，不猜测脚本所在仓库。
 
@@ -39,7 +52,7 @@ Sourcetree 动作传入 `$REPO`，打印内置自述后无交互执行 `soft`；
 
 `hard` 模式先显示仓库完整路径、目标说明和提交号，然后要求输入完整 `YES`。回车或其它输入均取消。取消后没有重置动作。
 
-## 三、upstream 与 soft 的安全判据 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-4" data-jobs-toc="v2">三、upstream 与 soft 的安全判据 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 1、优先采用当前分支的真实 `@{upstream}`，支持远端名和分支名均不同于 `origin/当前分支` 的配置。
 
@@ -51,7 +64,7 @@ Sourcetree 动作传入 `$REPO`，打印内置自述后无交互执行 `soft`；
 
 5、保留已有暂存和工作区修改；回退后先核对 `git diff --cached` 与 `git diff`，确认下一次提交的实际内容。
 
-## 四、执行流程 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-5" data-jobs-toc="v2">四、执行流程 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 ```mermaid
 flowchart TD
@@ -76,7 +89,7 @@ flowchart TD
   M --> N
 ```
 
-## 五、风险、日志与验证 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-6" data-jobs-toc="v2">五、风险、日志与验证 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 - `soft` 会移动当前分支 HEAD，原提交通常仍能通过 reflog 找到；它不是远端撤销动作。
 - `hard` 会覆盖工作区的已跟踪内容，也可能清除挡住目标已跟踪路径的未跟踪文件或目录。请先留存需要的内容；`YES` 只是执行门禁，不提供内容备份。

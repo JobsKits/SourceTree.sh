@@ -2,11 +2,26 @@
 
 ![Jobs出品，必属精品](https://picsum.photos/1500/400)
 
-[toc]
+<!-- jobs-toc:start -->
+<!-- jobs-toc:source {"v":2,"token":"[toc]"} -->
+<details>
+<summary>📚 目录（点击展开 / 收起）</summary>
+
+- [🔥 前言](#jobs-toc-heading-1)
+- [一、脚本用途](#jobs-toc-heading-2)
+- [二、运行方式](#jobs-toc-heading-3)
+  - [2.1、Sourcetree 自定义动作](#jobs-toc-heading-4)
+  - [2.2、终端独立运行](#jobs-toc-heading-5)
+- [三、远程选择规则](#jobs-toc-heading-6)
+- [四、安全与隐私](#jobs-toc-heading-7)
+- [五、流程图](#jobs-toc-heading-8)
+
+</details>
+<!-- jobs-toc:end -->
 
 ---
 
-## 🔥 <font id=前言>前言</font>
+## <span id="jobs-toc-heading-1" data-jobs-toc="v2">🔥 <font id=前言>前言</font></span><!-- jobs-toc:heading-end -->
 
 - 本自述文件对应脚本：`./【MacOS@SourceTree】🌐获取远程仓库地址.command`。
 - 脚本定位：用于 [**Sourcetree**](https://www.sourcetreeapp.com/) 自定义动作入口，快速获取当前 Git 仓库的首选远程仓库地址。
@@ -16,7 +31,7 @@
 - 依赖检查：实际执行 `git --version` 验证 Git 健康，命令存在但无法执行时停止。
 - 日志位置：系统临时目录中的 `【MacOS@SourceTree】🌐获取远程仓库地址.log`。
 
-## 一、脚本用途 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-2" data-jobs-toc="v2">一、脚本用途 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 | 项目 | 说明 |
 |---|---|
@@ -30,9 +45,9 @@
 | 是否修改 Git 状态 | `否` |
 | 是否联网 | `否` |
 
-## 二、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-3" data-jobs-toc="v2">二、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-### 2.1、Sourcetree 自定义动作 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-4" data-jobs-toc="v2">2.1、Sourcetree 自定义动作 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 - 推荐配置如下：
 
@@ -49,7 +64,7 @@
   | 输出窗口 | 仓库根目录、远程名称、远程地址和日志位置 |
   | macOS 剪贴板 | Git 配置中的原始远程地址 |
 
-### 2.2、终端独立运行 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-5" data-jobs-toc="v2">2.2、终端独立运行 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 - 进入脚本目录后执行：
 
@@ -65,7 +80,7 @@
 
 - 不传参数时，脚本会先展示内置自述并等待回车确认，再让你拖入或输入目标仓库路径；直接回车会使用当前工作目录。
 
-## 三、远程选择规则 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-6" data-jobs-toc="v2">三、远程选择规则 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 | 优先级 | 来源 | 说明 |
 |---|---|---|
@@ -77,7 +92,7 @@
 - 没有 `origin` 且存在多个远程时，脚本不会猜测；输出可用远程列表后退出。
 - 获取的是 `git remote get-url` 返回的首个抓取地址，SSH 和 HTTPS 形式都会保留原样。
 
-## 四、安全与隐私 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-7" data-jobs-toc="v2">四、安全与隐私 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 确认前只展示内置自述，不清空或写入旧日志；确认后才初始化本次日志。业务正文和路径按原文记录，反斜杠不会被解释为转义。
 
@@ -88,7 +103,7 @@
 - 如果系统缺少 `pbcopy`，脚本仍会打印结果，只跳过剪贴板复制。
 - 脚本通过 `zsh -n`，隔离验证多 `@` 用户信息脱敏和非交互确认门禁。未改写用户 Git 配置或以测试覆盖真实剪贴板。
 
-## 五、流程图 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-8" data-jobs-toc="v2">五、流程图 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 ```mermaid
 graph TD

@@ -2,17 +2,31 @@
 
 ![Jobs出品，必属精品](https://picsum.photos/1500/400)
 
-[toc]
+<!-- jobs-toc:start -->
+<!-- jobs-toc:source {"v":2,"token":"[toc]"} -->
+<details>
+<summary>📚 目录（点击展开 / 收起）</summary>
+
+- [🔥 前言](#jobs-toc-heading-1)
+- [一、运行方式](#jobs-toc-heading-2)
+- [二、目标与依赖](#jobs-toc-heading-3)
+- [三、打开与失败策略](#jobs-toc-heading-4)
+- [四、Java 环境](#jobs-toc-heading-5)
+- [五、日志与风险](#jobs-toc-heading-6)
+- [六、验证边界](#jobs-toc-heading-7)
+
+</details>
+<!-- jobs-toc:end -->
 
 ---
 
-## 🔥 <font id=前言>前言</font>
+## <span id="jobs-toc-heading-1" data-jobs-toc="v2">🔥 <font id=前言>前言</font></span><!-- jobs-toc:heading-end -->
 
 发现并验证健康的 [**OpenJDK / Java**](https://openjdk.org) 17，再使用 [**Trae**](https://www.trae.cn/) 打开工程目录。文件名保留旧 `17.0.16` 字样用于菜单路径兼容，运行时支持健康的 Java 17 补丁版本。
 
 入口用于 [**Sourcetree**](https://www.sourcetreeapp.com/) 自定义动作，也支持终端独立运行；脚本自述写在源码里，不读取 README 作为运行说明。
 
-## 一、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-2" data-jobs-toc="v2">一、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 - Sourcetree 动作使用本目录同名脚本，参数为 `"$REPO"`，整个路径作为一个参数传入。
 - 在终端进入脚本目录后运行：
@@ -24,7 +38,7 @@
 - 终端先打印内置自述，按回车确认，`Ctrl+C` 取消；真实 Sourcetree 父进程或相关环境变量被识别后无交互执行。
 - 非 Sourcetree 且没有可交互输入时停止；相对脚本路径、无 TTY、`TERM=dumb` 都不会单独绕过确认。
 
-## 二、目标与依赖 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-3" data-jobs-toc="v2">二、目标与依赖 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 | 项目 | 规则 |
 |---|---|
@@ -36,7 +50,7 @@
 | 应用候选 | 系统级 / 用户级 Trae、Trae CN |
 | 系统命令 | macOS `open`；日志使用原生 Shell 和系统文本工具 |
 
-## 三、打开与失败策略 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-4" data-jobs-toc="v2">三、打开与失败策略 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 1、完成目标校验，发现并激活健康 JDK 17，然后尝试健康 CLI。
 
@@ -46,7 +60,7 @@
 
 4、参数和目标校验失败返回 `2`，其它运行错误返回非零；Sourcetree 输出窗口可据此识别失败。
 
-## 四、Java 环境 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-5" data-jobs-toc="v2">四、Java 环境 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 1、优先复用已安装且健康的 [**jenv**](https://www.jenv.be/) 映射。优先检查 `17` 别名，其它别名逐个验证真实 `java` 与 `javac` 主版本；名字里包含 `17` 不作为通过条件。
 
@@ -58,14 +72,14 @@
 
 5、CLI 会继承本次启动环境；已运行的编辑器进程或 GUI 启动可能使用应用自身的 JDK 设置。编辑器 Java 插件的 JDK 配置需要在工程里核对，脚本不会改写 IDE 配置。
 
-## 五、日志与风险 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-6" data-jobs-toc="v2">五、日志与风险 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 - 日志位于系统临时目录，文件名为 `【MacOS@SourceTree】用Trae打开@openjdk64-17.0.16.log`；确认后初始化日志，记录自述摘要和业务输出；取消前不清空旧日志。
 - Sourcetree、非彩色终端或设置 `NO_COLOR` 时输出纯文本；路径中的反斜杠按原文保留。
 - 只有健康 jenv 映射时会保存项目 `.java-version`，可能影响以后在该目录运行 Java。
 - 关闭输出窗口后仍可查看日志；应用启动接受请求不等于项目构建或运行成功。
 
-## 六、验证边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-7" data-jobs-toc="v2">六、验证边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 - 已执行真实 macOS `zsh -n` 和隔离假命令回归，覆盖路径校验、损坏 CLI 回退、启动失败、Sourcetree 无交互和终端确认拒绝。Java 分支额外覆盖真实主版本校验、jenv 映射和现有标记保护。
 - 回归没有安装软件、启动真实编辑器或改写用户业务项目；各应用 GUI 和实际项目加载仍由使用时确认。

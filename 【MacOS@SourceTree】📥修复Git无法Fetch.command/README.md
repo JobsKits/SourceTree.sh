@@ -2,15 +2,46 @@
 
 ![Jobs出品，必属精品](https://picsum.photos/1500/400)
 
-[toc]
+<!-- jobs-toc:start -->
+<!-- jobs-toc:source {"v":2,"token":"[toc]"} -->
+<details>
+<summary>📚 目录（点击展开 / 收起）</summary>
+
+- [🔥 前言](#jobs-toc-heading-1)
+- [一、脚本覆盖的故障场景与成因](#jobs-toc-heading-2)
+  - [1.1、为什么 refs/remotes 与 logs/refs/remotes 要分开检查](#jobs-toc-heading-3)
+  - [1.2、为什么每个场景修复后立刻 Fetch](#jobs-toc-heading-4)
+  - [1.3、什么叫 D/F conflict](#jobs-toc-heading-5)
+- [二、Fetch 原理、最小诊断与错误分流](#jobs-toc-heading-6)
+  - [2.1、Fetch 与 Pull 不是一回事](#jobs-toc-heading-7)
+  - [2.2、运行脚本前的最小诊断](#jobs-toc-heading-8)
+  - [2.3、错误分流表](#jobs-toc-heading-9)
+  - [2.4、脚本明确不处理的 Fetch 故障](#jobs-toc-heading-10)
+- [三、逐项试验并解锁的执行流程](#jobs-toc-heading-11)
+- [四、运行方式](#jobs-toc-heading-12)
+  - [4.1、Sourcetree 自定义动作](#jobs-toc-heading-13)
+  - [4.2、终端独立运行](#jobs-toc-heading-14)
+- [五、执行后核对与手工恢复边界](#jobs-toc-heading-15)
+- [六、安全边界](#jobs-toc-heading-16)
+- [七、日志文件](#jobs-toc-heading-17)
+- [八、常见问题](#jobs-toc-heading-18)
+  - [8.1、没有冲突时运行会怎样？](#jobs-toc-heading-19)
+  - [8.2、脚本会自动恢复备份吗？](#jobs-toc-heading-20)
+  - [8.3、为什么不删除整个 refs/remotes/origin？](#jobs-toc-heading-21)
+  - [8.4、大小写碰撞修复后还可能再出现吗？](#jobs-toc-heading-22)
+  - [8.5、为什么 Commit 和 Fetch 要保留为两个脚本？](#jobs-toc-heading-23)
+  - [8.6、验证范围](#jobs-toc-heading-24)
+
+</details>
+<!-- jobs-toc:end -->
 
 ---
 
-## 🔥 <font id=前言>前言</font>
+## <span id="jobs-toc-heading-1" data-jobs-toc="v2">🔥 <font id=前言>前言</font></span><!-- jobs-toc:heading-end -->
 
 > 这是一个挂载到 [**Sourcetree**](https://www.sourcetreeapp.com/) 的 [**Git**](https://git-scm.com/) Fetch 修复动作。脚本把安全可自动处理的远端跟踪引用故障拆成 5 个独立场景；每处理一项就立即重新 Fetch，成功后停止后续元数据修复。
 
-## 一、脚本覆盖的故障场景与成因 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-2" data-jobs-toc="v2">一、脚本覆盖的故障场景与成因 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 | 编号 | 故障现象 | 出现原因 | 独立处理 | 解锁判据 |
 | --- | --- | --- | --- | --- |
@@ -20,18 +51,18 @@
 | F04 | `refs/remotes/...` 或 `logs/refs/remotes/...` 报 `Not a directory`、`exists; cannot create` | 远端从单层分支 `foo` 迁移到层级分支 `foo/bar`；本地旧 `foo` 是文件，新引用却要求它成为目录 | 只针对错误明确点名的 `foo/bar`，备份其前缀位置上的 loose ref/reflog 文件，再立即 Fetch | 前缀文件移开后的 Fetch 返回 0 |
 | F05 | Fetch 需要创建单层引用文件，但同名位置仍是目录 | 远端从层级分支 `foo/bar` 收口为单层分支 `foo`；本地旧 `foo/` 引用目录或 reflog 目录仍存在 | 只针对错误明确点名的 `foo`，备份同名 loose ref/reflog 目录，再立即 Fetch | 同名目录移开后的 Fetch 返回 0 |
 
-### 1.1、为什么 `refs/remotes` 与 `logs/refs/remotes` 要分开检查 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-3" data-jobs-toc="v2">1.1、为什么 `refs/remotes` 与 `logs/refs/remotes` 要分开检查 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 - `refs/remotes/<remote>/...` 保存远端跟踪引用的当前指向。
 - `logs/refs/remotes/<remote>/...` 保存这些引用的本地 reflog。
 - 其中任意一侧残留文件或目录，都可能单独造成文件/目录冲突。脚本只移动本次错误分支路径上的实际阻塞项，不删除整个远端引用目录。
 - F03 使用 Git 原生 `pack-refs` 把有效引用从 loose 文件收进 `packed-refs`；引用 OID 不变，但文件系统上的大小写前缀被释放，之后才能创建另一个大小写层级目录。
 
-### 1.2、为什么每个场景修复后立刻 Fetch <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-4" data-jobs-toc="v2">1.2、为什么每个场景修复后立刻 Fetch <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 每次 `git fetch --prune` 都是真实“解锁试验”。如果 F02 已经解决问题，就没有理由继续进入大小写或文件/目录元数据处理；只有最近一次 Fetch 仍返回同类受支持错误，脚本才刷新冲突分支并进入下一项。
 
-### 1.3、什么叫 D/F conflict <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-5" data-jobs-toc="v2">1.3、什么叫 D/F conflict <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 D/F 是 Directory/File 的缩写。Git 引用名会映射为层级路径：
 
@@ -40,9 +71,9 @@ D/F 是 Directory/File 的缩写。Git 引用名会映射为层级路径：
 
 同一路径不可能同时既是文件又是目录，因此上游在 `foo` 与 `foo/bar` 之间迁移后，本地旧 remote-tracking 元数据可能阻止新形态落盘。
 
-## 二、Fetch 原理、最小诊断与错误分流 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-6" data-jobs-toc="v2">二、Fetch 原理、最小诊断与错误分流 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-### 2.1、Fetch 与 Pull 不是一回事 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-7" data-jobs-toc="v2">2.1、Fetch 与 Pull 不是一回事 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 `git fetch` 下载远端对象，并按照 refspec 更新本地引用；常见映射是：
 
@@ -55,7 +86,7 @@ D/F 是 Directory/File 的缩写。Git 引用名会映射为层级路径：
 
 本脚本只处理 Fetch 阶段的远端跟踪引用与 reflog 路径阻塞，不处理 Pull 后半段的分支分叉、工作区覆盖或 merge/rebase 冲突。
 
-### 2.2、运行脚本前的最小诊断 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-8" data-jobs-toc="v2">2.2、运行脚本前的最小诊断 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 以 `origin` 为例：
 
@@ -72,7 +103,7 @@ git for-each-ref --format='%(refname) %(objectname)' refs/remotes/origin/
 - `git fetch --prune` 是基线复现，也是 F01 的真实解锁试验；它会更新远端跟踪状态，不是只读命令。
 - `git for-each-ref` 用 Git 自己的引用接口查看本地状态，比直接假设所有引用都存在于 `.git/refs` 更可靠，因为引用也可能保存在 `packed-refs`。
 
-### 2.3、错误分流表 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-9" data-jobs-toc="v2">2.3、错误分流表 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 | 报错或现象 | 根因方向 | 本脚本是否处理 | 先做什么 |
 | --- | --- | --- | --- |
@@ -87,7 +118,7 @@ git for-each-ref --format='%(refname) %(objectname)' refs/remotes/origin/
 | `bad object` / `missing blob` | 对象库或引用损坏 | 否 | 先备份并用 `git fsck --full` 诊断，必要时重新克隆对比。 |
 | `No space left on device` / 只读错误 | 磁盘空间、配额、挂载或权限问题 | 否 | 先修复系统资源，不要继续移动引用。 |
 
-### 2.4、脚本明确不处理的 Fetch 故障 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-10" data-jobs-toc="v2">2.4、脚本明确不处理的 Fetch 故障 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 以下问题会保留原始错误并返回失败，不自动尝试旁路：
 
@@ -102,7 +133,7 @@ F01 会照常使用仓库既有 Fetch 配置；只有标准 `refs/heads/* → re
 
 Fetch 输出明确指向 `refs/remotes/...` 或 `logs/refs/remotes/...`，并命中 `Not a directory`、`Is a directory`、`exists; cannot create` 等路径冲突特征时，脚本提取错误目标分支。Git 仅输出 `! ... -> <remote>/<branch> (unable to update local ref)` 时也会严格解析该目标；每个目标必须仍存在于远端，并在其 loose ref/reflog 上找到真实的前缀文件或同名目录阻塞，才允许启动 F02–F05。一般权限、锁或其它更新失败不会仅凭这条简略错误进入元数据修复。
 
-## 三、逐项试验并解锁的执行流程 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-11" data-jobs-toc="v2">三、逐项试验并解锁的执行流程 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 ```mermaid
 flowchart TD
@@ -138,16 +169,16 @@ flowchart TD
 └── logs/refs/remotes/...
 ```
 
-## 四、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-12" data-jobs-toc="v2">四、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-### 4.1、Sourcetree 自定义动作 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-13" data-jobs-toc="v2">4.1、Sourcetree 自定义动作 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 1、在 Sourcetree 中选中目标仓库。
 2、运行自定义动作 `📥修复Git无法Fetch`。
 3、脚本使用 `$REPO` 识别仓库，默认处理 `origin`。
 4、Sourcetree 模式不等待回车；输出窗口会显示 F01–F05 的原因、是否命中、每次 Fetch 复试和最终结果。
 
-### 4.2、终端独立运行 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-14" data-jobs-toc="v2">4.2、终端独立运行 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 默认使用仓库的 `origin`：
 
@@ -163,7 +194,7 @@ flowchart TD
 
 终端模式会先打印内置自述；按回车确认后才初始化日志并执行 Fetch，按 `Ctrl+C` 可取消。参数或相对脚本路径不代表 Sourcetree 身份；无法交互或确认读取失败时直接停止。
 
-## 五、执行后核对与手工恢复边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-15" data-jobs-toc="v2">五、执行后核对与手工恢复边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 脚本成功后核对：
 
@@ -183,7 +214,7 @@ git status --short --branch
 
 脚本不会自动恢复备份。分支层级迁移时，备份项通常已经失效；大小写碰撞时，备份项也可能仍对应有效远端分支。若必须手工恢复，应先确认远端当前真值和 `packed-refs` 状态，再只处理日志记录的精确路径。不要删除整个 `refs/remotes/<remote>` 或 `logs/refs/remotes/<remote>` 来碰运气。
 
-## 六、安全边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-16" data-jobs-toc="v2">六、安全边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 - 脚本会更新远端跟踪引用，这是 Fetch 本身的正常行为。
 - 脚本不执行 `git pull`、`merge`、`rebase`、`git add`、`git commit`、`git push`、`git reset` 或 `git checkout`。
@@ -194,7 +225,7 @@ git status --short --branch
 - 大小写碰撞时，被备份对象可能仍对应远端有效分支；彻底解决需要上游统一分支大小写命名。
 - 最近一次 Fetch 如果转为网络、认证、并发锁等其它错误，脚本立即停止，不继续尝试下一种元数据修复。
 
-## 七、日志文件 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-17" data-jobs-toc="v2">七、日志文件 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 确认前只展示内置自述，不清空或写入旧日志；确认后才初始化本次日志。业务正文和路径按原文记录，反斜杠不会被解释为转义。
 
@@ -206,29 +237,29 @@ git status --short --branch
 
 日志记录远端选择、F01–F05 场景顺序、每次 Fetch 输出、错误分支、备份路径、阻塞项数量和最终退出结果。日志可能包含本机路径及远端信息，分享前应脱敏。
 
-## 八、常见问题 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-18" data-jobs-toc="v2">八、常见问题 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-### 8.1、没有冲突时运行会怎样？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-19" data-jobs-toc="v2">8.1、没有冲突时运行会怎样？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 只执行 F01 的正常 `git fetch --prune`。成功后 F02–F05 自动跳过，不创建元数据备份目录。
 
-### 8.2、脚本会自动恢复备份吗？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-20" data-jobs-toc="v2">8.2、脚本会自动恢复备份吗？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 不会。分支层级迁移时，备份对象通常已经失效；大小写碰撞时，它也可能仍对应有效远端分支。脚本保留现场，避免自动恢复后重新制造相同路径阻塞。
 
-### 8.3、为什么不删除整个 `refs/remotes/origin`？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-21" data-jobs-toc="v2">8.3、为什么不删除整个 `refs/remotes/origin`？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 远端跟踪引用可以重新 Fetch，但 reflog 可能承载排错证据；多 worktree、packed refs、自定义 refspec 和多个远端也可能让整目录删除扩大影响。脚本只处理错误点名分支的实际阻塞路径。
 
-### 8.4、大小写碰撞修复后还可能再出现吗？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-22" data-jobs-toc="v2">8.4、大小写碰撞修复后还可能再出现吗？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 可能。远端同时保留 `SaaS` 和 `saas/...` 本身就与 MacOS 默认大小写不敏感文件系统存在映射冲突。脚本只能解开当前 Fetch；上游再次更新碰撞分支时仍可能重现。
 
-### 8.5、为什么 Commit 和 Fetch 要保留为两个脚本？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-23" data-jobs-toc="v2">8.5、为什么 Commit 和 Fetch 要保留为两个脚本？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 Commit 修复处理工作树、索引、`.gitmodules`、gitlink 和子模块；Fetch 修复处理远端跟踪引用与 reflog。两者影响边界和验收命令不同，分开更容易停止、追溯和验证。
 
-### 8.6、验证范围 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-24" data-jobs-toc="v2">8.6、验证范围 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 脚本通过 `zsh -n`；隔离临时仓库验证旧 orphan reflog 导致的 `foo → foo/bar` 与 `foo/bar → foo` 双向阻塞、精确备份后 Fetch 成功、纯文本输出和自定义 refspec 拒绝搬移元数据。未访问用户远端或修改用户仓库。已在本机大小写不敏感卷的隔离仓库实际复现 `SaaS` 文件挡住 `saas/team`，验证 F03 收口有效引用、备份 reflog 后 Fetch 成功，并保留两条远端跟踪引用；一般 `unable to update local ref` 没有物理阻塞时停止。
 

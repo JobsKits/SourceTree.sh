@@ -2,11 +2,27 @@
 
 ![Jobs出品，必属精品](https://picsum.photos/1500/400)
 
-[toc]
+<!-- jobs-toc:start -->
+<!-- jobs-toc:source {"v":2,"token":"[toc]"} -->
+<details>
+<summary>📚 目录（点击展开 / 收起）</summary>
+
+- [🔥 前言](#jobs-toc-heading-1)
+- [一、脚本用途](#jobs-toc-heading-2)
+- [二、运行方式](#jobs-toc-heading-3)
+  - [2.1、SourceTree 自定义动作](#jobs-toc-heading-4)
+  - [2.2、终端独立运行](#jobs-toc-heading-5)
+- [三、路径解析规则](#jobs-toc-heading-6)
+- [四、风险说明](#jobs-toc-heading-7)
+- [五、流程图](#jobs-toc-heading-8)
+- [六、验证边界](#jobs-toc-heading-9)
+
+</details>
+<!-- jobs-toc:end -->
 
 ---
 
-## 🔥 <font id=前言>前言</font>
+## <span id="jobs-toc-heading-1" data-jobs-toc="v2">🔥 <font id=前言>前言</font></span><!-- jobs-toc:heading-end -->
 
 - 本自述文件对应脚本：`【MacOS@SourceTree】用终端打开.command`。
 - 脚本定位：用于 [**SourceTree**](https://www.sourcetreeapp.com/) 自定义动作入口，打开 macOS `Terminal.app` 后让命令行直接进入当前仓库、文件所在目录或指定目录。
@@ -15,7 +31,7 @@
 - 安全边界：不提交、不推送、不删除、不修改 Git 索引或业务文件。
 - 日志位置：系统临时目录中的 `【MacOS@SourceTree】用终端打开.log`。
 
-## 一、脚本用途 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-2" data-jobs-toc="v2">一、脚本用途 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 | 项目 | 说明 |
 |---|---|
@@ -29,9 +45,9 @@
 | 是否修改 Git 状态 | `否` |
 | 是否可能联网 | `否` |
 
-## 二、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-3" data-jobs-toc="v2">二、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-### 2.1、SourceTree 自定义动作 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-4" data-jobs-toc="v2">2.1、SourceTree 自定义动作 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 - 推荐配置如下：
 
@@ -43,7 +59,7 @@
 
 - 运行后脚本会把 `$REPO` 解析为物理目录路径，并打开 `Terminal.app` 新窗口执行 `cd` 到该目录。
 
-### 2.2、终端独立运行 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-5" data-jobs-toc="v2">2.2、终端独立运行 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 - 进入脚本目录后执行：
 
@@ -54,7 +70,7 @@
 
 - 不传参数时，脚本会先展示内置自述，再让你拖入或输入目标路径；直接回车会使用当前工作目录。
 
-## 三、路径解析规则 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-6" data-jobs-toc="v2">三、路径解析规则 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 | 优先级 | 来源 | 说明 |
 |---|---|---|
@@ -70,13 +86,13 @@
 - 日志保留路径原文，不把反斜杠解释为换行或制表符。
 - 目标不存在时会停止，并在日志里输出无法解析的原始路径。
 
-## 四、风险说明 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-7" data-jobs-toc="v2">四、风险说明 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 - 脚本不会执行 `git add`、`git commit`、`git push`、`rm`、`sudo` 等动作。
 - 脚本会写入系统临时目录日志，用于排查 [**SourceTree**](https://www.sourcetreeapp.com/) 输出窗口关闭后的历史结果。
 - 脚本使用 AppleScript 打开 `Terminal.app`，并执行 `builtin cd --` 到目标目录；如果系统自动化权限异常，日志会输出失败原因。
 
-## 五、流程图 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-8" data-jobs-toc="v2">五、流程图 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 ```mermaid
 graph TD
@@ -92,7 +108,7 @@ graph TD
     I --> J([结束])
 ```
 
-## 六、验证边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-9" data-jobs-toc="v2">六、验证边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 - 已执行 macOS `zsh -n` 与隔离假命令回归，覆盖中文 / 空格 / 引号 / 反斜杠、家目录展开、参数唯一性、Sourcetree 无交互和终端确认拒绝。
 - 未打开真实 Terminal.app 或写入真实系统剪贴板；AppleScript / pbcopy 在回归中由假命令接收并检查参数。

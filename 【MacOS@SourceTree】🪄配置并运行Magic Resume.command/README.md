@@ -2,15 +2,40 @@
 
 ![Jobs出品，必属精品](https://picsum.photos/1500/400)
 
-[toc]
+<!-- jobs-toc:start -->
+<!-- jobs-toc:source {"v":2,"token":"[toc]"} -->
+<details>
+<summary>📚 目录（点击展开 / 收起）</summary>
+
+- [🔥 前言](#jobs-toc-heading-1)
+- [一、适用场景](#jobs-toc-heading-2)
+- [二、行为边界](#jobs-toc-heading-3)
+  - [2.1、仓库识别](#jobs-toc-heading-4)
+  - [2.2、环境和依赖](#jobs-toc-heading-5)
+  - [2.3、后台服务](#jobs-toc-heading-6)
+- [三、运行方式](#jobs-toc-heading-7)
+  - [3.1、Sourcetree 自定义动作](#jobs-toc-heading-8)
+  - [3.2、系统终端](#jobs-toc-heading-9)
+- [四、执行流程](#jobs-toc-heading-10)
+- [五、日志与停止服务](#jobs-toc-heading-11)
+- [六、风险说明](#jobs-toc-heading-12)
+- [七、常见问题](#jobs-toc-heading-13)
+  - [7.1、为什么没有创建新的同级目录？](#jobs-toc-heading-14)
+  - [7.2、为什么没有再次启动 pnpm dev？](#jobs-toc-heading-15)
+  - [7.3、为什么提示 3000 端口被其它目录占用？](#jobs-toc-heading-16)
+  - [7.4、关闭终端后页面是否还能访问？](#jobs-toc-heading-17)
+- [八、预演与回归验证](#jobs-toc-heading-18)
+
+</details>
+<!-- jobs-toc:end -->
 
 ---
 
-## 🔥 <font id=前言>前言</font>
+## <span id="jobs-toc-heading-1" data-jobs-toc="v2">🔥 <font id=前言>前言</font></span><!-- jobs-toc:heading-end -->
 
 > 该脚本用于从 [**Sourcetree**](https://www.sourcetreeapp.com/) 一键校验、准备并运行 [**JOYCEQL/magic-resume**](https://github.com/JOYCEQL/magic-resume)。开发服务器会脱离终端在后台运行，关闭 Sourcetree 输出窗口或终端不会停止服务。
 
-## 一、适用场景 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-2" data-jobs-toc="v2">一、适用场景 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 - 当前 Sourcetree 仓库就是 `JOYCEQL/magic-resume`：直接进入当前仓库配置并运行。
 
@@ -18,9 +43,9 @@
 
 - 希望运行 `pnpm dev` 后立即关闭终端：脚本通过 `nohup`、断开标准输入并脱离 zsh 作业控制启动后台服务。
 
-## 二、行为边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-3" data-jobs-toc="v2">二、行为边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-### 2.1、仓库识别 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-4" data-jobs-toc="v2">2.1、仓库识别 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 - 支持 `https://github.com/JOYCEQL/magic-resume.git`、`git@github.com:JOYCEQL/magic-resume.git` 等常见 HTTPS / SSH remote 写法。
 
@@ -34,7 +59,7 @@
 
 - 参数路径保留文件名中的反斜线和内部引号，仅去除完整成对外围引号、末尾换行并展开 `~/`。交互拖入的路径先按字面检查，只有该路径不存在时才尝试还原 shell 转义；输入结束时停止。
 
-### 2.2、环境和依赖 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-5" data-jobs-toc="v2">2.2、环境和依赖 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 - 需要 macOS 自带的 `git`、`curl`、`lsof`、`nohup` 和 `open`；`git --version` 必须健康，损坏 shim 会提前停止。
 
@@ -44,7 +69,7 @@
 
 - 按 [官方快速开始](https://github.com/JOYCEQL/magic-resume#-quick-start) 安装依赖并启动 Vite；启动命令为 `pnpm dev --port 3000 --strictPort`，端口占用时失败，不自动漂移到其它端口。不自动执行 `git pull`、依赖升级、构建或部署。
 
-### 2.3、后台服务 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-6" data-jobs-toc="v2">2.3、后台服务 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 - `pnpm dev` 的标准输入会断开，输出写入系统临时目录中的 `【MacOS@SourceTree】🪄配置并运行Magic Resume-dev.log`。
 
@@ -58,9 +83,9 @@
 
 - 服务就绪后调用系统默认浏览器打开 `http://localhost:3000`，随后脚本退出，后台服务继续运行。
 
-## 三、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-7" data-jobs-toc="v2">三、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-### 3.1、Sourcetree 自定义动作 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-8" data-jobs-toc="v2">3.1、Sourcetree 自定义动作 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 1、打开 Sourcetree 的“偏好设置 → 自定义操作”。
 
@@ -70,7 +95,7 @@
 
 4、在任意仓库中执行该自定义动作。Sourcetree 模式会打印内置自述，但不会等待键盘输入。
 
-### 3.2、系统终端 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-9" data-jobs-toc="v2">3.2、系统终端 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 - 传入当前 Git 仓库：
 
@@ -80,7 +105,7 @@
 
 - 不传参数时，脚本优先识别当前目录；无法识别时提示拖入 Git 仓库目录。终端模式会先等待回车确认。
 
-## 四、执行流程 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-10" data-jobs-toc="v2">四、执行流程 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 ```mermaid
 flowchart TD
@@ -106,7 +131,7 @@ flowchart TD
   N --> O[默认浏览器打开 localhost:3000]
 ```
 
-## 五、日志与停止服务 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-11" data-jobs-toc="v2">五、日志与停止服务 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 - 业务日志位于系统临时目录中的 `【MacOS@SourceTree】🪄配置并运行Magic Resume.log`。
 
@@ -126,7 +151,7 @@ flowchart TD
 
   执行 `kill` 前先使用 `ps -p PID -o command=` 核对进程，避免临时 PID 文件过期后误停其它进程。
 
-## 六、风险说明 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-12" data-jobs-toc="v2">六、风险说明 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 - `git clone` 只写入新建或已确认完全为空的同级目录；克隆失败时保留现场，不自动删除非空残留。
 
@@ -136,25 +161,25 @@ flowchart TD
 
 - 为满足“终端可关闭”，当前仓库已有但未被 PID 文件标记为脚本托管的 Vite dev 会先收到 `TERM`，再由脚本后台重启；其它类型进程不会被自动停止。
 
-## 七、常见问题 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-13" data-jobs-toc="v2">七、常见问题 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-### 7.1、为什么没有创建新的同级目录？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-14" data-jobs-toc="v2">7.1、为什么没有创建新的同级目录？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 当前仓库已经是官方仓库，或父目录第一层的任意名称文件夹中已经存在 remote 正确的官方仓库时，不重复创建和克隆。
 
-### 7.2、为什么没有再次启动 `pnpm dev`？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-15" data-jobs-toc="v2">7.2、为什么没有再次启动 `pnpm dev`？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 只有 3000 端口监听 PID 与脚本 PID 文件一致时才直接复用。当前仓库手工前台启动的 Vite 会被安全停止并转为后台运行，确保关闭终端后仍可访问。
 
-### 7.3、为什么提示 3000 端口被其它目录占用？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-16" data-jobs-toc="v2">7.3、为什么提示 3000 端口被其它目录占用？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 脚本不会结束未知进程，也不会让 Vite 自动漂移到其它端口。先核对并处理占用者，再重新运行脚本。
 
-### 7.4、关闭终端后页面是否还能访问？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+### <span id="jobs-toc-heading-17" data-jobs-toc="v2">7.4、关闭终端后页面是否还能访问？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 能。由该脚本新启动的服务已经通过 `nohup` 脱离终端；只要后台进程没有被主动停止，`http://localhost:3000` 就会继续提供服务。
 
-## 八、预演与回归验证 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+## <span id="jobs-toc-heading-18" data-jobs-toc="v2">八、预演与回归验证 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 - 设置 `JOBS_MAGIC_RESUME_DRY_RUN=1` 可预演。已有目标仓库时需要预先可用 Node.js / npm / pnpm，只展示依赖安装和启动计划；未命中目标仓库时只展示克隆计划后退出，不创建目录。
 - 支持单个明确仓库路径，来源按参数、`SOURCETREE_REPO_PATH`、`REPO`、当前目录依次选择。显式错误路径会停止，不改用其它目录。
