@@ -620,7 +620,7 @@ pause_sourcetree_before_menu_sync() {
   done
   exit_with_error "Sourcetree 尚未退出，可能等待操作完成；不会强杀或覆盖配置。"
 }
-# 合并按目标路径匹配的动作，保留当前自定义标题及额外动作。
+# 合并按脚本路径匹配的动作，补齐登记动作并保留当前自定义标题。
 merge_actions_preserving_titles() {
   local merged_file="$1" runtime_root="$HOME_PACKAGE_ROOT"
   [[ -z "$DEPLOYED_PACKAGE_ROOT" || ! -d "$DEPLOYED_PACKAGE_ROOT" ]] || runtime_root="$DEPLOYED_PACKAGE_ROOT"
@@ -641,6 +641,10 @@ function run(argv) {
   }
   var templates = readArchive(argv[0]);
   var current = $.NSFileManager.defaultManager.fileExistsAtPath(argv[1]) ? readArchive(argv[1]) : [];
+  var pullScriptName = '【MacOS@SourceTree】⏬只拉取远程代码.command';
+  var pullScriptPath = argv[3] + '/' + pullScriptName + '/' + pullScriptName;
+  var pullDefault = { target: pullScriptPath, params: '$REPO', name: '⏬只拉取远程代码（终端）', repoAction: true, fileAction: false, separateWindow: false, showFullOutput: false, logAction: false, shortcutKeyCode: -1, shortcutKeyModifiers: 0, shortcutKeyDisplay: '' };
+  if (!templates.some(function(item) { return canonical(item.target) === pullScriptPath; })) templates.push(pullDefault);
   var updates = {}, seen = {}, result = [];
   templates.forEach(function(item) {
     item.target = canonical(item.target);

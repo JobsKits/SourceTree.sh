@@ -8,7 +8,7 @@
 
 ## 🔥 <font id=前言>前言</font>
 
-脚本库包含 32 个系统 `/bin/zsh` 入口，每个脚本包有同名 `.command` 和独立 `README.md`。源码、静态说明和运行时内置自述分别维护；运行时不读取 README。
+脚本库包含 33 个系统 `/bin/zsh` 入口，每个脚本包有同名 `.command` 和独立 `README.md`。源码、静态说明和运行时内置自述分别维护；运行时不读取 README。
 
 运行态位于当前用户家目录的 `SourceTree.command`，备份态为 JobsGenesis 下的同名 Git 工作树。维护时保留两侧已有改动，修改完成后按相同相对路径同步脚本、README、资源及菜单配置；Git 元数据和系统生成文件不互相覆盖。
 
@@ -22,7 +22,7 @@
 
 安装器先确认库发送目标，再选择菜单安装或配置回收。已有目标库回车保留，输入 `YES` 才备份替换。菜单按脚本路径合并并保留自定义显示标题、快捷键和显示设置，覆盖前生成可恢复备份；正在运行的 Sourcetree 正常退出、保存配置后再写入并重新打开，不强制结束。
 
-菜单动作目标默认使用家目录运行副本；指定其它发送目录时使用该目标库，仓库动作参数为 `$REPO`，不是把多个路径拼接成一个参数。所有动作目标须存在、可执行且唯一。安装器本身保留终端交互，不挂成仓库菜单；其余 31 个任务入口可作为仓库动作。
+菜单动作目标默认使用家目录运行副本；指定其它发送目录时使用该目标库，仓库动作参数为 `$REPO`，不是把多个路径拼接成一个参数。所有动作目标须存在、可执行且唯一。安装器本身保留终端交互，不挂成仓库菜单；其余 32 个任务入口可作为仓库动作。
 
 详细步骤、依赖与风险见 [安装器 README](./【MacOS】安装SourceTree自定义菜单.command/README.md)。
 
@@ -32,13 +32,14 @@
 - Sourcetree 动作：根据明确环境或父进程链识别，无交互连续执行；相对脚本路径、非 TTY 或 `TERM=dumb` 单独不能作为身份依据。
 - Sourcetree、非 TTY、`NO_COLOR` 使用纯文本输出；完整终端自述标题红色加粗、正文蓝色常规。业务错误不会被最后的成功输出掩盖。
 - 递归动作跳过 Git、依赖、缓存与生成目录；具体范围及所有权过滤由各包 README 说明，明确目标错误时不回退到其它项目。
-- 普通更新或升级回车跳过，输入任意字符后回车执行；危险替换或 hard 回退要求 `YES`。逐层 Push 与终端 Pod Install 会转交独立终端，以对应入口确认和结果为准。
+- 普通更新或升级回车跳过，输入任意字符后回车执行；危险替换或 hard 回退要求 `YES`。只拉取远程代码、逐层 Push 与终端 Pod Install 会转交独立终端，以对应入口确认和结果为准。
 - 开发工具、Java 17 和项目 SDK 先检查实际可用性。打开类动作复用现有工具，不为打开项目自动安装依赖或清理全局缓存；工具缺失时提供明确排查入口。
 
 ## 三、脚本索引 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
 | 脚本包 | 说明 |
 | --- | --- |
+| `⏬只拉取远程代码` | [README](./【MacOS@SourceTree】⏬只拉取远程代码.command/README.md) |
 | `⏬双击下载SourceTree效率脚本` | [README](./%E3%80%90MacOS%40SourceTree%E3%80%91%E2%8F%AC%E5%8F%8C%E5%87%BB%E4%B8%8B%E8%BD%BDSourceTree%E6%95%88%E7%8E%87%E8%84%9A%E6%9C%AC.command/README.md) |
 | `♻️修复Flutter项目中文路径` | [README](./%E3%80%90MacOS%40SourceTree%E3%80%91%E2%99%BB%EF%B8%8F%E4%BF%AE%E5%A4%8DFlutter%E9%A1%B9%E7%9B%AE%E4%B8%AD%E6%96%87%E8%B7%AF%E5%BE%84.command/README.md) |
 | `♻️双击Git（识别子Git） 提交回退` | [README](./%E3%80%90MacOS%40SourceTree%E3%80%91%E2%99%BB%EF%B8%8F%E5%8F%8C%E5%87%BBGit%EF%BC%88%E8%AF%86%E5%88%AB%E5%AD%90Git%EF%BC%89%20%E6%8F%90%E4%BA%A4%E5%9B%9E%E9%80%80.command/README.md) |
@@ -104,6 +105,7 @@ SourceTree.command/
 ├── README.md
 ├── assets/
 ├── icon.png
+├── 【MacOS@SourceTree】⏬只拉取远程代码.command/  # 1 个入口
 ├── 【MacOS@SourceTree】⏬双击下载SourceTree效率脚本.command/  # 1 个入口
 ├── 【MacOS@SourceTree】♻️修复Flutter项目中文路径.command/  # 1 个入口
 ├── 【MacOS@SourceTree】♻️双击Git（识别子Git） 提交回退.command/  # 1 个入口
@@ -140,7 +142,17 @@ SourceTree.command/
 
 ## 七、<span id="script-workflows">脚本执行流程</span> <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-本仓共有 32 个用户入口。这里只列本仓维护的主入口；独立子 Git、测试、函数库及打包资源模板不作为用户运行入口。步骤来自静态源码与配套说明，未执行安装、清理、构建或 Git 写操作。
+本仓共有 33 个用户入口。这里只列本仓维护的主入口；独立子 Git、测试、函数库及打包资源模板不作为用户运行入口。步骤来自静态源码与配套说明，不在真实业务仓执行安装、清理、构建或 Git 写操作。
+
+### [【MacOS@SourceTree】⏬只拉取远程代码.command](./【MacOS@SourceTree】⏬只拉取远程代码.command/【MacOS@SourceTree】⏬只拉取远程代码.command)
+
+> **目的：** 从独立终端安全同步只能拉取的第三方仓库，不提交、不推送。
+
+- SourceTree 只负责打开 Terminal，终端显示自述并等待回车。
+- 确认当前分支的明确远程上游，显示来源，成功 fetch 后固定目标提交。
+- 检查工作区、暂存内容、未跟踪文件及本地独有提交；有风险时红字列明，精确输入 `YES` 才舍弃并同步。
+- 忽略文件保留；可能覆盖忽略内容、嵌套仓库、子模块改动、未完成操作及上游不明确时停止，不递归父子仓。
+- 核验最终提交与工作区，输出来源、日志和退出码。
 
 ### [【MacOS@SourceTree】⏬双击下载SourceTree效率脚本.command](./%E3%80%90MacOS@SourceTree%E3%80%91%E2%8F%AC%E5%8F%8C%E5%87%BB%E4%B8%8B%E8%BD%BDSourceTree%E6%95%88%E7%8E%87%E8%84%9A%E6%9C%AC.command/%E3%80%90MacOS@SourceTree%E3%80%91%E2%8F%AC%E5%8F%8C%E5%87%BB%E4%B8%8B%E8%BD%BDSourceTree%E6%95%88%E7%8E%87%E8%84%9A%E6%9C%AC.command)
 
