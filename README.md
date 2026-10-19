@@ -194,13 +194,15 @@ SourceTree.command/
 
 ### <span id="jobs-toc-heading-9" data-jobs-toc="v2">[【MacOS@SourceTree】⏬只拉取远程代码.command](./【MacOS@SourceTree】⏬只拉取远程代码.command/【MacOS@SourceTree】⏬只拉取远程代码.command)</span><!-- jobs-toc:heading-end -->
 
-> **目的：** 从独立终端安全同步只能拉取的第三方仓库，不提交、不推送。
+> **目的：** 从独立终端同步只能拉取的仓库，并向下检出父仓锁定的子模块版本，不提交、不推送。
 
 - SourceTree 只负责打开 Terminal，终端显示自述并等待回车。
 - 确认当前分支的明确远程上游，显示来源，成功 fetch 后固定目标提交。
 - 检查工作区、暂存内容、未跟踪文件及本地独有提交；有风险时红字列明，精确输入 `YES` 才舍弃并同步。
-- 忽略文件保留；可能覆盖忽略内容、嵌套仓库、子模块改动、未完成操作及上游不明确时停止，不递归父子仓。
-- 核验最终提交与工作区，输出来源、日志和退出码。
+- 逐层预取父仓 gitlink 指定的子提交；纯子仓 HEAD 漂移自动对齐，不追踪各子仓分支最新。
+- 忽略文件保留；子仓源码、暂存指针、未完成操作、独有游离提交或有损路径变更停止，父仓 `YES` 不授权丢弃子仓内容。
+- 子提交在所选来源缺失时，显示具体仓库、来源和 SHA，要求发布端补齐；不退回旧版本，不生成待 push 的本地提交。
+- 逐仓核验最终提交与工作区，输出来源、日志和退出码；不向更高父仓同步。
 
 ### <span id="jobs-toc-heading-10" data-jobs-toc="v2">[【MacOS@SourceTree】⏬双击下载SourceTree效率脚本.command](./%E3%80%90MacOS@SourceTree%E3%80%91%E2%8F%AC%E5%8F%8C%E5%87%BB%E4%B8%8B%E8%BD%BDSourceTree%E6%95%88%E7%8E%87%E8%84%9A%E6%9C%AC.command/%E3%80%90MacOS@SourceTree%E3%80%91%E2%8F%AC%E5%8F%8C%E5%87%BB%E4%B8%8B%E8%BD%BDSourceTree%E6%95%88%E7%8E%87%E8%84%9A%E6%9C%AC.command)</span><!-- jobs-toc:heading-end -->
 
