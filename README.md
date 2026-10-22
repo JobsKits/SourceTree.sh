@@ -42,12 +42,13 @@
   - [【MacOS@SourceTree】📥修复Git无法Fetch.command](#jobs-toc-heading-33)
   - [【MacOS@SourceTree】📦双击打包Flutter.android.command](#jobs-toc-heading-34)
   - [【MacOS@SourceTree】📦双击打包Flutter.iOS.command](#jobs-toc-heading-35)
-  - [【MacOS@SourceTree】📦双击自动生成ipa文件.command](#jobs-toc-heading-36)
-  - [【MacOS@SourceTree】🚀逐层空白提交并Push.command](#jobs-toc-heading-37)
-  - [【MacOS@SourceTree】🪄配置并运行Magic Resume.command](#jobs-toc-heading-38)
-  - [【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.command](#jobs-toc-heading-39)
-  - [【MacOS@SourceTree】🫘打开终端运行Pod Install.command](#jobs-toc-heading-40)
-  - [【MacOS】安装SourceTree自定义菜单.command](#jobs-toc-heading-41)
+  - [【MacOS@SourceTree】📦双击打包Flutter.ohos.command](#jobs-toc-heading-36)
+  - [【MacOS@SourceTree】📦双击自动生成ipa文件.command](#jobs-toc-heading-37)
+  - [【MacOS@SourceTree】🚀逐层空白提交并Push.command](#jobs-toc-heading-38)
+  - [【MacOS@SourceTree】🪄配置并运行Magic Resume.command](#jobs-toc-heading-39)
+  - [【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.command](#jobs-toc-heading-40)
+  - [【MacOS@SourceTree】🫘打开终端运行Pod Install.command](#jobs-toc-heading-41)
+  - [【MacOS】安装SourceTree自定义菜单.command](#jobs-toc-heading-42)
 
 </details>
 <!-- jobs-toc:end -->
@@ -56,9 +57,11 @@
 
 ## <span id="jobs-toc-heading-1" data-jobs-toc="v2">🔥 <font id=前言>前言</font></span><!-- jobs-toc:heading-end -->
 
-脚本库包含 33 个系统 `/bin/zsh` 入口，每个脚本包有同名 `.command` 和独立 `README.md`。源码、静态说明和运行时内置自述分别维护；运行时不读取 README。
+脚本库包含 34 个系统 `/bin/zsh` 入口，每个脚本包有同名 `.command` 和独立 `README.md`（按各包独立主脚本计数，不含内部工具；依据当前磁盘目录，2026-10-22）。源码、静态说明和运行时内置自述分别维护；运行时不读取 README。
 
 运行态位于当前用户家目录的 `SourceTree.command`，备份态为 JobsGenesis 下的同名 Git 工作树。维护时保留两侧已有改动，修改完成后按相同相对路径同步脚本、README、资源及菜单配置；Git 元数据和系统生成文件不互相覆盖。
+
+[**Android**](https://developer.android.com) 打包生成 APK / AAB；[**HarmonyOS**](https://developer.huawei.com/consumer/cn/harmonyos/) 原生应用使用 HAP，构建工具链与签名配置不同。[鸿蒙 Flutter 打包入口](./【MacOS@SourceTree】📦双击打包Flutter.ohos.command/README.md) 只适用于已含 `ohos/` 的适配工程，并要求支持 `flutter build hap` 的 [Flutter 适配 SDK](https://gitcode.com/CPF-Flutter/flutter_flutter)；不会把 Android APK 转成 HAP，也不自动迁移工程。
 
 ## <span id="jobs-toc-heading-2" data-jobs-toc="v2">一、菜单安装 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
@@ -70,7 +73,7 @@
 
 安装器先确认库发送目标，再选择菜单安装或配置回收。已有目标库回车保留，输入 `YES` 才备份替换。菜单按脚本路径合并并保留自定义显示标题、快捷键和显示设置，覆盖前生成可恢复备份；正在运行的 Sourcetree 正常退出、保存配置后再写入并重新打开，不强制结束。
 
-菜单动作目标默认使用家目录运行副本；指定其它发送目录时使用该目标库，仓库动作参数为 `$REPO`，不是把多个路径拼接成一个参数。所有动作目标须存在、可执行且唯一。安装器本身保留终端交互，不挂成仓库菜单；其余 32 个任务入口可作为仓库动作。
+菜单动作目标默认使用家目录运行副本；指定其它发送目录时使用该目标库，仓库动作参数为 `$REPO`，不是把多个路径拼接成一个参数。所有动作目标须存在、可执行且唯一。安装器本身保留终端交互，不挂成仓库菜单；其余 33 个任务入口可作为仓库动作。
 
 详细步骤、依赖与风险见 [安装器 README](./【MacOS】安装SourceTree自定义菜单.command/README.md)。
 
@@ -114,6 +117,7 @@
 | `📥修复Git无法Fetch` | [README](./%E3%80%90MacOS%40SourceTree%E3%80%91%F0%9F%93%A5%E4%BF%AE%E5%A4%8DGit%E6%97%A0%E6%B3%95Fetch.command/README.md) |
 | `📦双击打包Flutter.android` | [README](./%E3%80%90MacOS%40SourceTree%E3%80%91%F0%9F%93%A6%E5%8F%8C%E5%87%BB%E6%89%93%E5%8C%85Flutter.android.command/README.md) |
 | `📦双击打包Flutter.iOS` | [README](./%E3%80%90MacOS%40SourceTree%E3%80%91%F0%9F%93%A6%E5%8F%8C%E5%87%BB%E6%89%93%E5%8C%85Flutter.iOS.command/README.md) |
+| `📦双击打包Flutter.ohos` | [README](./【MacOS@SourceTree】📦双击打包Flutter.ohos.command/README.md) |
 | `📦双击自动生成ipa文件` | [README](./%E3%80%90MacOS%40SourceTree%E3%80%91%F0%9F%93%A6%E5%8F%8C%E5%87%BB%E8%87%AA%E5%8A%A8%E7%94%9F%E6%88%90ipa%E6%96%87%E4%BB%B6.command/README.md) |
 | `🚀逐层空白提交并Push` | [README](./%E3%80%90MacOS%40SourceTree%E3%80%91%F0%9F%9A%80%E9%80%90%E5%B1%82%E7%A9%BA%E7%99%BD%E6%8F%90%E4%BA%A4%E5%B9%B6Push.command/README.md) |
 | `🪄配置并运行Magic Resume` | [README](./%E3%80%90MacOS%40SourceTree%E3%80%91%F0%9F%AA%84%E9%85%8D%E7%BD%AE%E5%B9%B6%E8%BF%90%E8%A1%8CMagic%20Resume.command/README.md) |
@@ -180,6 +184,7 @@ SourceTree.command/
 ├── 【MacOS@SourceTree】📥修复Git无法Fetch.command/  # 1 个入口
 ├── 【MacOS@SourceTree】📦双击打包Flutter.android.command/  # 1 个入口
 ├── 【MacOS@SourceTree】📦双击打包Flutter.iOS.command/  # 1 个入口
+├── 【MacOS@SourceTree】📦双击打包Flutter.ohos.command/  # 1 个入口
 ├── 【MacOS@SourceTree】📦双击自动生成ipa文件.command/  # 1 个入口
 ├── 【MacOS@SourceTree】🚀逐层空白提交并Push.command/  # 1 个入口
 ├── 【MacOS@SourceTree】🪄配置并运行Magic Resume.command/  # 1 个入口
@@ -190,7 +195,7 @@ SourceTree.command/
 
 ## 七、<span id="script-workflows">脚本执行流程</span> <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-本仓共有 33 个用户入口。这里只列本仓维护的主入口；独立子 Git、测试、函数库及打包资源模板不作为用户运行入口。步骤来自静态源码与配套说明，不在真实业务仓执行安装、清理、构建或 Git 写操作。
+本仓共有 34 个用户入口（按各包独立主脚本计数，依据当前磁盘目录，2026-10-22）。这里只列本仓维护的主入口；独立子 Git、测试、函数库及打包资源模板不作为用户运行入口。步骤来自静态源码与配套说明，不在真实业务仓执行安装、清理、构建或 Git 写操作。
 
 ### <span id="jobs-toc-heading-9" data-jobs-toc="v2">[【MacOS@SourceTree】⏬只拉取远程代码.command](./【MacOS@SourceTree】⏬只拉取远程代码.command/【MacOS@SourceTree】⏬只拉取远程代码.command)</span><!-- jobs-toc:heading-end -->
 
@@ -361,10 +366,10 @@ SourceTree.command/
 
 > **目的：** 按工程实际启用的生成器生成代码与资源。
 
-- 定位项目与 SDK，读取 pubspec.yaml 和生成目录。
-- 按配置顺序执行 clean / get、代码生成、图标、国际化或 Protobuf。
-  - 默认先清理并拉取依赖；`build_runner` 可覆盖冲突的生成输出。
-- 报告结果；持续 watch 仅允许明确的终端模式，Sourcetree 跳过。
+- 定位真实 Flutter 项目及其 SDK，依据依赖声明与生成器配置列出计划；`--check` 只预览，不调用 SDK、不写项目。
+- 默认执行 `pub get`，再生成项目明确配置的代码、图标、启动页、国际化或绑定文件；任一步失败停止。
+  - 默认不清缓存、不传强制删除冲突参数；生成器仍会改写其管理的产物。显式启用清理或删除冲突输出时，须在终端输入 `YES`。
+- 报告结果及日志；持续 watch 仅限终端，已声明 FVM 的工程不静默切换到全局 SDK。
 
 ### <span id="jobs-toc-heading-28" data-jobs-toc="v2">[【MacOS@SourceTree】🐦Flutter重新拉取第三方依赖.command](./%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%90%A6Flutter%E9%87%8D%E6%96%B0%E6%8B%89%E5%8F%96%E7%AC%AC%E4%B8%89%E6%96%B9%E4%BE%9D%E8%B5%96.command/%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%90%A6Flutter%E9%87%8D%E6%96%B0%E6%8B%89%E5%8F%96%E7%AC%AC%E4%B8%89%E6%96%B9%E4%BE%9D%E8%B5%96.command)</span><!-- jobs-toc:heading-end -->
 
@@ -378,10 +383,10 @@ SourceTree.command/
 
 > **目的：** 检查 Flutter 工具链或执行明确选择的依赖准备模式。
 
-- 解析项目与模式参数，检查 SDK。
-- 按模式执行 doctor 或依赖准备。
-  - 如果选择仅 get，拉取依赖；如果选择 clean-get，先清理再拉取。
-- 输出诊断和日志，保留失败状态。
+- 解析真实 Flutter 项目与 SDK；`--check` 只检查路径与命令计划，不调用 SDK、不写项目。
+- 默认运行 `doctor -v`；工具报告环境问题时也返回失败状态，避免把命令完成误报为环境健康。
+  - 兼容显式 `pub-get` 和 `clean-get`；后者须在终端输入 `YES` 才清理缓存。
+- 输出诊断与日志；已声明 FVM 的工程不静默切换到全局 SDK。
 
 ### <span id="jobs-toc-heading-30" data-jobs-toc="v2">[【MacOS@SourceTree】🐦打开:运行Flutter项目.command](./%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%90%A6%E6%89%93%E5%BC%80%3A%E8%BF%90%E8%A1%8CFlutter%E9%A1%B9%E7%9B%AE.command/%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%90%A6%E6%89%93%E5%BC%80%3A%E8%BF%90%E8%A1%8CFlutter%E9%A1%B9%E7%9B%AE.command)</span><!-- jobs-toc:heading-end -->
 
@@ -434,7 +439,15 @@ SourceTree.command/
 - 按所选配置执行 flutter build ipa。
 - 核验 IPA；仅产生 xcarchive 时明确提示后续导出要求。
 
-### <span id="jobs-toc-heading-36" data-jobs-toc="v2">[【MacOS@SourceTree】📦双击自动生成ipa文件.command](./%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%93%A6%E5%8F%8C%E5%87%BB%E8%87%AA%E5%8A%A8%E7%94%9F%E6%88%90ipa%E6%96%87%E4%BB%B6.command/%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%93%A6%E5%8F%8C%E5%87%BB%E8%87%AA%E5%8A%A8%E7%94%9F%E6%88%90ipa%E6%96%87%E4%BB%B6.command)</span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-36" data-jobs-toc="v2">[【MacOS@SourceTree】📦双击打包Flutter.ohos.command](./【MacOS@SourceTree】📦双击打包Flutter.ohos.command/【MacOS@SourceTree】📦双击打包Flutter.ohos.command)</span><!-- jobs-toc:heading-end -->
+
+> **目的：** 为已适配鸿蒙的 Flutter 工程构建 HAP，支持按需生成 APP 发布包。
+
+- 定位目标工程，检查既有 `ohos/` 目录和适配 SDK 的 `flutter build hap` 能力。
+- 默认执行 release HAP 构建，可选 `hap` / `app` / `all` 与 debug / profile 模式；构建失败返回非零状态。
+- 核对非空产物并显示路径与日志；允许增量复用已有产物，签名与上架配置按工程实际设置，详见 [打包 README](./【MacOS@SourceTree】📦双击打包Flutter.ohos.command/README.md)。
+
+### <span id="jobs-toc-heading-37" data-jobs-toc="v2">[【MacOS@SourceTree】📦双击自动生成ipa文件.command](./%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%93%A6%E5%8F%8C%E5%87%BB%E8%87%AA%E5%8A%A8%E7%94%9F%E6%88%90ipa%E6%96%87%E4%BB%B6.command/%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%93%A6%E5%8F%8C%E5%87%BB%E8%87%AA%E5%8A%A8%E7%94%9F%E6%88%90ipa%E6%96%87%E4%BB%B6.command)</span><!-- jobs-toc:heading-end -->
 
 > **目的：** 把明确选定的现有真机 App 重新封装成 IPA。
 
@@ -442,7 +455,7 @@ SourceTree.command/
 - 在独立临时 Payload 中复制 App 并压缩。
 - 验证输出并移动到指定目录，不执行构建、重签名或 App Store 导出。
 
-### <span id="jobs-toc-heading-37" data-jobs-toc="v2">[【MacOS@SourceTree】🚀逐层空白提交并Push.command](./%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%9A%80%E9%80%90%E5%B1%82%E7%A9%BA%E7%99%BD%E6%8F%90%E4%BA%A4%E5%B9%B6Push.command/%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%9A%80%E9%80%90%E5%B1%82%E7%A9%BA%E7%99%BD%E6%8F%90%E4%BA%A4%E5%B9%B6Push.command)</span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-38" data-jobs-toc="v2">[【MacOS@SourceTree】🚀逐层空白提交并Push.command](./%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%9A%80%E9%80%90%E5%B1%82%E7%A9%BA%E7%99%BD%E6%8F%90%E4%BA%A4%E5%B9%B6Push.command/%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%9A%80%E9%80%90%E5%B1%82%E7%A9%BA%E7%99%BD%E6%8F%90%E4%BA%A4%E5%B9%B6Push.command)</span><!-- jobs-toc:heading-end -->
 
 > **目的：** 按子仓到父仓顺序提交并同步已配置远端。
 
@@ -455,7 +468,7 @@ SourceTree.command/
   - 只复用已有本地分支；整合冲突或目标线路失败时停止，保留现场，不强推。
 - 整合全部目标线路，再将同一最终 HEAD 逐条推送并核验，随后处理父仓指针。
 
-### <span id="jobs-toc-heading-38" data-jobs-toc="v2">[【MacOS@SourceTree】🪄配置并运行Magic Resume.command](./%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%AA%84%E9%85%8D%E7%BD%AE%E5%B9%B6%E8%BF%90%E8%A1%8CMagic%20Resume.command/%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%AA%84%E9%85%8D%E7%BD%AE%E5%B9%B6%E8%BF%90%E8%A1%8CMagic%20Resume.command)</span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-39" data-jobs-toc="v2">[【MacOS@SourceTree】🪄配置并运行Magic Resume.command](./%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%AA%84%E9%85%8D%E7%BD%AE%E5%B9%B6%E8%BF%90%E8%A1%8CMagic%20Resume.command/%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%AA%84%E9%85%8D%E7%BD%AE%E5%B9%B6%E8%BF%90%E8%A1%8CMagic%20Resume.command)</span><!-- jobs-toc:heading-end -->
 
 > **目的：** 准备并后台运行匹配的 Magic Resume 项目。
 
@@ -463,7 +476,7 @@ SourceTree.command/
 - 检查项目工具并执行 pnpm install。
 - 核对端口后后台启动 pnpm dev，服务就绪再打开网页，日志与 PID 留存。
 
-### <span id="jobs-toc-heading-39" data-jobs-toc="v2">[【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.command](./%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%AB%98%E5%9C%A8Sourcetree%E4%B8%AD%E8%BF%90%E8%A1%8CPod%20Install.command/%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%AB%98%E5%9C%A8Sourcetree%E4%B8%AD%E8%BF%90%E8%A1%8CPod%20Install.command)</span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-40" data-jobs-toc="v2">[【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.command](./%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%AB%98%E5%9C%A8Sourcetree%E4%B8%AD%E8%BF%90%E8%A1%8CPod%20Install.command/%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%AB%98%E5%9C%A8Sourcetree%E4%B8%AD%E8%BF%90%E8%A1%8CPod%20Install.command)</span><!-- jobs-toc:heading-end -->
 
 > **目的：** 在指定 Podfile 目录执行受控的 Pod 安装。
 
@@ -471,7 +484,7 @@ SourceTree.command/
 - 检查参数、单目录边界与 Podfile。
 - 默认执行纯净模式 pod install --no-repo-update，输出实时日志，不升级全局工具链。
 
-### <span id="jobs-toc-heading-40" data-jobs-toc="v2">[【MacOS@SourceTree】🫘打开终端运行Pod Install.command](./%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%AB%98%E6%89%93%E5%BC%80%E7%BB%88%E7%AB%AF%E8%BF%90%E8%A1%8CPod%20Install.command/%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%AB%98%E6%89%93%E5%BC%80%E7%BB%88%E7%AB%AF%E8%BF%90%E8%A1%8CPod%20Install.command)</span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-41" data-jobs-toc="v2">[【MacOS@SourceTree】🫘打开终端运行Pod Install.command](./%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%AB%98%E6%89%93%E5%BC%80%E7%BB%88%E7%AB%AF%E8%BF%90%E8%A1%8CPod%20Install.command/%E3%80%90MacOS@SourceTree%E3%80%91%F0%9F%AB%98%E6%89%93%E5%BC%80%E7%BB%88%E7%AB%AF%E8%BF%90%E8%A1%8CPod%20Install.command)</span><!-- jobs-toc:heading-end -->
 
 > **目的：** 把 Pod Install 交给独立 Terminal 执行。
 
@@ -479,7 +492,7 @@ SourceTree.command/
 - 通过 AppleScript 打开终端并传入明确目录。
 - 子入口展示自述、确认后安装；启动器成功仅代表已转交。
 
-### <span id="jobs-toc-heading-41" data-jobs-toc="v2">[【MacOS】安装SourceTree自定义菜单.command](./%E3%80%90MacOS%E3%80%91%E5%AE%89%E8%A3%85SourceTree%E8%87%AA%E5%AE%9A%E4%B9%89%E8%8F%9C%E5%8D%95.command/%E3%80%90MacOS%E3%80%91%E5%AE%89%E8%A3%85SourceTree%E8%87%AA%E5%AE%9A%E4%B9%89%E8%8F%9C%E5%8D%95.command)</span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-42" data-jobs-toc="v2">[【MacOS】安装SourceTree自定义菜单.command](./%E3%80%90MacOS%E3%80%91%E5%AE%89%E8%A3%85SourceTree%E8%87%AA%E5%AE%9A%E4%B9%89%E8%8F%9C%E5%8D%95.command/%E3%80%90MacOS%E3%80%91%E5%AE%89%E8%A3%85SourceTree%E8%87%AA%E5%AE%9A%E4%B9%89%E8%8F%9C%E5%8D%95.command)</span><!-- jobs-toc:heading-end -->
 
 > **目的：** 发送脚本库并合并安装 Sourcetree 自定义动作。
 

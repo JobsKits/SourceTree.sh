@@ -645,6 +645,10 @@ function run(argv) {
   var pullScriptPath = argv[3] + '/' + pullScriptName + '/' + pullScriptName;
   var pullDefault = { target: pullScriptPath, params: '$REPO', name: '⏬只拉取远程代码（终端）', repoAction: true, fileAction: false, separateWindow: false, showFullOutput: false, logAction: false, shortcutKeyCode: -1, shortcutKeyModifiers: 0, shortcutKeyDisplay: '' };
   if (!templates.some(function(item) { return canonical(item.target) === pullScriptPath; })) templates.push(pullDefault);
+  var ohosScriptName = '【MacOS@SourceTree】📦双击打包Flutter.ohos.command';
+  var ohosScriptPath = argv[3] + '/' + ohosScriptName + '/' + ohosScriptName;
+  var ohosDefault = { target: ohosScriptPath, params: '$REPO', name: '📦双击打包Flutter.ohos', repoAction: true, fileAction: false, separateWindow: true, showFullOutput: true, logAction: false, shortcutKeyCode: -1, shortcutKeyModifiers: 0, shortcutKeyDisplay: '' };
+  if (!templates.some(function(item) { return canonical(item.target) === ohosScriptPath; })) templates.push(ohosDefault);
   var updates = {}, seen = {}, result = [];
   templates.forEach(function(item) {
     item.target = canonical(item.target);

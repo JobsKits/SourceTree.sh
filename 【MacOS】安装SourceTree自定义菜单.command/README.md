@@ -28,6 +28,8 @@
 
 安装菜单时会补齐 [⏬只拉取远程代码（终端）](../【MacOS@SourceTree】⏬只拉取远程代码.command/README.md) 动作，适用于没有推送权限的上游仓库。它打开独立终端执行，拉取当前父仓后逐层按 gitlink 检出子模块，不提交、不推送；纯子仓 HEAD 漂移自动对齐。当前父仓本地内容须红字列明并精确输入 `YES` 才舍弃，子仓源码和暂存指针仍单独保护。目标平台缺少子提交时停止并显示仓库、来源及 SHA，不能用消费端提交或 push 解决。
 
+安装菜单也会补齐 [📦双击打包Flutter.ohos](../【MacOS@SourceTree】📦双击打包Flutter.ohos.command/README.md)。[**Android**](https://developer.android.com) 打包产物为 APK / AAB，[**HarmonyOS**](https://developer.huawei.com/consumer/cn/harmonyos/) 原生应用采用 HAP；该入口只处理已适配鸿蒙的 [**Flutter**](https://flutter.dev/) 工程，需要支持 `flutter build hap` 的 [适配 SDK](https://gitcode.com/CPF-Flutter/flutter_flutter) 和既有 `ohos/` 目录。安装菜单不会安装 SDK、迁移工程或生成签名配置。
+
 | 子模块副本处理 | 原写法 | 当前写法与结果 |
 | --- | --- | --- |
 | 清除旧工作树路径 | `git -C 暂存目录 config --local --unset core.worktree`，可能先进入失效路径而失败 | `git config --file 配置文件 --unset-all core.worktree`，直接清理暂存 `.git/config` 与已有的 `.git/config.worktree` |
@@ -67,6 +69,8 @@
 
 `⏬只拉取远程代码（终端）` 同时登记在安装脚本与 `actions.plist` 模板中。即使旧模板尚未包含该动作，安装方向也会按稳定脚本路径补齐；目标为运行库中的同名可执行 `.command`，参数为 `$REPO`，仓库动作启用、文件动作关闭。默认不打开 Sourcetree 输出窗口，脚本负责启动独立 `Terminal.app` 承接交互；更新已有动作时仍保留用户的标题和窗口设置。终端启动失败或无法交互时停止，不能跳过 `YES` 门禁。
 
+`📦双击打包Flutter.ohos` 同样同时登记在安装脚本与模板中，旧模板安装时按稳定脚本路径补齐。默认参数为 `$REPO`，仓库动作启用、文件动作关闭，并启用独立输出窗口与完整输出；更新已有动作时保留当前标题、快捷键和窗口设置。工具链和 HAP 产物校验由打包入口负责。
+
 ## <span id="jobs-toc-heading-5" data-jobs-toc="v2">四、同步和重载 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 参与同步的等位包为当前库、当前用户家目录中的运行库、JobsGenesis 中的备份库，以及本次发送的目标库；仅同步实际存在的安装器目录。
@@ -86,6 +90,8 @@
 已通过 `zsh -n`、归档解档、菜单标题保留、重复目标拒绝和内容相同不误报失败的隔离验证。库发送与替换的失败路径在临时目录验证；未实际替换用户仓库或克隆目录。
 
 仅拉取动作的菜单合并已在临时运行库验证：31 个原模板动作保持原值，旧模板与首次安装均能补齐唯一新动作；用户标题、快捷键、窗口设置和额外动作保留，仓库参数和动作类型校正，重复目标及不可执行脚本会拒绝安装。
+
+鸿蒙动作另通过 44 项临时库检查：旧模板自动补齐、首次安装、现有标题与其它用户字段保留、额外动作保留、重复安装幂等、重复目标和不可执行脚本拒绝。模板原有 32 个动作逐字段保持原值，新增鸿蒙动作后共 33 个；检查未改写真实用户菜单或执行真实打包。
 
 Git 副本回归通过 37 项检查，覆盖普通仓库、真实吸收元数据的子模块、旧相对路径失效或误指现存目录、绝对路径、`config.worktree`、重复键、无提交仓库、共享对象拒绝及配置锁失败；同时核对源库配置、HEAD、索引和工作区不变，以及暂存目录移到最终位置后 `fsck` 成功。完整发送流程另通过新建目标、备份替换、失败保留目标并清理暂存三类隔离检查。非管理员新电脑仍需使用更新后的脚本实机重跑。
 
