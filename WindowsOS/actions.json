@@ -1,0 +1,164 @@
+[
+  {
+    "Id": "download",
+    "Name": "⏬双击下载SourceTree效率脚本",
+    "Script": "【WindowsOS@SourceTree】⏬双击下载SourceTree效率脚本/Run.ps1",
+    "Purpose": "克隆效率脚本到新目录，保留已有库"
+  },
+  {
+    "Id": "pull",
+    "Name": "⏬只拉取远程代码",
+    "Script": "【WindowsOS@SourceTree】⏬只拉取远程代码/Run.ps1",
+    "Purpose": "同步明确 upstream，再按父仓 gitlink 更新子模块"
+  },
+  {
+    "Id": "imports",
+    "Name": "♻️修复Flutter项目中文路径",
+    "Script": "【WindowsOS@SourceTree】♻️修复Flutter项目中文路径/Run.ps1",
+    "Purpose": "备份并修复自有 Dart package 指令中的 Unicode 编码"
+  },
+  {
+    "Id": "rollback",
+    "Name": "♻️双击Git（识别子Git） 提交回退",
+    "Script": "【WindowsOS@SourceTree】♻️双击Git（识别子Git） 提交回退/Run.ps1",
+    "Purpose": "soft 撤回未推送提交；hard 固定目标并确认"
+  },
+  {
+    "Id": "dependencies",
+    "Name": "⚙️收集当前Flutter工程的依赖",
+    "Script": "【WindowsOS@SourceTree】⚙️收集当前Flutter工程的依赖/Run.ps1",
+    "Purpose": "按已解析依赖复制源码并输出独立归档"
+  },
+  {
+    "Id": "unblock",
+    "Name": "⚙️运行授权",
+    "Script": "【WindowsOS@SourceTree】⚙️运行授权/Run.ps1",
+    "Purpose": "仅对可信 Windows 脚本移除下载来源标记"
+  },
+  {
+    "Id": "edgetunnel",
+    "Name": "同步edgetunnel代码后手动升级",
+    "Script": "【WindowsOS@SourceTree】同步edgetunnel代码后手动升级/Run.ps1",
+    "Purpose": "按现有 Wrangler 配置检查身份并确认部署"
+  },
+  {
+    "Id": "studio",
+    "Name": "用Android Studio打开",
+    "Script": "【WindowsOS@SourceTree】用Android Studio打开/Run.ps1",
+    "Purpose": "使用 Windows Android Studio 打开所选目录"
+  },
+  {
+    "Id": "studio17",
+    "Name": "用Android Studio打开openjdk64-17.0.16",
+    "Script": "【WindowsOS@SourceTree】用Android Studio打开openjdk64-17.0.16/Run.ps1",
+    "Purpose": "仅给新 Android Studio 进程设置已安装 Java17"
+  },
+  {
+    "Id": "trae17",
+    "Name": "用Trae打开@openjdk64-17.0.16",
+    "Script": "【WindowsOS@SourceTree】用Trae打开@openjdk64-17.0.16/Run.ps1",
+    "Purpose": "仅给新 Trae 进程设置已安装 Java17"
+  },
+  {
+    "Id": "trae",
+    "Name": "用Trea打开",
+    "Script": "【WindowsOS@SourceTree】用Trea打开/Run.ps1",
+    "Purpose": "使用 Windows Trae 打开所选目录"
+  },
+  {
+    "Id": "code",
+    "Name": "用VSCode打开",
+    "Script": "【WindowsOS@SourceTree】用VSCode打开/Run.ps1",
+    "Purpose": "使用 Windows VS Code 打开所选目录"
+  },
+  {
+    "Id": "code17",
+    "Name": "用VSCode打开@openjdk64-17.0.16",
+    "Script": "【WindowsOS@SourceTree】用VSCode打开@openjdk64-17.0.16/Run.ps1",
+    "Purpose": "仅给新 VS Code 进程设置已安装 Java17"
+  },
+  {
+    "Id": "terminal",
+    "Name": "用终端打开",
+    "Script": "【WindowsOS@SourceTree】用终端打开/Run.ps1",
+    "Purpose": "在所选目录打开 PowerShell"
+  },
+  {
+    "Id": "path",
+    "Name": "获取目标绝对地址",
+    "Script": "【WindowsOS@SourceTree】获取目标绝对地址/Run.ps1",
+    "Purpose": "输出并复制目标绝对地址"
+  },
+  {
+    "Id": "remote",
+    "Name": "🌐获取远程仓库地址",
+    "Script": "【WindowsOS@SourceTree】🌐获取远程仓库地址/Run.ps1",
+    "Purpose": "读取当前 Git 仓库的全部 remote 地址"
+  },
+  {
+    "Id": "codegen",
+    "Name": "🐦Flutter自动化生产代码",
+    "Script": "【WindowsOS@SourceTree】🐦Flutter自动化生产代码/Run.ps1",
+    "Purpose": "按工程配置执行 Flutter 代码生成"
+  },
+  {
+    "Id": "pubget",
+    "Name": "🐦Flutter重新拉取第三方依赖",
+    "Script": "【WindowsOS@SourceTree】🐦Flutter重新拉取第三方依赖/Run.ps1",
+    "Purpose": "使用工程 SDK 执行 flutter pub get"
+  },
+  {
+    "Id": "doctor",
+    "Name": "🐦Flutter项目体检",
+    "Script": "【WindowsOS@SourceTree】🐦Flutter项目体检/Run.ps1",
+    "Purpose": "检查工程同源 Flutter/Dart SDK 并执行 doctor"
+  },
+  {
+    "Id": "run",
+    "Name": "🐦打开：运行Flutter项目",
+    "Script": "【WindowsOS@SourceTree】🐦打开：运行Flutter项目/Run.ps1",
+    "Purpose": "选择 Android、Web 或 Windows 设备运行项目"
+  },
+  {
+    "Id": "typora",
+    "Name": "📘用Typora打开蓝皮书",
+    "Script": "【WindowsOS@SourceTree】📘用Typora打开蓝皮书/Run.ps1",
+    "Purpose": "使用 Windows Typora 打开项目 README"
+  },
+  {
+    "Id": "commit-repair",
+    "Name": "📥修复Git无法Commit",
+    "Script": "【WindowsOS@SourceTree】📥修复Git无法Commit/Run.ps1",
+    "Purpose": "检查 Git 元数据与锁，确认后归档残留锁"
+  },
+  {
+    "Id": "fetch-repair",
+    "Name": "📥修复Git无法Fetch",
+    "Script": "【WindowsOS@SourceTree】📥修复Git无法Fetch/Run.ps1",
+    "Purpose": "分阶段 fetch、prune、pack-refs 并传播错误"
+  },
+  {
+    "Id": "android",
+    "Name": "📦双击打包Flutter.android",
+    "Script": "【WindowsOS@SourceTree】📦双击打包Flutter.android/Run.ps1",
+    "Purpose": "使用工程 SDK 构建 Android APK 和 AAB"
+  },
+  {
+    "Id": "ohos",
+    "Name": "📦双击打包Flutter.ohos",
+    "Script": "【WindowsOS@SourceTree】📦双击打包Flutter.ohos/Run.ps1",
+    "Purpose": "使用已有鸿蒙适配 SDK 和 ohos 工程构建 HAP"
+  },
+  {
+    "Id": "push",
+    "Name": "🚀逐层空白提交并Push",
+    "Script": "【WindowsOS@SourceTree】🚀逐层空白提交并Push/Run.ps1",
+    "Purpose": "子仓先于父仓，以已有本地分支同步明确远端分支"
+  },
+  {
+    "Id": "magic",
+    "Name": "🪄配置并运行Magic Resume",
+    "Script": "【WindowsOS@SourceTree】🪄配置并运行Magic Resume/Run.ps1",
+    "Purpose": "复用或克隆官方仓库并在当前窗口运行开发服务"
+  }
+]
