@@ -239,12 +239,12 @@ macOS 侧共有 34 个用户入口（位于 `MacOS/`；按各包独立主脚本�
 
 ### <span id="jobs-toc-heading-12" data-jobs-toc="v2">[【MacOS@SourceTree】♻️双击Git（识别子Git） 提交回退.command](<./MacOS/【MacOS@SourceTree】♻️双击Git（识别子Git） 提交回退.command/【MacOS@SourceTree】♻️双击Git（识别子Git） 提交回退.command>)</span><!-- jobs-toc:heading-end -->
 
-> **目的：** 将选中历史之后的提交退回暂存区，或在终端明确选择回退模式。
+> **目的：** 在本地撤回选定远端快照或历史提交之后的提交，保留内容供重新审阅。
 
 - 定位仓库，检查冲突、锁与未完成 Git 操作。
 - 选择回退目标与模式。
-  - 如果来自 Sourcetree，只执行保留内容的 soft；hard 只在终端输入 YES 后允许。
-- 执行并核对状态，不 Fetch、不提交、不推送，也不递归重置子仓。
+  - Sourcetree 各远端快照不同时转交终端，明确选择线路或历史提交后 soft 回退；hard 只在直接终端运行并输入 YES 后允许。
+- 按实际净差异报告待提交内容；空提交可能没有文件变化。不 Fetch、不提交、不推送，也不向上回退父仓或递归重置子仓。
 
 ### <span id="jobs-toc-heading-13" data-jobs-toc="v2">[【MacOS@SourceTree】⚙️收集当前Flutter工程的依赖.command](<./MacOS/【MacOS@SourceTree】⚙️收集当前Flutter工程的依赖.command/【MacOS@SourceTree】⚙️收集当前Flutter工程的依赖.command>)</span><!-- jobs-toc:heading-end -->
 

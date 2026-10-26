@@ -71,6 +71,8 @@
 
 `📦双击打包Flutter.ohos` 同样同时登记在安装脚本与模板中，旧模板安装时按稳定脚本路径补齐。默认参数为 `$REPO`，仓库动作启用、文件动作关闭，并启用独立输出窗口与完整输出；更新已有动作时保留当前标题、快捷键和窗口设置。工具链和 HAP 产物校验由打包入口负责。
 
+[提交回退](<../【MacOS@SourceTree】♻️双击Git（识别子Git） 提交回退.command/README.md>) 保持仓库动作与 `$REPO` 参数，菜单不传选中的历史提交。当前分支的多远端快照不同时，脚本打开独立终端明确选择线路或历史提交，再执行 soft 回退；单线路仍以 upstream 为默认目标。更新同路径脚本后下次点击即读取新实现，菜单目标和用户标题沿用已有配置。
+
 ## <span id="jobs-toc-heading-5" data-jobs-toc="v2">四、同步和重载 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 参与同步的等位包为当前库、当前用户家目录中的运行库、JobsGenesis 中的备份库，以及本次发送的目标库；仅同步实际存在的安装器目录。
