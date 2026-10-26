@@ -12,9 +12,60 @@ $env:GIT_CONFIG_COUNT='0';$env:GIT_CONFIG_KEY_0=$null;$env:GIT_CONFIG_VALUE_0=$n
 $env:GIT_ALLOW_PROTOCOL='file';$env:GIT_TERMINAL_PROMPT='0'
 $script:passed=0
 function Assert-Check {param($Condition,$Message) if(-not $Condition){throw $Message};$script:passed++;Write-Host "PASS $Message"}
-function Invoke-TestGit {param([string]$Repo,[string[]]$GitArgs) & git -C $Repo @GitArgs 2>&1|Out-Null;if($LASTEXITCODE -ne 0){throw ('git failed: '+($GitArgs -join ' '))}}
+function Invoke-TestGit {
+    param([string]$Repo,[string[]]$GitArgs)
+    $previousPreference=$ErrorActionPreference
+    try {
+        # PowerShell 5.1 将 Git 的提示性 stderr 包装为错误，实际成败以退出码判定。
+        $ErrorActionPreference='Continue'
+        & git -C $Repo @GitArgs 2>&1|Out-Null
+        $code=$LASTEXITCODE
+    } finally { $ErrorActionPreference=$previousPreference }
+    if($code -ne 0){throw ('git failed: '+($GitArgs -join ' '))}
+}
 try {
     $module=Import-Module $ModulePath -Force -DisableNameChecking -PassThru
+    $unicodeRepo=Join-Path $root '中文仓库 & space [编码]'
+    [void][IO.Directory]::CreateDirectory($unicodeRepo)
+    Invoke-TestGit $unicodeRepo @('init','-b','main')
+    $expectedRoot=(Get-Item -LiteralPath $unicodeRepo).FullName
+    foreach($codePage in @(437,936)) {
+        $encodingCheck=& $module {
+            param($Repository,$CodePage)
+            $savedConsoleEncoding=[Console]::OutputEncoding
+            $savedOutputEncoding=$OutputEncoding
+            try {
+                $OutputEncoding=[Text.Encoding]::GetEncoding(1252)
+                $expectedOutputEncoding=$OutputEncoding
+                [Console]::OutputEncoding=[Text.Encoding]::GetEncoding($CodePage)
+                $resolved=Resolve-JobsRepository $Repository
+                $successConsoleRestored=[Console]::OutputEncoding.CodePage -eq $CodePage
+                $successOutputRestored=[object]::ReferenceEquals($OutputEncoding,$expectedOutputEncoding)
+                $failed=$false
+                try { Invoke-JobsGit $Repository @('jobs-encoding-invalid-command') -Quiet | Out-Null }
+                catch { $failed=$true }
+                $failureConsoleRestored=[Console]::OutputEncoding.CodePage -eq $CodePage
+                $failureOutputRestored=[object]::ReferenceEquals($OutputEncoding,$expectedOutputEncoding)
+                $allowed=Invoke-JobsGit $Repository @('jobs-encoding-invalid-command') -Quiet -AllowFailure
+                [pscustomobject]@{
+                    Root=$resolved
+                    SuccessRestored=($successConsoleRestored -and $successOutputRestored)
+                    FailureRaised=$failed
+                    FailureRestored=($failureConsoleRestored -and $failureOutputRestored)
+                    AllowedFailure=($allowed.Code -ne 0)
+                    AllowedRestored=([Console]::OutputEncoding.CodePage -eq $CodePage -and [object]::ReferenceEquals($OutputEncoding,$expectedOutputEncoding))
+                }
+            } finally {
+                $OutputEncoding=$savedOutputEncoding
+                [Console]::OutputEncoding=$savedConsoleEncoding
+            }
+        } $unicodeRepo $codePage
+        Assert-Check ($encodingCheck.Root -ceq $expectedRoot) ("CP$codePage native Git preserves Unicode repository path")
+        Assert-Check $encodingCheck.SuccessRestored ("CP$codePage restores both encodings after success")
+        Assert-Check $encodingCheck.FailureRaised ("CP$codePage native Git failure propagates")
+        Assert-Check $encodingCheck.FailureRestored ("CP$codePage restores both encodings after failure")
+        Assert-Check ($encodingCheck.AllowedFailure -and $encodingCheck.AllowedRestored) ("CP$codePage allowed failure preserves exit code and encodings")
+    }
     $project=Join-Path $root '中文 space [x]';[void][IO.Directory]::CreateDirectory((Join-Path $project 'lib'))
     $file=Join-Path $project 'lib/demo.dart'
     $source="// Created by Jobs`nimport 'package:demo/%E4%B8%AD%E6%96%87.dart';`nconst x='package:x/%E4%B8%AD';`nexport 'package:x/%2F%E4%B8%AD.dart';`n"
@@ -35,7 +86,8 @@ try {
     [IO.File]::WriteAllText((Join-Path $repo 'one.txt'),'one');Invoke-TestGit $repo @('add','.');Invoke-TestGit $repo @('commit','-m','first')
     $first=(& git -C $repo rev-parse HEAD).Trim()
     $bare1=Join-Path $root 'upstream.git';$bare2=Join-Path $root 'mirror.git'
-    & git init --bare $bare1 2>&1|Out-Null;& git init --bare $bare2 2>&1|Out-Null
+    Invoke-TestGit $root @('init','--bare','-b','main',$bare1)
+    Invoke-TestGit $root @('init','--bare','-b','main',$bare2)
     Invoke-TestGit $repo @('remote','add','origin',$bare1);Invoke-TestGit $repo @('remote','add','gitee',$bare2)
     Invoke-TestGit $repo @('push','-u','origin','main');Invoke-TestGit $repo @('push','gitee','main:gitee')
     [IO.File]::WriteAllText((Join-Path $repo 'one.txt'),'two');Invoke-TestGit $repo @('add','.');Invoke-TestGit $repo @('commit','-m','local')

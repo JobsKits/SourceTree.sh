@@ -26,6 +26,7 @@
 
 - 双击 `Install-Menu.cmd` 安装 [**Sourcetree**](https://www.sourcetreeapp.com/) 当前用户菜单。先退出 Sourcetree；安装保留已有标题和未知动作，写前保存精确备份，`-Mode Restore` 检测配置未变化后恢复。配置位置以 [Atlassian 官方说明](https://support.atlassian.com/sourcetree/kb/edit-sourcetree-configurations-without-opening-the-application-windows/) 为准。
 - 菜单传入 `-SourceTree -Target "$REPO"`。动作进程转交独立 PowerShell，终端内打印自述并回车确认；危险操作精确输入 `YES`。进程级 `-ExecutionPolicy Bypass` 不修改系统策略。
+- CMD 入口关闭继承的延迟展开，保留路径和参数中的 `!`；企业组策略仍优先。
 - 请完整携带 `WindowsOS/`；公共实现与四套复用业务核心均在本目录，不要求原电脑的右键扩展或路径。
 - 日志在 `%TEMP%/JobsSourceTree-动作-时间-运行编号.log`，复用模块日志在 `%TEMP%/JobsSourceTree/logs/`；不会把日志放进项目。
 

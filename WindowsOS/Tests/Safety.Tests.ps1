@@ -7,15 +7,18 @@ $ErrorActionPreference='Stop'
 $root=Split-Path -Parent $PSScriptRoot
 $fixture=Join-Path ([IO.Path]::GetTempPath()) ('JobsSourceTreeSafety-'+[guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($fixture)
-$script:count=0
+$counter=@{Value=0}
 # 为每项安全门禁保留清楚的失败说明。
-function Assert-Check($Condition,[string]$Label){if(!$Condition){throw $Label};$script:count++}
+function Assert-Check($Condition,[string]$Label){if(!$Condition){throw $Label};$counter.Value++}
 # 危险取消及命令失败都必须传播。
 function Assert-Throws([scriptblock]$Body,[string]$Label){$failed=$false;try{& $Body}catch{$failed=$true};Assert-Check $failed $Label}
 try{
     $module=Import-Module (Join-Path $root 'Scripts/SourceTree.psm1') -Force -DisableNameChecking -PassThru
     & $module {
-        param($f)
+        param($f,$counter)
+        # PowerShell 5.1 的模块上下文不继承调用脚本的函数，计数对象显式共享。
+        function Assert-Check($Condition,[string]$Label){if(!$Condition){throw $Label};$counter.Value++}
+        function Assert-Throws([scriptblock]$Body,[string]$Label){$failed=$false;try{& $Body}catch{$failed=$true};Assert-Check $failed $Label}
         $script:LogFile=Join-Path $f 'fixture.log'
         $script:answer=''
         function script:Read-Host {param($Prompt) $script:answer}
@@ -25,10 +28,12 @@ try{
         Assert-Check ($safe -notmatch 'user|secret|token|private|fragment') '来源隐藏凭据与查询内容'
         Assert-Throws {Invoke-JobsTool 'jobs-source-tree-missing-command' @() $f} '缺少工具停止'
         $hostPath=(Get-Process -Id $PID).Path
-        $answer=Invoke-JobsTool $hostPath @('-NoLogo','-NoProfile','-Command','[Console]::Error.WriteLine("fixture stderr"); exit 0') $f -Quiet
+        $stderrProbe=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes('[Console]::Error.WriteLine("fixture stderr"); exit 0'))
+        $answer=Invoke-JobsTool $hostPath @('-NoLogo','-NoProfile','-EncodedCommand',$stderrProbe) $f -Quiet
         Assert-Check ($answer.Code -eq 0 -and $answer.Text -match 'fixture stderr') 'stderr 成功命令不误报失败'
-        Assert-Throws {Invoke-JobsTool $hostPath @('-NoLogo','-NoProfile','-Command','exit 7') $f -Quiet} '非零退出停止'
-    } $fixture
+        $failureProbe=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes('exit 7'))
+        Assert-Throws {Invoke-JobsTool $hostPath @('-NoLogo','-NoProfile','-EncodedCommand',$failureProbe) $f -Quiet} '非零退出停止'
+    } $fixture $counter
     $wrappers=@(Get-ChildItem -LiteralPath $root -Directory|ForEach-Object{Get-ChildItem -LiteralPath $_.FullName -File -Filter '*.cmd'})
     Assert-Check ($wrappers.Count -eq 27) '完整 SourceTree 动作集'
     foreach($wrapper in $wrappers){
@@ -54,5 +59,5 @@ try{
             Assert-Check ($process.ExitCode -eq 7) '真实 CMD 有参失败及时返回原退出码'
         }finally{$process.Dispose()}
     }else{Write-Host 'SKIP：CMD 原生运行仅在 Windows 执行；本机已检查全部 27 个转发入口。'}
-    Write-Host "PASS：$script:count 项断言。"
+    Write-Host "PASS：$($counter.Value) 项断言。"
 }finally{Remove-Item -LiteralPath $fixture -Recurse -Force}

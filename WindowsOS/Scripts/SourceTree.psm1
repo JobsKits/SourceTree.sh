@@ -21,12 +21,22 @@ function Invoke-JobsTool {
     $command = Get-Command $Tool -ErrorAction Stop
     Push-Location -LiteralPath $Directory
     $previousPreference = $ErrorActionPreference
+    $previousOutputEncoding = $OutputEncoding
+    $previousConsoleEncoding = [Console]::OutputEncoding
     try {
+        # Git 等工具输出 UTF8；系统 OEM 代码页会损坏中文仓库路径。
+        $OutputEncoding = New-Object Text.UTF8Encoding($false)
+        [Console]::OutputEncoding = $OutputEncoding
         $ErrorActionPreference = 'Continue'
         $global:LASTEXITCODE = 0
         $lines = @(& $command.Source @Arguments 2>&1 | ForEach-Object { $_.ToString() })
         $code = $LASTEXITCODE
-    } finally { $ErrorActionPreference = $previousPreference; Pop-Location }
+    } finally {
+        $ErrorActionPreference = $previousPreference
+        $OutputEncoding = $previousOutputEncoding
+        [Console]::OutputEncoding = $previousConsoleEncoding
+        Pop-Location
+    }
     $output = $lines -join "`n"
     if (-not $Quiet -and $output) { Write-JobsStatus $output }
     if ($code -ne 0 -and -not $AllowFailure) { throw "$Tool 执行失败，退出码 $code。" }
