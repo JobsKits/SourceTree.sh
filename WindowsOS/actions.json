@@ -93,7 +93,13 @@
     "Id": "remote",
     "Name": "🌐获取远程仓库地址",
     "Script": "【WindowsOS@SourceTree】🌐获取远程仓库地址/Run.ps1",
-    "Purpose": "读取当前 Git 仓库的全部 remote 地址"
+    "Purpose": "单地址直接复制；多地址在独立终端用 fzf 选择后复制"
+  },
+  {
+    "Id": "remote-open",
+    "Name": "🌍打开远程仓库地址",
+    "Script": "【WindowsOS@SourceTree】🌍打开远程仓库地址/Run.ps1",
+    "Purpose": "单地址直接打开；多地址在独立终端用 fzf 选择仓库网页"
   },
   {
     "Id": "codegen",
@@ -147,7 +153,7 @@
     "Id": "ohos",
     "Name": "📦双击打包Flutter.ohos",
     "Script": "【WindowsOS@SourceTree】📦双击打包Flutter.ohos/Run.ps1",
-    "Purpose": "使用已有鸿蒙适配 SDK 和 ohos 工程构建 HAP"
+    "Purpose": "使用已有鸿蒙适配 SDK 一次同时构建 HAP 和 APP，并核验两种产物"
   },
   {
     "Id": "push",

@@ -24,6 +24,8 @@
 
 从 [**JobsKits 脚本仓库**](https://github.com/JobsKits/SourceTree.sh) 下载 [**Sourcetree**](https://www.sourcetreeapp.com/) 效率脚本。下载、语法及结构校验完成后才替换运行目录，旧内容完整保存在同级备份。
 
+这是下载配置用的独立脚本，通过双击或终端运行，不挂入 Sourcetree 自定义菜单。脚本文件与既有调用能力保留，菜单安装器会排除旧配置中的此动作。
+
 ## <span id="jobs-toc-heading-2" data-jobs-toc="v2">一、执行前检查 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 运行环境为 [**macOS**](https://www.apple.com/macos/) 与系统 `/bin/zsh`，需要健康 [**Git**](https://git-scm.com/)。不使用 `sudo`；目标运行目录必须是普通目录，符号链接和文件占用会停止。无需 Homebrew，也不改 shell 配置。

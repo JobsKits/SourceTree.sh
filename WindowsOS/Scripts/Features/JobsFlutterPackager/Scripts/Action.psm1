@@ -283,10 +283,15 @@ function Invoke-JobsPackagerTool {
     try {
         # PowerShell 5.1 将原生 stderr 包装为 ErrorRecord；用进程退出码判断成功。
         $ErrorActionPreference = 'Continue'
+        $global:LASTEXITCODE = -1
         & $File @Arguments 2>&1 | ForEach-Object { Write-JobsPackagerMessage ([string]$_) }
         $code = $LASTEXITCODE
     } finally { Pop-Location }
-    if ($code -ne 0) { throw ('构建命令失败，退出码 ' + $code + '：' + ($Arguments -join ' ')) }
+    if ($code -ne 0) {
+        $failure = New-Object InvalidOperationException ('构建命令失败，退出码 ' + $code + '：' + ($Arguments -join ' '))
+        $failure.Data['JobsExitCode'] = $code
+        throw $failure
+    }
 }
 
 function Get-JobsPackagerArtifacts {
@@ -462,11 +467,14 @@ function Assert-JobsPackagerHarmonyToolchain {
 function Get-JobsPackagerHarmonyArtifacts {
     param([string]$Project, [string]$Type)
     $roots = @((Join-Path $Project 'build/ohos'), (Join-Path $Project 'ohos/build'))
-    foreach ($module in Get-ChildItem -LiteralPath (Join-Path $Project 'ohos') -Directory) { $roots += Join-Path $module.FullName 'build' }
+    foreach ($module in Get-ChildItem -LiteralPath (Join-Path $Project 'ohos') -Directory) {
+        if (($module.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) { $roots += Join-Path $module.FullName 'build' }
+    }
     $found = New-Object 'System.Collections.Generic.List[string]'
     $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($rootPath in $roots) {
         if (-not [IO.Directory]::Exists($rootPath)) { continue }
+        try { [void](Assert-JobsPackagerDirectory $rootPath) } catch { continue }
         $pending = New-Object 'System.Collections.Generic.Stack[string]'
         $pending.Push($rootPath)
         while ($pending.Count -gt 0) {
@@ -492,6 +500,10 @@ function Get-JobsPackagerHarmonyArtifacts {
 function Invoke-JobsPackagerHarmonyBuild {
     param([string]$Project, [string]$Type = $env:OHOS_BUILD_TARGET, [string]$Mode = $env:BUILD_MODE, [string]$FlutterSdk = $env:FLUTTER_OHOS_SDK, [string]$Flavor = $env:FLAVOR)
     $options = Get-JobsPackagerHarmonyOptions -Type $Type -Mode $Mode -Flavor $Flavor
+    Assert-JobsFlutterProject $Project
+    foreach ($relative in @('lib', 'ohos')) {
+        [void](Assert-JobsPackagerDirectory (Join-Path $Project $relative))
+    }
     foreach ($relative in @('ohos/build-profile.json5', 'ohos/oh-package.json5')) {
         $file = Join-Path $Project $relative
         if (-not [IO.File]::Exists($file)) { throw ('工程缺少 ' + $relative + '，请先完成 ohos 平台适配；不会自动创建或修改平台。') }
@@ -511,15 +523,30 @@ function Invoke-JobsPackagerHarmonyBuild {
         Write-JobsPackagerMessage ('Flutter SDK：' + $flutter)
         Write-JobsPackagerMessage ('鸿蒙产物：' + $options.Type + '；模式：' + $options.Mode + '；签名沿用工程现有配置。')
         Invoke-JobsPackagerTool -File $flutter -Arguments @('pub', 'get') -Project $Project
+        $artifactsByTarget = @{}
         foreach ($target in $targets) {
             $started = [DateTime]::UtcNow
             Invoke-JobsPackagerTool -File $flutter -Arguments @('build', $target, ('--' + $options.Mode)) -Project $Project
-            foreach ($artifact in @(Get-JobsPackagerHarmonyArtifacts -Project $Project -Type $target)) {
+            $artifactsByTarget[$target] = @(Get-JobsPackagerHarmonyArtifacts -Project $Project -Type $target)
+            foreach ($artifact in $artifactsByTarget[$target]) {
                 $file = Get-Item -LiteralPath $artifact
                 if ($file.Name -match '-unsigned\.') { Write-JobsPackagerMessage ('未签名鸿蒙产物：' + $artifact + '；安装或上架前必须完成签名。') }
                 elseif ($file.LastWriteTimeUtc -lt $started) { Write-JobsPackagerMessage ('现存鸿蒙产物（构建命令成功，可能复用 Hvigor 缓存，请核对）：' + $artifact) }
                 else { Write-JobsPackagerMessage ('鸿蒙产物已验证：' + $artifact) }
             }
+        }
+        # APP 构建可能重建同一输出树；最终复核刚才确认的路径，避免只剩一种包也报完成。
+        foreach ($target in $targets) {
+            $remaining = 0
+            foreach ($artifact in $artifactsByTarget[$target]) {
+                if (-not [IO.File]::Exists($artifact)) { continue }
+                try {
+                    Assert-JobsPackagerPlainFile $artifact
+                    [void](Assert-JobsPackagerDirectory (Split-Path -Parent $artifact))
+                } catch { continue }
+                if ((Get-Item -LiteralPath $artifact).Length -gt 0) { $remaining++ }
+            }
+            if ($remaining -eq 0) { throw ('最终产物核验失败：已确认的 .' + $target + ' 文件已消失、变空或变成链接；保留其它输出供排查。') }
         }
     } finally {
         foreach ($name in $environment.Keys) {

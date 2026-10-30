@@ -45,6 +45,7 @@ HOME_PACKAGE_ROOT="${HOME}/${SOURCE_PACKAGE_NAME}"
 DEPLOYED_PACKAGE_ROOT=""
 DEPLOY_TARGET_PACKAGE=""
 DEPLOY_STAGING_DIR=""
+PRESERVED_EXISTING_PACKAGE=0
 SOURCETREE_APP_NAME="Sourcetree"
 SOURCETREE_PROCESS_NAME="Sourcetree"
 ACTION_SYNC_PACKAGE_TO_SOURCETREE="将脚本包 actions.plist 同步到 Sourcetree 当前用户配置"
@@ -195,7 +196,8 @@ ensure_not_root_home() {
 }
 # 检查发送 SourceTree.command 库需要的基础命令。
 check_package_send_environment() {
-  command -v ditto >/dev/null 2>&1 || exit_with_error "未找到 ditto，无法完整复制 ${SOURCE_PACKAGE_NAME}。"
+  [[ -x /usr/bin/tar ]] || exit_with_error "未找到系统 tar，无法完整复制 ${SOURCE_PACKAGE_NAME}。"
+  [[ -x /usr/bin/find ]] || exit_with_error "未找到系统 find，无法生成安全复制清单。"
   command -v git >/dev/null 2>&1 || exit_with_error "未找到 git，无法复制并校验 Git 元数据。"
 }
 # 检查 Sourcetree 自定义菜单同步需要的命令。
@@ -323,6 +325,7 @@ confirm_replace_existing_package() {
   echo ""
   warn_echo "目标库已存在：${DEPLOY_TARGET_PACKAGE}"
   gray_echo "直接回车：保留现有 ${SOURCE_PACKAGE_NAME}，继续进入 Sourcetree 自定义菜单安装流程。"
+  gray_echo "保留的库若不兼容当前菜单，将校验并改用当前源库，不替换旧库。"
   gray_echo "输入 YES 后回车：备份旧目标库，再写入新的 ${SOURCE_PACKAGE_NAME}，随后继续安装流程。"
   IFS= read -r "input?👉 直接回车继续；输入 YES 备份替换后继续："
   if [[ "$input" == "YES" ]]; then
@@ -332,13 +335,60 @@ confirm_replace_existing_package() {
   [[ -n "$input" ]] && warn_echo "输入不是 YES，本次保留现有 ${SOURCE_PACKAGE_NAME} 并继续。"
   return 1
 }
+# 收集相对路径清单，按实际类型预排除 socket，避免 tar 尝试读取其扩展属性。
+prepare_copy_file_list() {
+  local source_dir="$1" copy_state_dir="$2" socket_path=""
+  (
+    cd "$source_dir" || exit 1
+    /usr/bin/find . ! -type s -print0 > "${copy_state_dir}/files" || exit 1
+    /usr/bin/find . -type s -print0 > "${copy_state_dir}/sockets"
+  ) 2> "${copy_state_dir}/scan.log" || return 1
+  while IFS= read -r -d '' socket_path; do
+    info_echo "跳过运行时 socket：${source_dir}/${socket_path#./}"
+  done < "${copy_state_dir}/sockets"
+}
+# 同步逐行输出诊断，补齐工具缺少的末尾换行，并区分提示与失败。
+report_copy_diagnostics() {
+  local copy_result="$1" diagnostic_file="" diagnostic_line=""
+  shift
+  for diagnostic_file in "$@"; do
+    [[ -s "$diagnostic_file" ]] || continue
+    while IFS= read -r diagnostic_line || [[ -n "$diagnostic_line" ]]; do
+      if [[ "$copy_result" == 0 ]]; then
+        warn_echo "$diagnostic_line"
+      else
+        error_echo "$diagnostic_line"
+      fi
+    done < "$diagnostic_file"
+  done
+}
+# 按 NUL 清单复制文件及元数据，两端失败均传播，结束前回收本次诊断目录。
+copy_tree_without_runtime_sockets() {
+  setopt LOCAL_OPTIONS PIPE_FAIL
+  local source_dir="$1" target_dir="$2" copy_state_dir="" copy_result=0
+  mkdir -p "$target_dir" || return 1
+  copy_state_dir="$(mktemp -d "${TMPDIR:-/tmp}/sourcetree-copy.XXXXXX")" || return 1
+  {
+    if ! prepare_copy_file_list "$source_dir" "$copy_state_dir"; then
+      report_copy_diagnostics 1 "${copy_state_dir}/scan.log"
+      return 1
+    fi
+    /usr/bin/tar -C "$source_dir" -cpf - --no-recursion --null -T "${copy_state_dir}/files" 2> "${copy_state_dir}/archive.log" |
+      /usr/bin/tar -C "$target_dir" -xpf - 2> "${copy_state_dir}/extract.log" || copy_result=$?
+    report_copy_diagnostics "$copy_result" "${copy_state_dir}/archive.log" "${copy_state_dir}/extract.log"
+    return "$copy_result"
+  } always {
+    rm -r -- "$copy_state_dir"
+  }
+}
 # 复制源库工作树到临时目录。
 copy_source_worktree_to_temp() {
   local temp_package="$1"
   note_echo "发送 ${SOURCE_PACKAGE_NAME} 工作树。"
   gray_echo "本地来源：${SOURCE_PACKAGE_ROOT}"
   gray_echo "暂存目标：${temp_package}"
-  ditto "$SOURCE_PACKAGE_ROOT" "$temp_package" || exit_with_error "复制工作树失败：${SOURCE_PACKAGE_ROOT} -> ${temp_package}"
+  gray_echo "按文件清单复制，运行时 socket 单独提示跳过；普通文件与权限保留。"
+  copy_tree_without_runtime_sockets "$SOURCE_PACKAGE_ROOT" "$temp_package" || exit_with_error "复制工作树失败：${SOURCE_PACKAGE_ROOT} -> ${temp_package}；详见日志 ${LOG_FILE}"
 }
 # 直接修改暂存配置文件，避免 Git 先进入复制后已失效的旧工作树。
 clear_copied_git_worktree_config() {
@@ -357,7 +407,7 @@ clear_copied_git_worktree_config() {
 validate_deploy_git_command() {
   local temp_package="$1" failure_message="$2" diagnostic="" git_result=0
   shift 2
-  diagnostic="$(GIT_OPTIONAL_LOCKS=0 git -C "$temp_package" "$@" 2>&1)" || git_result=$?
+  diagnostic="$(GIT_OPTIONAL_LOCKS=0 git -c core.fsmonitor=false -C "$temp_package" "$@" 2>&1)" || git_result=$?
   if [[ "$git_result" != 0 ]]; then
     [[ -z "$diagnostic" ]] || error_echo "$diagnostic"
     exit_with_error "${failure_message}（Git 退出码 ${git_result}）：${temp_package}"
@@ -381,7 +431,8 @@ copy_git_metadata_to_temp() {
   gray_echo "Git 元数据来源：${source_git_dir}"
   gray_echo "Git 元数据目标：${temp_package}/.git"
   rm -rf "${temp_package}/.git"
-  ditto "$source_git_dir" "${temp_package}/.git" || exit_with_error "复制 Git 元数据失败：${source_git_dir}"
+  gray_echo "Git 运行时 socket 不复制；源文件、监控器与配置保持原状。"
+  copy_tree_without_runtime_sockets "$source_git_dir" "${temp_package}/.git" || exit_with_error "复制 Git 元数据失败：${source_git_dir}；详见日志 ${LOG_FILE}"
   clear_copied_git_worktree_config "$temp_package"
   if ! copied_worktree="$(git -C "$temp_package" rev-parse --show-toplevel 2>&1)"; then
     error_echo "$copied_worktree"
@@ -428,9 +479,11 @@ send_package_to_user_directory() {
   local target_parent=""
   local temp_package=""
 
+  PRESERVED_EXISTING_PACKAGE=0
   ask_deploy_target_package
   ensure_deploy_target_is_safe || return 0
   if ! confirm_replace_existing_package; then
+    PRESERVED_EXISTING_PACKAGE=1
     info_echo "已保留现有 ${SOURCE_PACKAGE_NAME}，继续进入 Sourcetree 自定义菜单安装流程。"
     return 0
   fi
@@ -622,11 +675,11 @@ pause_sourcetree_before_menu_sync() {
 }
 # 合并按脚本路径匹配的动作，补齐登记动作并保留当前自定义标题。
 merge_actions_preserving_titles() {
-  local merged_file="$1" runtime_root="$HOME_PACKAGE_ROOT"
-  [[ -z "$DEPLOYED_PACKAGE_ROOT" || ! -d "$DEPLOYED_PACKAGE_ROOT" ]] || runtime_root="$DEPLOYED_PACKAGE_ROOT"
-  osascript -l JavaScript - "$LOCAL_ACTIONS_PLIST" "$TARGET_ACTIONS_PLIST" "$merged_file" "$runtime_root" <<'JAVASCRIPT' || exit_with_error "菜单归档合并失败，未覆盖当前配置。"
+  local merged_file="$1" report_mode="${2:-normal}" runtime_root="${DEPLOYED_PACKAGE_ROOT:-$HOME_PACKAGE_ROOT}" merge_report=""
+  if ! merge_report="$(osascript -l JavaScript - "$LOCAL_ACTIONS_PLIST" "$TARGET_ACTIONS_PLIST" "$merged_file" "$runtime_root" "$SOURCE_PACKAGE_ROOT" "$PRESERVED_EXISTING_PACKAGE" <<'JAVASCRIPT'
 ObjC.import('Foundation');
 function run(argv) {
+  var runtimeRoot = argv[3], fallbackNotice = '';
   function readArchive(path) {
     var data = $.NSData.dataWithContentsOfFile(path);
     if (!data || data.isNil()) throw new Error('Cannot read archive: ' + path);
@@ -634,26 +687,71 @@ function run(argv) {
     if (!Array.isArray(items)) throw new Error('Expected actions array');
     return items;
   }
-  function canonical(target) {
+  function canonical(target, root) {
     var name = target.split('/').pop();
     if (name === '【MacOS@SourceTree】Pod_Install.command') name = '【MacOS@SourceTree】🫘打开终端运行Pod Install.command';
-    return target.indexOf('/SourceTree.command/') >= 0 ? argv[3] + '/MacOS/' + name + '/' + name : target;
+    if (name === '【MacOS@SourceTree】🐦打开:运行Flutter项目.command') name = '【MacOS@SourceTree】🐦打开：运行Flutter项目.command';
+    var managed = target.indexOf('/SourceTree.command/') >= 0 ||
+      target.indexOf(argv[3] + '/MacOS/') === 0 || target.indexOf(argv[4] + '/MacOS/') === 0;
+    return managed ? (root || runtimeRoot) + '/MacOS/' + name + '/' + name : target;
   }
-  var templates = readArchive(argv[0]);
-  var current = $.NSFileManager.defaultManager.fileExistsAtPath(argv[1]) ? readArchive(argv[1]) : [];
+  // 这两个入口只供独立运行；同时过滤旧模板与当前菜单，避免作为额外动作重新加入。
+  function isMenuAction(item) {
+    var name = item.target.split('/').pop();
+    return name !== '【MacOS@SourceTree】⏬双击下载SourceTree效率脚本.command' &&
+      name !== '【MacOS@SourceTree】⚙️运行授权.command';
+  }
+  var templates = readArchive(argv[0]).filter(isMenuAction);
+  var current = $.NSFileManager.defaultManager.fileExistsAtPath(argv[1]) ? readArchive(argv[1]).filter(isMenuAction) : [];
   var pullScriptName = '【MacOS@SourceTree】⏬只拉取远程代码.command';
   var pullScriptPath = argv[3] + '/MacOS/' + pullScriptName + '/' + pullScriptName;
   var pullDefault = { target: pullScriptPath, params: '$REPO', name: '⏬只拉取远程代码（终端）', repoAction: true, fileAction: false, separateWindow: false, showFullOutput: false, logAction: false, shortcutKeyCode: -1, shortcutKeyModifiers: 0, shortcutKeyDisplay: '' };
   if (!templates.some(function(item) { return canonical(item.target) === pullScriptPath; })) templates.push(pullDefault);
   var ohosScriptName = '【MacOS@SourceTree】📦双击打包Flutter.ohos.command';
   var ohosScriptPath = argv[3] + '/MacOS/' + ohosScriptName + '/' + ohosScriptName;
-  var ohosDefault = { target: ohosScriptPath, params: '$REPO', name: '📦双击打包Flutter.ohos', repoAction: true, fileAction: false, separateWindow: true, showFullOutput: true, logAction: false, shortcutKeyCode: -1, shortcutKeyModifiers: 0, shortcutKeyDisplay: '' };
+  var ohosDefault = { target: ohosScriptPath, params: '$REPO --target all --mode release', name: '📦打包生成HAP+APP文件（Flutter.ohos）', repoAction: true, fileAction: false, separateWindow: true, showFullOutput: true, logAction: false, shortcutKeyCode: -1, shortcutKeyModifiers: 0, shortcutKeyDisplay: '' };
   if (!templates.some(function(item) { return canonical(item.target) === ohosScriptPath; })) templates.push(ohosDefault);
+  templates.forEach(function(item) {
+    if (canonical(item.target) === ohosScriptPath) {
+      item.params = ohosDefault.params;
+      if (item.name === '📦双击打包Flutter.ohos') item.name = ohosDefault.name;
+    }
+  });
+  var remoteOpenScriptName = '【MacOS@SourceTree】🌍打开远程仓库地址.command';
+  var remoteOpenScriptPath = argv[3] + '/MacOS/' + remoteOpenScriptName + '/' + remoteOpenScriptName;
+  var remoteOpenDefault = { target: remoteOpenScriptPath, params: '$REPO', name: '🌍打开远程仓库地址', repoAction: true, fileAction: false, separateWindow: false, showFullOutput: true, logAction: false, shortcutKeyCode: -1, shortcutKeyModifiers: 0, shortcutKeyDisplay: '' };
+  if (!templates.some(function(item) { return canonical(item.target) === remoteOpenScriptPath; })) templates.push(remoteOpenDefault);
+  // 保留旧库时，只能整体切换到校验通过的源库，不能混用不同版本的动作。
+  function runtimeProblems(root) {
+    return templates.map(function(item) {
+      var target = canonical(item.target, root), fm = $.NSFileManager.defaultManager;
+      if (!fm.fileExistsAtPath(target)) return '脚本缺失：' + target;
+      var attributes = fm.attributesOfItemAtPathError($(target).stringByResolvingSymlinksInPath, null);
+      if (ObjC.unwrap(attributes.objectForKey($.NSFileType)) !== ObjC.unwrap($.NSFileTypeRegular)) return '不是普通脚本文件：' + target;
+      if (!fm.isExecutableFileAtPath(target)) return '脚本不可执行：' + target;
+      return '';
+    }).filter(function(problem) { return problem; });
+  }
+  var problems = runtimeProblems(runtimeRoot);
+  if (problems.length && argv[5] === '1' && argv[4] !== runtimeRoot) {
+    var sourceProblems = runtimeProblems(argv[4]);
+    if (!sourceProblems.length) {
+      fallbackNotice = '⚠ 保留的目标库不兼容当前菜单：' + runtimeRoot + '\n' +
+        '共有 ' + problems.length + ' 个动作未通过校验，首项：' + problems[0] +
+        '\n已保留旧库，菜单改用当前源库；请保持源库路径有效。\n';
+      runtimeRoot = argv[4];
+      problems = [];
+    } else problems = problems.concat(['当前源库也无法使用：'], sourceProblems);
+  }
+  if (problems.length) throw new Error('运行库校验失败：\n' + problems.join('\n') +
+    '\n请修复脚本或执行权限，或重新运行安装器并输入 YES 备份替换目标库。');
+  pullScriptPath = canonical(pullScriptPath);
+  ohosScriptPath = canonical(ohosScriptPath);
+  remoteOpenScriptPath = canonical(remoteOpenScriptPath);
   var updates = {}, seen = {}, result = [];
   templates.forEach(function(item) {
     item.target = canonical(item.target);
     if (updates[item.target]) throw new Error('Duplicate template target: ' + item.target);
-    if (!$.NSFileManager.defaultManager.isExecutableFileAtPath(item.target)) throw new Error('Missing or non-executable managed action: ' + item.target);
     updates[item.target] = item;
   });
   current.forEach(function(item) {
@@ -666,14 +764,83 @@ function run(argv) {
       merged.params = update.params;
       merged.repoAction = update.repoAction;
       merged.fileAction = update.fileAction;
+      if (key === ohosScriptPath && merged.name === '📦双击打包Flutter.ohos') merged.name = ohosDefault.name;
       result.push(merged);
     } else result.push(item);
   });
   templates.forEach(function(item) { if (!seen[item.target]) { seen[item.target] = true; result.push(item); } });
+  // 体检标题去掉末尾句点，缺少开头 emoji 时补图标；保留其它正文与已有图标。
+  var emojiPattern = '^(?:[\\p{Extended_Pictographic}\\p{Regional_Indicator}]|[0-9#*]\\x{FE0F}?\\x{20E3})';
+  var emojiPrefix = $.NSRegularExpression.regularExpressionWithPatternOptionsError(emojiPattern, 0, null);
+  if (!emojiPrefix || emojiPrefix.isNil()) throw new Error('Cannot validate menu emoji prefixes');
+  result.forEach(function(item) {
+    var scriptName = item.target.split('/').pop();
+    if (scriptName === '【MacOS@SourceTree】🐦Flutter项目体检.command') item.name = String(item.name || '').replace(/\.+$/, '');
+    var title = String(item.name || '');
+    if (Number(emojiPrefix.numberOfMatchesInStringOptionsRange(title, 0, $.NSMakeRange(0, $(title).length))) > 0) return;
+    var icon = scriptName.indexOf('】用Android Studio打开') >= 0 ? '🤖' :
+      /】用(?:Trae|Trea)打开/.test(scriptName) ? '🧠' :
+      scriptName.indexOf('】用VSCode打开') >= 0 ? '💻' : '🔧';
+    item.name = icon + title;
+  });
+  // 用稳定脚本名归类，不依赖用户修改过的显示标题；额外动作保持相对顺序置于末尾。
+  var menuScriptOrder = [
+    // 打开：文档、IDE、终端、项目与远程网页。
+    '【MacOS@SourceTree】📘用Typora打开蓝皮书.command',
+    '【MacOS@SourceTree】（递归目录寻找工程@不适用于多工程项目）用Xcode打开.command',
+    '【MacOS@SourceTree】（只打开当前目录）用Xcode打开.command',
+    '【MacOS@SourceTree】用Android Studio打开.command',
+    '【MacOS@SourceTree】用Android Studio打开openjdk64-17.0.16.command',
+    '【MacOS@SourceTree】用Trea打开.command',
+    '【MacOS@SourceTree】用Trae打开@openjdk64-17.0.16.command',
+    '【MacOS@SourceTree】用VSCode打开.command',
+    '【MacOS@SourceTree】用VSCode打开@openjdk64-17.0.16.command',
+    '【MacOS@SourceTree】用终端打开.command',
+    '【MacOS@SourceTree】🐦打开：运行Flutter项目.command',
+    '【MacOS@SourceTree】🌍打开远程仓库地址.command',
+    // Git 与地址：获取、拉取、推送、回退。
+    '【MacOS@SourceTree】🌐获取远程仓库地址.command',
+    '【MacOS@SourceTree】获取目标绝对地址.command',
+    '【MacOS@SourceTree】⏬只拉取远程代码.command',
+    '【MacOS@SourceTree】🚀逐层空白提交并Push.command',
+    '【MacOS@SourceTree】♻️双击Git（识别子Git） 提交回退.command',
+    // 修复：Git 与 Flutter 的修复入口连续排列。
+    '【MacOS@SourceTree】📥修复Git无法Commit.command',
+    '【MacOS@SourceTree】📥修复Git无法Fetch.command',
+    '【MacOS@SourceTree】♻️修复Flutter项目中文路径.command',
+    // Flutter 工程维护。
+    '【MacOS@SourceTree】🐦Flutter项目体检.command',
+    '【MacOS@SourceTree】⚙️收集当前Flutter工程的依赖.command',
+    '【MacOS@SourceTree】🐦Flutter重新拉取第三方依赖.command',
+    '【MacOS@SourceTree】🐦Flutter自动化生产代码.command',
+    // CocoaPods 依赖。
+    '【MacOS@SourceTree】🫘打开终端运行Pod Install.command',
+    '【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.command',
+    // 打包：Flutter Android / iOS / 鸿蒙相邻，随后是原生 iOS。
+    '【MacOS@SourceTree】📦双击打包Flutter.android.command',
+    '【MacOS@SourceTree】📦双击打包Flutter.iOS.command',
+    '【MacOS@SourceTree】📦双击打包Flutter.ohos.command',
+    '【MacOS@SourceTree】📦双击自动生成ipa文件.command',
+    // 通用工具与专用项目。
+    '【MacOS@SourceTree】同步edgetunnel代码后手动升级.command',
+    '【MacOS@SourceTree】🪄配置并运行Magic Resume.command'
+  ];
+  var ranks = {};
+  menuScriptOrder.forEach(function(name, index) { ranks[runtimeRoot + '/MacOS/' + name + '/' + name] = index; });
+  result = result.map(function(item, index) {
+    var rank = updates[item.target] && Object.prototype.hasOwnProperty.call(ranks, item.target) ? ranks[item.target] : menuScriptOrder.length;
+    return { item: item, rank: rank, index: index };
+  }).sort(function(a, b) { return a.rank - b.rank || a.index - b.index; }).map(function(entry) { return entry.item; });
   var data = $.NSKeyedArchiver.archivedDataWithRootObject($(result));
   if (!data.writeToFileAtomically(argv[2], true)) throw new Error('Cannot save merged archive');
+  return fallbackNotice + '菜单运行库：' + runtimeRoot;
 }
 JAVASCRIPT
+  )"; then
+    error_echo "菜单归档合并失败，未覆盖当前配置。"
+    return 1
+  fi
+  [[ "$report_mode" == quiet ]] || info_echo "$merge_report"
   validate_plist "$merged_file"
 }
 # 把当前脚本包 actions.plist 安装到 Sourcetree 当前用户配置。
@@ -681,9 +848,18 @@ sync_current_actions_to_sourcetree() {
   local merged_file=""
   info_echo "按稳定脚本路径合并菜单，保留当前用户标题及额外动作。"
   validate_plist "$LOCAL_ACTIONS_PLIST"
-  pause_sourcetree_before_menu_sync
   merged_file="$(mktemp "${TMPDIR:-/tmp}/sourcetree-actions.XXXXXX")" || exit_with_error "无法创建菜单临时文件。"
-  merge_actions_preserving_titles "$merged_file"
+  if ! (merge_actions_preserving_titles "$merged_file" quiet); then
+    rm -f "$merged_file"
+    exit_with_error "菜单预检失败，尚未退出 Sourcetree 或覆盖当前配置。"
+  fi
+  pause_sourcetree_before_menu_sync
+  # 最终合并重新读取配置，只在这一阶段报告运行库及回退结果。
+  if ! (merge_actions_preserving_titles "$merged_file"); then
+    rm -f "$merged_file"
+    restart_sourcetree_if_needed
+    exit_with_error "退出后菜单合并失败，未覆盖当前配置。"
+  fi
   copy_file_with_backup "$merged_file" "$TARGET_ACTIONS_PLIST"
   rm -f "$merged_file"
   sync_sourcetree_to_peer_packages

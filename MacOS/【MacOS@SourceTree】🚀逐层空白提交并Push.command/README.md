@@ -96,7 +96,7 @@ chmod +x './【MacOS@SourceTree】🚀逐层空白提交并Push.command'
 
 - 游离 HEAD 会先解析远端目标和已有本地恢复分支并 fetch 最新提交；全部仓库准备成功后，才清理游离态并恢复该本地分支。目标不明确、本地分支缺失时停止，不自动创建分支。正常分支不执行重置。
 - 每层不能存在未解决冲突、未完成的 rebase、cherry-pick、revert 或 bisect。正常分支的 merge 若冲突已全部解决并暂存，允许续跑并完成合并提交；即使最终文件内容与 HEAD 相同，也会创建必要的合并提交。
-- 每层必须已配置 upstream；未配置时，脚本只在存在 `origin` 或唯一远端时自动建立关联。
+- 每层优先使用已配置的 upstream；未配置时保留 `origin` 优先，否则接受唯一远端，或多个远端中的唯一 GitHub 线路。`Github` / `码云` 等改名按实际地址识别；存在多个 GitHub 候选且没有 `origin` 时停止，不按名称排序猜测。
 - 首次执行的预检覆盖全部队列；续跑先复查已完成前缀的本地状态，再统一预检剩余子仓、当前仓库及上层父仓。其中任意待处理仓库不满足条件，本轮队列都不开始暂存或提交。
 - `JobsOCBaseConfigDemo@ByPods` 使用 GitHub 完整历史和 Gitee 独立零点快照。队列包含该工程时，在 Fetch、恢复、暂存或推送前停止；应使用该工程原生推送窗口或明确的快照映射。
 
@@ -169,7 +169,7 @@ flowchart TD
 
 ### <span id="jobs-toc-heading-17" data-jobs-toc="v2">8.5、游离 HEAD 如何恢复？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-优先使用父仓 `.gitmodules` 声明的远端目标分支；分支为 `.` 时使用父仓当前分支。未声明时优先读取已有本地分支在所选远端的唯一上游目标，没有配置时再查询远端公布的默认分支，不猜测 `main` 或 `master`。远端优先选择 `origin`，不存在时要求只有一个远端；存在多个不同上游目标则停止。
+优先使用父仓 `.gitmodules` 声明的远端目标分支；分支为 `.` 时使用父仓当前分支。未声明时优先读取已有本地分支在所选远端的唯一上游目标，没有配置时再查询远端公布的默认分支，不猜测 `main` 或 `master`。远端优先选择 `origin`，不存在时使用唯一远端或唯一 GitHub 线路；多个 GitHub 候选、多个不同上游目标均停止。
 
 本地恢复分支优先按 `branch.<本地分支>.remote / merge` 匹配该远端目标，允许本地分支名和远端目标名不同；没有匹配配置时只接受已经存在的同名本地分支。匹配到多个分支、本地目标分支不存在或无法唯一确定映射时，在清理前停止；不会通过 `switch -c / -C` 或远端自动跟踪新建分支。
 
@@ -201,22 +201,24 @@ flowchart TD
 
 ### <span id="jobs-toc-heading-20" data-jobs-toc="v2">8.8、GitHub 和码云如何同时推送？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-每个仓库按自己的 remote 配置识别线路，支持 [**GitHub**](https://github.com) 与 [**码云 Gitee**](https://gitee.com)：主上游的全部 push URL 始终纳入；其它远端的地址指向 `github.com` / `gitee.com`，或远端名为 `github` / `gitee` 时也纳入。相同地址去重，无关远端不会自动推送。也支持一个 remote 配置多个 push URL。
+每个仓库按自己的 remote 配置识别线路，支持 [**GitHub**](https://github.com) 与 [**码云 Gitee**](https://gitee.com)：主上游的全部 push URL 始终纳入；其它远端按 `github.com` / `gitee.com` 完整主机识别，兼容 HTTPS、scp SSH、`ssh://`、用户名和端口。远端可以叫 `Github`、`码云`、`origin`、`gitee` 或其它名称；非官方网络主机不会仅凭平台别名被自动纳入。本地路径镜像兼容 `github` / `gitee` / `码云` 别名。相同地址去重，映射冲突时停止；也支持一个 remote 配置多个 push URL。
 
-通常使用主上游配置的目标分支名（未配置时使用当前本地分支名）。`JobsGenesis`、`JobsBaseConfig` 及其下属仓库默认采用固定码云规则：码云远端别名为 `gitee`，远端目标分支为 `gitee`；GitHub 仍使用主上游目标分支。例如当前 `main` 会分别同步到 GitHub 的 `main` 与码云的 `gitee`，两端最后提交号一致。其它范围沿用主上游分支名，不猜测码云默认分支。
+通常使用主上游配置的目标分支名（未配置时使用当前本地分支名）。`JobsGenesis`、`JobsBaseConfig` 及其下属仓库默认采用固定码云规则：按地址识别码云，远端名称不受限制，远端目标分支默认仍为 `gitee`；GitHub 使用主上游目标分支。例如当前 `main` 会分别同步到 GitHub 的 `main` 与码云的 `gitee`，两端最后提交号一致。远端别名与远端分支名分别处理，把远端改名为 `码云` 不会把目标分支改成 `码云`。其它范围沿用主上游分支名，不猜测码云默认分支。
 
-需要把上述范围内某个仓库的码云目标改为 `main` 时，在该仓库目录执行：
+需要把上述范围内某个仓库的码云目标改为 `main` 时，在该仓库目录按实际远端名称配置，例如远端名为 `码云`：
 
 ```shell
-git config --local remote.gitee.jobsPushBranch main
+git config --local 'remote.码云.jobsPushBranch' main
 ```
 
-仅该仓库本地配置中的非空分支名覆盖固定 `gitee` 目标；全局同名配置不生效，不传给父仓或子仓，也不改变 GitHub 映射。填写分支名本身，例如 `main` 或 `release/stable`；非法值会在推送目标预检时明确报错并停止。未配置或空值沿用原规则，恢复默认可执行 `git config --local --unset-all remote.gitee.jobsPushBranch`。该配置不修改远端默认分支，也不删除原有远端分支；OC 新工程独立快照门禁保持有效。
+配置键为 `remote.<实际名称>.jobsPushBranch`；原远端仍叫 `gitee` 的仓库继续使用 `remote.gitee.jobsPushBranch`。改名后要核对新名称下的配置是否保留，不读取与当前线路无关联的旧名称配置。只有该仓库本地配置中的非空分支名覆盖固定 `gitee` 目标；全局同名配置不生效，不传给父仓或子仓，也不改变 GitHub 映射。填写分支名本身，例如 `main` 或 `release/stable`；多个配置值、非法值或读取失败会在推送目标预检时明确报错并停止。未配置或空值沿用原规则，恢复默认可执行 `git config --local --unset-all 'remote.码云.jobsPushBranch'`。该配置不修改远端默认分支，也不删除原有远端分支；OC 新工程独立快照门禁保持有效。
 
-每条线路都显式使用 `HEAD:refs/heads/<远端目标分支>`，不依赖 `push.default`、`--all` 或 `--mirror`。本地始终沿用当前工作分支，不额外建立或维护本地 `gitee` 跟踪分支；已有额外分支保留原状，不自动删除，也不纳入推送。未配置 `gitee` 别名时先修正配置后重试；脚本不创建远端仓库。只有一条已配置线路的子仓继续单线运行。可在目标仓库配置：
+只有残留配置、没有非空 URL 的旧远端不参与选择或推送，避免将远端名称误当成本地相对路径。账户工具 `JobsCodexAccountSwitcher.py` 使用 `Github` / `码云` 时，仓库本地保留 `remote.码云.jobsPushBranch=main`，同一已有本地 `main` 分别推到两端 `main`。
+
+每条线路都显式使用 `HEAD:refs/heads/<远端目标分支>`，不依赖 `push.default`、`--all` 或 `--mirror`。本地始终沿用当前工作分支，不额外建立或维护本地 `gitee` 跟踪分支；已有额外分支保留原状，不自动删除，也不纳入推送。脚本不创建远端仓库；只有一条已配置线路的子仓继续单线运行。需要增加已存在的码云仓库线路时，可在目标仓库配置：
 
 ```shell
-git remote add gitee git@gitee.com:你的账号/你的仓库.git
+git remote add 码云 git@gitee.com:你的账号/你的仓库.git
 ```
 
 全部线路先获取、再整合，最后逐条推送相同 HEAD。远端分支不存在时首次创建；存在独立且无共同祖先的历史时停止，需人工处理。任一线路失败停止父仓，已经成功的推送保留，修复后重跑。不会强推，也不会把当前分支的 upstream 改成第二条线路。获取的历史保存在 `refs/jobs-push-sync/` 下，供本次合并使用。OC 新工程的独立快照例外会在整队列执行前明确阻断，不把快照历史合入 GitHub 开发分支。
@@ -238,6 +240,12 @@ Sourcetree 动作现在只负责打开 Terminal.app；实际 Git 流程在独立
 脚本双位置均通过 `zsh -n`，对应脚本和 README 逐字节一致。隔离临时仓库验证单本地分支同步 GitHub/main 与 Gitee/gitee、已有辅助分支保持原状且不上传、游离态复用已有分支、本地与远端异名映射、本地分支缺失或映射不明确时停止、确认后恢复分支缺失或出现独有提交时在清理前停止。验证对比运行前后全部本地分支名，并核对两端目标提交号；OC 快照例外门禁继续保留。既有父子仓 gitlink 收口、已解决 merge 续跑与网络重试行为未改动。验证未对用户仓库执行提交、推送、重置或清理；菜单仍指向原运行路径。
 
 仓库本地码云分支覆盖的隔离验证包括双端 `main` 同提交且不重建已删除的 `gitee`、合法多层分支名、空值回退、忽略全局同名配置、作用范围保持、非法分支名及配置读取失败停止；本地分支集合与原有 upstream 保持，OC 独立快照门禁仍阻断。
+
+远端别名回归使用真实脚本函数和临时 bare 仓库，覆盖 `Github` / `码云`、旧名称、任意别名、候选歧义、无 URL 残留配置及映射冲突。传输仅允许本地 `file` 协议，不访问或推送业务仓库；日志位置在运行结束时打印。在本脚本目录执行：
+
+```shell
+/bin/zsh '../Tests/LayeredPushRemoteAliases.Tests.zsh'
+```
 
 退出码验证覆盖源码在运行中被覆盖、正常完成、Git hook 拒绝和无效路径。父仓及两个子模块的隔离验证覆盖中断后续跑、从头执行、已完成仓库的文件 / 分支 / HEAD / 配置变化、损坏状态及旧日志迁移，并核对被跳过仓库没有重复 fetch / push、最终父仓 gitlink 和各远端提交一致。代理逻辑通过隔离优先级验证，并对故障仓库进行只读 `ls-remote` 验证；未执行该业务仓库的提交或推送。
 

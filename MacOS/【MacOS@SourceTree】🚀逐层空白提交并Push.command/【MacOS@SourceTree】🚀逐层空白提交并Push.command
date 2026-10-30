@@ -4,7 +4,7 @@
 # - 核心用途：递归提交并推送当前仓库管理的子仓，再处理当前仓库及上层父仓。
 # - 影响范围：游离态先丢弃临时内容并恢复远端版本；每层执行 git add -A、必要时提交并向已配置的 GitHub / 码云线路推送。
 # - 分支规则：只复用已有本地工作分支，同一 HEAD 映射到两端目标分支，绝不新建或推送辅助本地分支。
-# - 码云映射：固定 gitee 目标可由各仓本地 remote.gitee.jobsPushBranch 显式覆盖，非法分支名停止。
+# - 码云映射：按地址识别线路，固定 gitee 目标可由各仓本地 remote.<实际名称>.jobsPushBranch 显式覆盖，非法分支名停止。
 # - 网络策略：查询、fetch、push 的短暂传输故障最多尝试三次；鉴权、权限及推送拒绝直接停止。
 # - 运行提示：Sourcetree 动作打开 Terminal.app；终端回车确认后执行，游离态舍弃前列出仓库和恢复目标并要求 YES。
 
@@ -190,7 +190,7 @@ show_script_intro_and_wait() {
   print -r -- "影响范围：每层会执行 git add -A；无改动时不制造空提交，但仍尝试推送已有提交。" | jobs_intro_style body
   print -r -- "正常分支：先获取主上游及 GitHub / 码云各推送线路，提交并整合后逐条 push、核验同一提交；冲突时停止。" | jobs_intro_style body
   print -r -- "分支规则：每仓复用已有本地工作分支；同一 HEAD 推送到两端各自目标分支，不创建或推送辅助本地分支。" | jobs_intro_style body
-  print -r -- "码云映射：各仓本地 remote.gitee.jobsPushBranch 可覆盖固定 gitee 目标；未配置或空值沿用原规则。" | jobs_intro_style body
+  print -r -- "远程改名：支持 Github / 码云及旧名称；各仓本地 remote.<实际名称>.jobsPushBranch 可覆盖固定 gitee 目标。" | jobs_intro_style body
   print -r -- "网络重试：查询、fetch、push 的短暂传输故障最多尝试 3 次；鉴权、权限和推送拒绝直接停止。" | jobs_intro_style body
   print -r -- "网络代理：HTTP(S) 优先使用显式 Git / 环境配置，否则临时读取系统手动代理；SSH 沿用原配置。" | jobs_intro_style body
   print -r -- "游离态策略：只恢复明确的已有本地分支；fetch 后舍弃游离态内容并快进到远端目标，保留忽略文件。" | jobs_intro_style body
@@ -659,7 +659,10 @@ build_repository_chain() {
 }
 # 对有效 Git 配置求摘要，检查点不保存可能含凭据的远端地址。
 repository_config_fingerprint() {
-  git -C "$1" config --null --list --includes | cksum
+  {
+    print -rn -- $'remote-routing-v2\0'
+    git -C "$1" config --null --list --includes
+  } | cksum
 }
 # 将完整队列和已完成前缀写入同目录临时文件，再原子替换检查点。
 save_push_checkpoint() {
@@ -846,18 +849,74 @@ record_completed_repository() {
   PROCESSED_COUNT=$((PROCESSED_COUNT + 1))
   save_push_checkpoint
 }
-# 选择未配置 upstream 时唯一可靠的推送远端。
+# 按完整主机识别托管平台；本地镜像仍兼容已有平台别名。
+remote_hosting_platform() {
+  local remote="$1" target="$2" authority="" host=""
+  if [[ "$target" == *://* ]]; then
+    authority="${${target#*://}%%/*}"
+    authority="${authority##*@}"
+    host="${authority%%:*}"
+  elif [[ "$target" != /* && "$target" == *:* ]]; then
+    authority="${target%%:*}"
+    host="${authority##*@}"
+  fi
+  case "${host:l}" in
+    github.com) print -r -- github; return 0 ;;
+    gitee.com) print -r -- gitee; return 0 ;;
+  esac
+  [[ -z "$host" ]] || return 1
+  case "${remote:l}" in
+    github) print -r -- github ;;
+    gitee|码云) print -r -- gitee ;;
+    *) return 1 ;;
+  esac
+}
+# 没有 URL 的残留配置不是线路，避免 Git 将远程名当作相对路径返回。
+read_configured_push_urls() {
+  local repository="$1" remote="$2" configured_url="" result=0
+  if configured_url="$(git -C "$repository" config --get "remote.${remote}.url")"; then
+    [[ -n "$configured_url" ]] || return 2
+  else
+    result=$?
+    [[ "$result" -eq 1 ]] && return 2
+    return 1
+  fi
+  git -C "$repository" remote get-url --push --all "$remote"
+}
+# 保留 origin 优先，改名后只接受唯一 GitHub 线路或唯一远端。
 resolve_fallback_remote() {
-  local repository="$1"
-  local -a remotes=()
-  if git -C "$repository" remote get-url --push origin >/dev/null 2>&1; then
+  local repository="$1" remote="" urls="" target="" platform="" remote_output=""
+  local -a remotes=() github_remotes=()
+  if read_configured_push_urls "$repository" origin >/dev/null 2>&1; then
     print -r -- "origin"
     return 0
+  elif [[ "$?" -ne 2 ]]; then
+    return 1
   fi
-  remotes=("${(@f)$(git -C "$repository" remote 2>/dev/null)}")
-  if [[ "${#remotes[@]}" -eq 1 && -n "${remotes[1]:-}" ]]; then
-    git -C "$repository" remote get-url --push "${remotes[1]}" >/dev/null 2>&1 || return 1
+  remote_output="$(git -C "$repository" remote)" || return 1
+  for remote in "${(@f)remote_output}"; do
+    [[ -n "$remote" ]] || continue
+    if urls="$(read_configured_push_urls "$repository" "$remote")"; then
+      remotes+=("$remote")
+    elif [[ "$?" -eq 2 ]]; then
+      continue
+    else
+      return 1
+    fi
+    for target in "${(@f)urls}"; do
+      platform="$(remote_hosting_platform "$remote" "$target" || true)"
+      if [[ "$platform" == github ]]; then
+        github_remotes+=("$remote")
+        break
+      fi
+    done
+  done
+  if [[ "${#remotes[@]}" -eq 1 ]]; then
     print -r -- "${remotes[1]}"
+    return 0
+  fi
+  if [[ "${#github_remotes[@]}" -eq 1 ]]; then
+    print -r -- "${github_remotes[1]}"
     return 0
   fi
   return 1
@@ -1156,7 +1215,7 @@ check_snapshot_repository_boundary() {
 # 收集主上游及 GitHub / 码云线路，地址和目标分支同时记录以避免错误映射。
 resolve_push_targets() {
   local repository="$1" primary="$2"
-  local remote="" target="" urls="" branch="" primary_ref="" target_ref="" gitee_branch=""
+  local remote="" target="" urls="" branch="" primary_ref="" target_ref="" gitee_branch="" platform="" branch_key=""
   local -a remotes=("$primary")
   local -A seen=()
   RESOLVED_PUSH_TARGETS=()
@@ -1171,40 +1230,40 @@ resolve_push_targets() {
   remotes+=("${(@f)$(git -C "$repository" remote)}")
   for remote in "${remotes[@]}"; do
     [[ -n "$remote" ]] || continue
-    urls="$(git -C "$repository" remote get-url --push --all "$remote")" || return 1
+    if urls="$(read_configured_push_urls "$repository" "$remote")"; then
+      :
+    elif [[ "$?" -eq 2 && "$remote" != "$primary" ]]; then
+      continue
+    else
+      error_echo "无法读取远端推送地址：${repository} [${remote}]"
+      return 1
+    fi
     for target in "${(@f)urls}"; do
-      if [[ "$remote" != "$primary" ]]; then
-        case "${remote:l}:${target:l}" in
-          github:*|gitee:*|*://github.com/*|*://gitee.com/*|*@github.com:*|*@gitee.com:*|*://*@github.com/*|*://*@gitee.com/*) ;;
-          *) continue ;;
-        esac
-      fi
+      platform="$(remote_hosting_platform "$remote" "$target" || true)"
+      [[ "$remote" == "$primary" || -n "$platform" ]] || continue
       [[ -n "$target" ]] || continue
       target_ref="$primary_ref"
-      if uses_gitee_branch_policy "$repository"; then
-        case "${remote:l}:${target:l}" in
-          gitee:*|*://gitee.com/*|*@gitee.com:*|*://*@gitee.com/*)
-            target_ref="refs/heads/gitee"
-            git -C "$repository" remote get-url gitee >/dev/null 2>&1 || {
-              error_echo "当前范围的码云远端须命名为 gitee；请核对远端配置后重试：${repository}"
-              return 1
-            }
-            if gitee_branch="$(git -C "$repository" config --local --null --get remote.gitee.jobsPushBranch 2>/dev/null)"; then
-              gitee_branch="${gitee_branch%$'\0'}"
-              if [[ -n "$gitee_branch" ]]; then
-                if ! git -C "$repository" check-ref-format --branch "$gitee_branch" >/dev/null 2>&1 ||
-                   ! git check-ref-format "refs/heads/${gitee_branch}" >/dev/null 2>&1; then
-                  error_echo "仓库本地 remote.gitee.jobsPushBranch 不是合法分支名：${repository} [${gitee_branch}]"
-                  return 1
-                fi
-                target_ref="refs/heads/${gitee_branch}"
-              fi
-            elif [[ "$?" -ne 1 ]]; then
-              error_echo "无法读取仓库本地 remote.gitee.jobsPushBranch：${repository}"
+      if uses_gitee_branch_policy "$repository" && [[ "$platform" == gitee ]]; then
+        target_ref="refs/heads/gitee"
+        branch_key="remote.${remote}.jobsPushBranch"
+        if gitee_branch="$(git -C "$repository" config --local --null --get-all "$branch_key" 2>/dev/null)"; then
+          gitee_branch="${gitee_branch%$'\0'}"
+          if [[ "$gitee_branch" == *$'\0'* ]]; then
+            error_echo "仓库本地 ${branch_key} 存在多个值，已停止：${repository}"
+            return 1
+          fi
+          if [[ -n "$gitee_branch" ]]; then
+            if ! git -C "$repository" check-ref-format --branch "$gitee_branch" >/dev/null 2>&1 ||
+               ! git check-ref-format "refs/heads/${gitee_branch}" >/dev/null 2>&1; then
+              error_echo "仓库本地 ${branch_key} 不是合法分支名：${repository} [${gitee_branch}]"
               return 1
             fi
-            ;;
-        esac
+            target_ref="refs/heads/${gitee_branch}"
+          fi
+        elif [[ "$?" -ne 1 ]]; then
+          error_echo "无法读取仓库本地 ${branch_key}：${repository}"
+          return 1
+        fi
       fi
       if [[ -n "${seen[$target]:-}" ]]; then
         [[ "${seen[$target]}" == "$target_ref" ]] || { error_echo "同一推送地址存在矛盾分支映射，已停止：${repository}"; return 1; }

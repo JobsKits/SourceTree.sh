@@ -1,8 +1,8 @@
 #!/bin/zsh
 # 脚本自述：
 # - 脚本名称：【MacOS@SourceTree】🐦打开：运行Flutter项目.command
-# - 核心用途：定位工程 setup.command，或把标准 Flutter 模拟器运行交给系统 Terminal。
-# - 影响范围：可能补齐 setup.command 执行权限；标准回退先确认项目 SDK 和模拟器就绪，超时停止。
+# - 核心用途：定位工程 setup.command，或在系统 Terminal 选择设备、初始化模拟器并运行 Flutter。
+# - 影响范围：可能补齐 setup.command 执行权限；标准回退沿用项目 SDK，按需创建 iOS / Android 模拟器并后台运行。
 # - 运行提示：运行后会先打印内置自述；Sourcetree 模式无交互连续执行，终端模式确认后继续。
 # =====================================================================
 # Jobs 标准化脚本外壳
@@ -168,8 +168,8 @@ show_script_intro_and_wait() {
   note_echo "脚本名称：${SCRIPT_BASENAME}.command" | jobs_intro_style title
   note_echo "脚本路径：${SCRIPT_PATH}" | jobs_intro_style body
   note_echo "运行入口：兼容系统终端双击运行和 Sourcetree 自定义动作运行。" | jobs_intro_style body
-  note_echo "核心行为：优先定位当前 Git / Flutter 工程中的 setup.command；没有 setup.command 时先启动 iOS Simulator，再回退执行 flutter run。" | jobs_intro_style body
-  note_echo "设计原因：setup.command、模拟器启动或 flutter run 可能涉及入口、设备、运行宿主等人工选择，不适合直接在 Sourcetree 受限窗口里执行。" | jobs_intro_style body
+  note_echo "核心行为：优先定位工程 setup.command；没有时进入随包设备选择，iOS / Android 均支持启动已有及缺失时初始化。" | jobs_intro_style body
+  note_echo "设计原因：型号、系统镜像、下载与创建确认在独立 Terminal 中处理；Sourcetree 动作窗口只负责转交。" | jobs_intro_style body
   note_echo "环境策略：系统终端保留清屏、彩色输出和回车确认；Sourcetree 瘦身环境自动跳过清屏和等待，并输出纯文本日志。" | jobs_intro_style body
   note_echo "文档关系：同目录 README.md 只作为外部说明文档保留，运行时自述不读取、不拼接、不依赖 README.md。" | jobs_intro_style body
   warn_echo "继续前请确认 SourceTree 传入路径、当前仓库或拖入路径正确；按 Ctrl+C 可以取消。" | jobs_intro_style body
@@ -358,7 +358,7 @@ resolve_setup_command() {
     [[ -f "$PROJECT_ROOT/pubspec.yaml" && -d "$PROJECT_ROOT/lib" ]] || { error_echo "没有 setup.command，当前目录也不是 Flutter 工程：$PROJECT_ROOT"; return 1; }
     SETUP_COMMAND_PATH=""
     warn_echo "未在当前工程中找到 setup.command：${PROJECT_ROOT}"
-    warn_echo "将回退为在系统 Terminal 中先启动 iOS Simulator，再执行 flutter run。"
+    warn_echo "将回退为系统 Terminal 内的设备选择；iOS / Android 可启动已有，缺失时初始化。"
     return 0
   fi
 
@@ -378,32 +378,15 @@ resolve_setup_command() {
 
   success_echo "已找到 setup.command：${SETUP_COMMAND_PATH}"
 }
-# 生成标准 Flutter 工程的运行命令，先拉起 iOS Simulator 再进入 flutter run。
+# 标准回退使用同包运行器；保持动作目录可整体复制，不依赖已安装扩展或其它仓库。
 build_flutter_run_command() {
-  local wait_seconds="${SIMULATOR_WAIT_SECS:-60}"
-  [[ "$wait_seconds" == <1-> ]] || { error_echo 'SIMULATOR_WAIT_SECS 必须是正整数。' >&2; return 1; }
-  local terminal_script='export PATH="$HOME/.pub-cache/bin:$HOME/.fvm/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-if [[ -x .fvm/flutter_sdk/bin/flutter ]]; then
-  flutter_cmd=("$PWD/.fvm/flutter_sdk/bin/flutter")
-elif [[ -f .fvmrc || -f .fvm/fvm_config.json ]]; then
-  command -v fvm >/dev/null 2>&1 || { print "缺少项目 FVM，请先恢复 SDK。"; exit 1; }
-  flutter_cmd=(fvm flutter)
-else
-  command -v flutter >/dev/null 2>&1 || { print "未找到 Flutter。"; exit 1; }
-  flutter_cmd=(flutter)
-fi
-command -v xcrun >/dev/null 2>&1 || { print "缺少 Xcode / xcrun。"; exit 1; }
-"${flutter_cmd[@]}" emulators --launch apple_ios_simulator || open -a Simulator || exit 1
-boot_device=""
-for ((i=0; i<WAIT_SECONDS; i++)); do
-  boot_device="$(xcrun simctl list devices booted 2>/dev/null | /usr/bin/awk -F "[()]" '\''/\(Booted\)/ {print $(NF-3); exit}'\'')"
-  [[ -n "$boot_device" ]] && break
-  sleep 1
-done
-[[ -n "$boot_device" ]] || { print "模拟器等待超时，已停止 Flutter 运行。"; exit 1; }
-"${flutter_cmd[@]}" run -d "$boot_device"'
-  terminal_script="${terminal_script/WAIT_SECONDS/$wait_seconds}"
-  print -r -- "cd ${(q)PROJECT_ROOT} && ( ${terminal_script} )"
+  local runner="$SCRIPT_DIR/Scripts/RunFlutterProject.zsh"
+  local helper="$SCRIPT_DIR/Scripts/FlutterRunner.jxa"
+  [[ -f "$runner" && -f "$helper" ]] || {
+    error_echo "缺少同包 Flutter 运行器：$runner / $helper；请保留完整动作目录。" >&2
+    return 1
+  }
+  print -r -- "/bin/zsh ${(q)runner} --project ${(q)PROJECT_ROOT}"
 }
 # 使用系统 Terminal 执行 setup.command 或标准 Flutter 运行命令，让后续人工选择回到完整终端。
 open_setup_in_terminal() {

@@ -1,6 +1,6 @@
 ﻿# 🐦打开：运行Flutter项目 | Jobs Windows Sourcetree
 # Created by Jobs on 2026年10月23日，星期五.
-# 用途：选择 Android、Web 或 Windows 设备运行项目；终端确认后运行，Ctrl+C 取消。
+# 用途：选择设备运行项目；Android 可启动已有 AVD，缺失时确认初始化；Ctrl+C 取消。
 [CmdletBinding()]
 param([Parameter(Position=0)][string]$Target, [string]$Option, [string]$Value,
       [switch]$SourceTree, [switch]$Terminal)
@@ -21,7 +21,8 @@ try {
     Write-Host 'Jobs | 🐦打开：运行Flutter项目' -ForegroundColor Red
     Write-Host '用途：选择 Android、Web 或 Windows 设备运行项目。'
     Write-Host '影响：仅所选项目及入口声明的目标；危险写操作另需 YES。日志：%TEMP%\JobsSourceTree*。'
-    Write-Host 'Ctrl+C 取消；缺少 SDK/工具时停止，不自动更换项目版本。'
+    Write-Host 'Android 模拟器支持启动已有 / 缺失时初始化；确认后可能补齐工具与下载所选镜像。'
+    Write-Host '设备用 fzf 上下键及输入筛选，← 返回上一层；Ctrl+C 取消，不自动更换项目 Flutter 版本。'
     if ([Console]::IsInputRedirected) { throw '需要独立交互终端；没有确认不能继续。' }
     [void](Read-Host '按回车继续')
     Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'Scripts/SourceTree.psm1') -Force -DisableNameChecking

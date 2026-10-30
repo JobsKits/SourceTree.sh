@@ -71,6 +71,11 @@
     "WindowsOS/Scripts/Features/JobsFlutterCodegen/Scripts/README.md",
     "WindowsOS/Scripts/Features/JobsFlutterDependencyExtractor/Scripts/README.md",
     "WindowsOS/Scripts/Features/JobsFlutterDoctor/Scripts/README.md",
-    "WindowsOS/Scripts/Features/JobsFlutterPackager/Scripts/README.md"
+    "WindowsOS/Scripts/Features/JobsFlutterPackager/Scripts/README.md",
+    "MacOS/Tests/README.md",
+    "MacOS/【MacOS@SourceTree】🌍打开远程仓库地址.command/README.md",
+    "WindowsOS/【WindowsOS@SourceTree】🌍打开远程仓库地址/README.md",
+    "MacOS/【MacOS@SourceTree】🐦打开：运行Flutter项目.command/Scripts/README.md",
+    "WindowsOS/Scripts/Features/JobsFlutterRunner/Scripts/README.md"
   ]
 }

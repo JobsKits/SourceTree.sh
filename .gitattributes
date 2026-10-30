@@ -71,4 +71,9 @@
 "/WindowsOS/Scripts/Features/JobsFlutterDependencyExtractor/Scripts/README.md" filter=jobs-markdown-toc
 "/WindowsOS/Scripts/Features/JobsFlutterDoctor/Scripts/README.md" filter=jobs-markdown-toc
 "/WindowsOS/Scripts/Features/JobsFlutterPackager/Scripts/README.md" filter=jobs-markdown-toc
+"/MacOS/Tests/README.md" filter=jobs-markdown-toc
+"/MacOS/\343\200\220MacOS@SourceTree\343\200\221\360\237\214\215\346\211\223\345\274\200\350\277\234\347\250\213\344\273\223\345\272\223\345\234\260\345\235\200.command/README.md" filter=jobs-markdown-toc
+"/WindowsOS/\343\200\220WindowsOS@SourceTree\343\200\221\360\237\214\215\346\211\223\345\274\200\350\277\234\347\250\213\344\273\223\345\272\223\345\234\260\345\235\200/README.md" filter=jobs-markdown-toc
+"/MacOS/【MacOS@SourceTree】🐦打开：运行Flutter项目.command/Scripts/README.md" filter=jobs-markdown-toc
 # jobs-markdown-toc:end
+"/WindowsOS/Scripts/Features/JobsFlutterRunner/Scripts/README.md" filter=jobs-markdown-toc

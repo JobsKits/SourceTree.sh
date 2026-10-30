@@ -22,7 +22,9 @@
 
 ## <span id="jobs-toc-heading-1" data-jobs-toc="v2">🔥 <font id=前言>前言</font></span><!-- jobs-toc:heading-end -->
 
-为明确选定的 `.command` 普通文件添加用户执行权限，并移除该文件已有的隔离属性。用于 [**Sourcetree**](https://www.sourcetreeapp.com/) 菜单入口授权，不修改 Git 或安装工具链。
+为明确选定的 `.command` 普通文件添加用户执行权限，并移除该文件已有的隔离属性。用于为 [**Sourcetree**](https://www.sourcetreeapp.com/) 动作脚本准备执行权限，不修改 Git 或安装工具链。
+
+这是独立终端工具，不挂入 Sourcetree 自定义菜单。脚本文件与既有调用能力保留，菜单安装器会排除旧配置中的此动作。
 
 ## <span id="jobs-toc-heading-2" data-jobs-toc="v2">一、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 

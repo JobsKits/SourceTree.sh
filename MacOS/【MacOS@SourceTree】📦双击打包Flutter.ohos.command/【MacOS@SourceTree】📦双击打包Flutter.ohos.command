@@ -1,7 +1,7 @@
 #!/bin/zsh
 # 脚本自述：
 # - 脚本名称：【MacOS@SourceTree】📦双击打包Flutter.ohos.command
-# - 核心用途：使用鸿蒙适配版 Flutter 构建 HAP 安装包或 APP 上架包。
+# - 核心用途：使用鸿蒙适配版 Flutter 一次构建 HAP 安装包和 APP 发布包。
 # - 影响范围：解析工程依赖、执行 Hvigor 构建并写入构建目录；签名沿用工程配置。
 # - 运行提示：先打印内置自述；终端回车确认，Sourcetree 无交互执行；缺少工具链时停止。
 
@@ -22,6 +22,7 @@ DEVECO_CONTENTS=""
 FLUTTER_CMD=()
 BUILD_TARGETS=()
 OUTPUT_ROOTS=()
+BUILD_REPORTED_ARTIFACTS=()
 
 # 通过明确的环境标志和父进程识别 Sourcetree，非 TTY 只影响输出能力。
 is_sourcetree_runtime() {
@@ -105,7 +106,7 @@ show_script_intro_and_wait() {
   configure_output_mode
   intro_line title "================ 鸿蒙 Flutter 打包 ================"
   intro_line title "脚本名称：${SCRIPT_BASENAME}.command"
-  intro_line body '1、用途：构建已有 Flutter 鸿蒙工程，默认生成 release HAP；可选 APP 或两者。'
+  intro_line body '1、用途：构建已有 Flutter 鸿蒙工程，默认一次生成 release HAP 和 APP；CLI 兼容单包目标。'
   intro_line body '2、依赖：鸿蒙适配 Flutter → Dart / 鸿蒙 SDK → Node / ohpm / Hvigor / Java。'
   intro_line body '3、影响：联网解析依赖、执行工程构建与现有签名配置，写入缓存和构建目录。'
   intro_line body '4、策略：不自动安装、升级工具链，不创建 ohos 平台，不修改证书或系统环境配置。'
@@ -131,7 +132,7 @@ initialize_script_runtime() {
 # 先校验全部参数，再进入 SDK 或联网操作。
 parse_build_options() {
   BUILD_MODE="${BUILD_MODE:-release}"
-  BUILD_TARGET="${BUILD_TARGET:-hap}"
+  BUILD_TARGET=all
   SDK_OVERRIDE="${FLUTTER_OHOS_SDK:-}"
   while (( $# > 0 )); do
     case "$1" in
@@ -331,6 +332,7 @@ report_build_outputs() {
     done < <(/usr/bin/find "$output_root" \( -type d \( -name node_modules -o -name intermediates \) -prune \) -o \( -type f -name "*.$target" \( -path '*/outputs/*' -o -path '*/build/ohos/*' \) -print0 \))
   done
   for artifact in "${artifacts[@]}"; do
+    BUILD_REPORTED_ARTIFACTS+=("$artifact")
     found=1
     if [[ "$artifact" == *-unsigned.* ]]; then
       warn_echo "未签名产物：$artifact；安装或上架前必须完成对应签名。"
@@ -345,6 +347,7 @@ report_build_outputs() {
 }
 # 全部前置检查通过后，按顺序解析依赖和构建所选包型。
 run_build_flow() {
+  BUILD_REPORTED_ARTIFACTS=()
   parse_build_options "$@" || return $?
   resolve_flutter_project || return $?
   choose_flutter_sdk || return $?
@@ -352,12 +355,19 @@ run_build_flow() {
   check_build_toolchain || return $?
   info_echo '依赖来源：沿用工程 pubspec.yaml / 锁文件和当前 Pub、ohpm 软件源配置。'
   run_step 'flutter pub get' "${FLUTTER_CMD[@]}" pub get || return $?
-  local target=""
+  local target="" artifact=""
   for target in "${BUILD_TARGETS[@]}"; do
     run_step "flutter build $target --$BUILD_MODE" "${FLUTTER_CMD[@]}" build "$target" "--$BUILD_MODE" || return $?
     report_build_outputs "$target" || return $?
   done
-  success_echo "鸿蒙构建结束；构建与签名是否满足发布要求需结合工程配置核对。日志：$LOG_FILE"
+  # APP 构建可能重建输出树，完成前再核对已登记的两类产物。
+  for artifact in "${BUILD_REPORTED_ARTIFACTS[@]}"; do
+    [[ -f "$artifact" && ! -L "$artifact" && -s "$artifact" ]] || {
+      error_echo "最终产物复核失败，后续构建移除或清空了包：$artifact"
+      return 1
+    }
+  done
+  success_echo "鸿蒙构建结束（${(j: + :)BUILD_TARGETS}）；构建与签名是否满足发布要求需结合工程配置核对。日志：$LOG_FILE"
 }
 # 保留失败退出码，避免尾部日志掩盖构建错误。
 run_checked_build() {

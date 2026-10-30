@@ -35,7 +35,7 @@ try{
         Assert-Throws {Invoke-JobsTool $hostPath @('-NoLogo','-NoProfile','-EncodedCommand',$failureProbe) $f -Quiet} '非零退出停止'
     } $fixture $counter
     $wrappers=@(Get-ChildItem -LiteralPath $root -Directory|ForEach-Object{Get-ChildItem -LiteralPath $_.FullName -File -Filter '*.cmd'})
-    Assert-Check ($wrappers.Count -eq 27) '完整 SourceTree 动作集'
+    Assert-Check ($wrappers.Count -eq 28) '完整 SourceTree 动作集'
     foreach($wrapper in $wrappers){
         $text=[IO.File]::ReadAllText($wrapper.FullName)
         Assert-Check ($text -match '"%~dp0Run\.ps1" %\*') ('保留脚本相对路径与参数 '+$wrapper.Name)
@@ -58,6 +58,6 @@ try{
             if(!$finished){$process.Kill();throw 'CMD 失败后等待了输入'}
             Assert-Check ($process.ExitCode -eq 7) '真实 CMD 有参失败及时返回原退出码'
         }finally{$process.Dispose()}
-    }else{Write-Host 'SKIP：CMD 原生运行仅在 Windows 执行；本机已检查全部 27 个转发入口。'}
+    }else{Write-Host 'SKIP：CMD 原生运行仅在 Windows 执行；本机已检查全部 28 个转发入口。'}
     Write-Host "PASS：$($counter.Value) 项断言。"
 }finally{Remove-Item -LiteralPath $fixture -Recurse -Force}

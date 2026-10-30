@@ -79,7 +79,13 @@ function Invoke-JobsFeatureModule {
     $path = Join-Path $PSScriptRoot ('Features/' + $Name + '/Scripts/Action.psm1')
     $module = Import-Module $path -Force -DisableNameChecking -PassThru
     if ($Kind -eq 'android') { & $module { param($p) Invoke-JobsPackagerBuild -Project $p -Type 'all' } $Target }
-    elseif ($Kind -eq 'ohos') { & $module { param($p) Invoke-JobsPackagerHarmonyBuild -Project $p -Type 'hap' } $Target }
+    elseif ($Kind -eq 'ohos') {
+        & $module {
+            param($p, $log)
+            if ($log) { $script:PackagerLog = $log }
+            Invoke-JobsPackagerHarmonyBuild -Project $p -Type 'all'
+        } $Target $script:LogFile
+    }
     else { & $module { param($p) Invoke-JobsFeature -Target $p } $Target }
 }
 # 项目锁定 FVM 时禁止静默使用全局 SDK。
@@ -439,9 +445,249 @@ function Start-JobsWebProject {
         [void](Invoke-JobsTool 'pnpm' @('exec','wrangler','deploy') $Directory)
     }
 }
+# 验证本动作需要的工具，发现候选后再执行最小健康检查。
+function Find-JobsRemoteTool {
+    param([string]$Name,[string]$Directory)
+    $candidates=@(Get-Command $Name -CommandType Application -All -ErrorAction SilentlyContinue | ForEach-Object Source)
+    if ($Name -eq 'git') {
+        foreach ($base in @($env:LOCALAPPDATA,$env:ProgramFiles,${env:ProgramFiles(x86)})) {
+            if ($base) {
+                $candidates+=@(Join-Path $base 'Programs/Git/cmd/git.exe')
+                $candidates+=@(Join-Path $base 'Git/cmd/git.exe')
+                $candidates+=@(Join-Path $base 'Atlassian/SourceTree/git_local/bin/git.exe')
+            }
+        }
+    }
+    if ($Name -eq 'fzf' -and $env:LOCALAPPDATA) {
+        $candidates+=@(Join-Path $env:LOCALAPPDATA 'Microsoft/WinGet/Links/fzf.exe')
+    }
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
+        if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
+        try {
+            $health=Invoke-JobsTool $candidate @('--version') $Directory -Quiet
+            if ($health.Text -notmatch '\d+\.\d+') { continue }
+            if ($Name -eq 'winget') { [void](Invoke-JobsTool $candidate @('--info') $Directory -Quiet) }
+            if ($Name -eq 'fzf') {
+                $help=(Invoke-JobsTool $candidate @('--help') $Directory -Quiet).Text
+                foreach ($flag in @('--multi','--layout','--prompt','--header')) {
+                    if (-not $help.Contains($flag)) { throw "fzf 缺少必要选项：$flag" }
+                }
+                Test-JobsRemoteFzfOptions $candidate
+            }
+            return $candidate
+        } catch { Write-JobsStatus "工具体检失败：$candidate；$($_.Exception.Message)" }
+    }
+    return $null
+}
+# 用无交互过滤验证实际选择参数，屏蔽用户额外绑定后恢复环境。
+function Test-JobsRemoteFzfOptions {
+    param([string]$Fzf)
+    $keys=@('FZF_DEFAULT_OPTS','FZF_DEFAULT_OPTS_FILE','FZF_DEFAULT_COMMAND','FZF_DEFAULT_COMMAND_FILE')
+    $saved=@{}
+    foreach ($key in $keys) { $saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process');Remove-Item -LiteralPath ('Env:'+$key) -ErrorAction SilentlyContinue }
+    try {
+        $probe=@('jobs-fzf-option-probe' | & $Fzf --no-multi --reverse --prompt 'remote > ' --header 'probe' --filter 'jobs-fzf-option-probe')
+        if ($LASTEXITCODE -ne 0 -or $probe.Count -ne 1 -or $probe[0] -cne 'jobs-fzf-option-probe') { throw 'fzf 实际参数验证失败。' }
+    } finally {
+        foreach ($key in $keys) { if ($null -eq $saved[$key]) { Remove-Item -LiteralPath ('Env:'+$key) -ErrorAction SilentlyContinue } else { [Environment]::SetEnvironmentVariable($key,$saved[$key],'Process') } }
+    }
+}
+# 仅刷新当前进程，合并安装器新登记的路径。
+function Update-JobsRemoteSessionPath {
+    $paths=@($env:PATH -split [IO.Path]::PathSeparator)
+    foreach ($scope in @('User','Machine')) {
+        $paths+=@([Environment]::GetEnvironmentVariable('PATH',$scope) -split [IO.Path]::PathSeparator)
+    }
+    if ($env:LOCALAPPDATA) { $paths+=@(Join-Path $env:LOCALAPPDATA 'Microsoft/WinGet/Links') }
+    $env:PATH=(@($paths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique) -join [IO.Path]::PathSeparator)
+}
+# 确保选择和安装只能在真实交互终端中进行。
+function Assert-JobsRemoteTerminal {
+    if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) { throw '需要独立交互终端，已停止；请从 CMD/PowerShell 重试。' }
+}
+# 仅沿缺失分支检查 WinGet，当前用户一次安装或修复后重新体检。
+function Ensure-JobsRemoteTool {
+    param([string]$Name,[string]$Directory)
+    $tool=Find-JobsRemoteTool $Name $Directory
+    if ($tool) { return $tool }
+    Assert-JobsRemoteTerminal
+    $winget=Find-JobsRemoteTool 'winget' $Directory
+    if (-not $winget) {
+        throw '依赖链停在 WinGet/App Installer。请按 https://learn.microsoft.com/windows/package-manager/winget/ 修复 App Installer 后重试；未继续安装或执行。'
+    }
+    $package=if ($Name -eq 'git') { 'Git.Git' } elseif ($Name -eq 'fzf') { 'junegunn.fzf' } else { throw "不支持的依赖：$Name" }
+    Write-JobsStatus "依赖来源：WinGet 官方 winget 源；包：$package；范围：当前用户。会联网安装/修复，不主动提权。"
+    if ((Read-Host '缺少或损坏的必需依赖；按回车安装/修复，任意字符取消') -cne '') { throw '已取消依赖安装。' }
+    [void](Invoke-JobsTool $winget @('install','--id',$package,'--exact','--source','winget','--scope','user','--force','--accept-source-agreements','--accept-package-agreements','--disable-interactivity') $Directory)
+    Update-JobsRemoteSessionPath
+    $tool=Find-JobsRemoteTool $Name $Directory
+    if (-not $tool) { throw "$Name 一次安装/修复后二次体检失败，停止下游动作；请检查安装日志和 PATH。" }
+    return $tool
+}
+# 所有 remote 的全部有效 fetch/push 地址按原值去重，不优先 origin。
+function Get-JobsRemoteAddresses {
+    param([string]$Repository)
+    $result=New-Object 'Collections.Generic.List[object]'
+    $byUrl=New-Object 'Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal)
+    $names=(Invoke-JobsGit $Repository @('remote') -Quiet).Text -split "`n"
+    foreach ($remote in $names) {
+        if (-not $remote) { continue }
+        if ($remote -match '[\x00-\x1f\x7f]') { throw '远程名称包含控制字符，停止。' }
+        foreach ($key in @('url','pushurl')) {
+            $raw=Invoke-JobsGit $Repository @('config','--null','--get-all',('remote.'+$remote+'.'+$key)) -Quiet -AllowFailure
+            if ($raw.Code -notin @(0,1)) { throw '读取远程 URL 配置失败，停止。' }
+            foreach ($value in $raw.Text.Split([char]0)) {
+                if ($value -match '[\x00-\x1f\x7f]') { throw '远程地址配置包含控制字符，停止。' }
+            }
+        }
+        foreach ($kind in @('fetch','push')) {
+            $arguments=@('remote','get-url','--all')
+            if ($kind -eq 'push') { $arguments+=@('--push') }
+            $arguments+=@($remote)
+            $urls=(Invoke-JobsGit $Repository $arguments -Quiet).Text -split "`n"
+            foreach ($url in $urls) {
+                if (-not $url) { continue }
+                if ($url -match '[\x00-\x1f\x7f]') { throw '远程地址包含控制字符，停止。' }
+                $label="$remote/$kind"
+                if ($byUrl.ContainsKey($url)) {
+                    $byUrl[$url].Labels+=@($label)
+                } else {
+                    $item=[pscustomobject]@{Url=$url;Labels=@($label)}
+                    $byUrl.Add($url,$item)
+                    $result.Add($item)
+                }
+            }
+        }
+    }
+    if ($result.Count -eq 0) { throw '当前 Git 仓库没有配置任何远程地址。' }
+    return $result.ToArray()
+}
+# SSH/原生 Git 转网页地址，HTTP(S) 保留端口；不猜非标准 SSH 端口映射。
+function ConvertTo-JobsRemoteWebUrl {
+    param([string]$Url)
+    if ($Url -match '[\x00-\x20\x7f\\]' -or $Url -match '^[a-zA-Z]:') { throw '该远程地址不能安全转换为仓库网页；请配置明确的 HTTP(S) 地址。' }
+    $uri=$null
+    if ($Url -match '^(?i)(https?|ssh|git)://' -and [Uri]::TryCreate($Url,[UriKind]::Absolute,[ref]$uri)) {
+        if (-not $uri.Host -or $uri.AbsolutePath -eq '/') { throw '远程地址缺少主机或仓库路径。' }
+        $hostPart=$uri.Host
+        if ($uri.HostNameType -eq [UriHostNameType]::IPv6 -and -not $hostPart.StartsWith('[')) { $hostPart='['+$hostPart+']' }
+        if ($uri.Scheme -in @('http','https')) {
+            $scheme=$uri.Scheme
+            $port=if ($uri.IsDefaultPort) { '' } else { ':'+$uri.Port }
+        } else {
+            if ($uri.Scheme -eq 'ssh' -and $uri.Port -notin @(-1,22)) { throw '非标准 SSH 端口无法确定网页端口；请配置明确的 HTTP(S) 远程地址。' }
+            if ($uri.Scheme -eq 'git' -and $uri.Port -notin @(-1,9418)) { throw '非标准 Git 端口无法确定网页端口；请配置明确的 HTTP(S) 远程地址。' }
+            $scheme='https';$port=''
+        }
+        $path=$uri.AbsolutePath -replace '/+$','' -replace '\.git$',''
+        return $scheme+'://'+$hostPart+$port+$path
+    }
+    if ($Url -match '://|^[a-zA-Z][a-zA-Z0-9+.-]*::' -or $Url -match '^(?i)(file|javascript|data|vbscript|mailto|about|shell|ms-[a-z-]+):') {
+        throw '该协议不是可打开的仓库网页，请配置明确的 HTTP(S) 远程地址。'
+    }
+    if ($Url -match '^(?:[^/@:]+@)?(?<host>\[[0-9a-fA-F:]+\]|[^/:@]+):(?<path>[^?#]+)$') {
+        $remoteHost=$Matches.host;$remotePath=$Matches.path -replace '^/+','' -replace '/+$','' -replace '\.git$',''
+        if (-not $remotePath -or $remoteHost -match '[?#]') { throw '远程地址缺少有效主机或路径。' }
+        $web='https://'+$remoteHost+'/'+$remotePath
+        if (-not [Uri]::TryCreate($web,[UriKind]::Absolute,[ref]$uri) -or -not $uri.Host) { throw '远程地址不能转换为网页。' }
+        # Framework 与现代 .NET 的 IPv6 AbsoluteUri 格式不同；保留已校验的主机字面量。
+        return 'https://'+$remoteHost+$uri.AbsolutePath
+    }
+    throw '只支持 HTTP(S)、SSH/scp 和 git 远程网页；本地路径或其它协议不打开。'
+}
+# 选择面板只展示脱敏文本，返回值必须与原行精确匹配。
+function Select-JobsRemoteAddress {
+    param([object[]]$Addresses,[string]$Directory)
+    Assert-JobsRemoteTerminal
+    $fzf=Ensure-JobsRemoteTool 'fzf' $Directory
+    $rows=@()
+    for ($i=0;$i -lt $Addresses.Count;$i++) {
+        $safe=Protect-JobsRemoteText $Addresses[$i].Url
+        $labels=Protect-JobsRemoteText ($Addresses[$i].Labels -join ', ')
+        $rows+=('{0} | {1} | {2}' -f ($i+1),$labels,$safe)
+    }
+    $keys=@('FZF_DEFAULT_OPTS','FZF_DEFAULT_OPTS_FILE','FZF_DEFAULT_COMMAND','FZF_DEFAULT_COMMAND_FILE')
+    $saved=@{}
+    foreach ($key in $keys) { $saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process');Remove-Item -LiteralPath ('Env:'+$key) -ErrorAction SilentlyContinue }
+    $oldEncoding=$OutputEncoding;$oldConsoleEncoding=[Console]::OutputEncoding
+    try {
+        $OutputEncoding=New-Object Text.UTF8Encoding($false);[Console]::OutputEncoding=$OutputEncoding
+        $result=Invoke-JobsRemoteFzf $fzf $rows
+        $selection=@($result.Rows)
+        $code=$result.Code
+    } finally {
+        $OutputEncoding=$oldEncoding;[Console]::OutputEncoding=$oldConsoleEncoding
+        foreach ($key in $keys) { if ($null -eq $saved[$key]) { Remove-Item -LiteralPath ('Env:'+$key) -ErrorAction SilentlyContinue } else { [Environment]::SetEnvironmentVariable($key,$saved[$key],'Process') } }
+    }
+    if ($code -in @(1,130)) { Write-JobsStatus '已取消或没有匹配地址，未复制、未打开。';return $null }
+    if ($code -ne 0) { throw "fzf 选择失败，退出码 $code；未复制、未打开。" }
+    if ($selection.Count -ne 1) { throw 'fzf 没有返回唯一地址，停止。' }
+    $index=[Array]::IndexOf([string[]]$rows,[string]$selection[0])
+    if ($index -lt 0) { throw 'fzf 返回未知选项，停止。' }
+    return $Addresses[$index]
+}
+# 保留 fzf 原始退出码，避免将取消与执行失败混在一起。
+function Invoke-JobsRemoteFzf {
+    param([string]$Fzf,[string[]]$Rows)
+    $output=@($Rows | & $Fzf --no-multi --reverse --prompt '远程仓库 > ' --header '回车选择；Esc / Ctrl+C 取消（不复制、不打开）')
+    [pscustomobject]@{Code=$LASTEXITCODE;Rows=$output}
+}
+# 用编码数据转交独立 PowerShell，路径不拼入可执行语句。
+function Start-JobsRemoteTerminal {
+    param([string]$EntryScript,[string]$Target)
+    if (-not $EntryScript -or -not (Test-Path -LiteralPath $EntryScript -PathType Leaf)) { throw '没有有效动作入口，无法打开选择终端。' }
+    $payload=@{Script=$EntryScript;Target=$Target}|ConvertTo-Json -Compress
+    $data=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payload))
+    $code='$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("'+$data+'"))|ConvertFrom-Json; & $p.Script -Target $p.Target -Terminal'
+    $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($code))
+    $hostPath=Join-Path $PSHOME 'powershell.exe'
+    if (-not (Test-Path -LiteralPath $hostPath -PathType Leaf)) { $hostPath=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe' }
+    Start-Process -FilePath $hostPath -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded) -ErrorAction Stop | Out-Null
+    Write-JobsStatus '已打开独立终端；请在新窗口确认并选择。'
+}
+# 两个动作共用候选与分流，单地址直接执行，多地址只在独立终端选择。
+function Invoke-JobsRemoteAddressCore {
+    param([string]$Target,[switch]$Open,[switch]$SourceTree,[string]$EntryScript)
+    $directory=Resolve-JobsDirectory $Target
+    $git=Find-JobsRemoteTool 'git' $directory
+    if (-not $git -and $SourceTree) { Start-JobsRemoteTerminal $EntryScript $directory;return }
+    if (-not $git) { $git=Ensure-JobsRemoteTool 'git' $directory }
+    $env:PATH=(Split-Path -Parent $git)+[IO.Path]::PathSeparator+$env:PATH
+    $repository=Resolve-JobsRepository $directory
+    $addresses=@(Get-JobsRemoteAddresses $repository)
+    if ($addresses.Count -gt 1 -and $SourceTree) { Start-JobsRemoteTerminal $EntryScript $repository;return }
+    $selected=if ($addresses.Count -eq 1) { $addresses[0] } else { Select-JobsRemoteAddress $addresses $repository }
+    if ($null -eq $selected) { return }
+    Write-JobsStatus ('远程：'+(Protect-JobsRemoteText ($selected.Labels -join ', '))+'；地址：'+(Protect-JobsRemoteText $selected.Url))
+    if ($Open) {
+        $web=ConvertTo-JobsRemoteWebUrl $selected.Url
+        Start-Process -FilePath $web -ErrorAction Stop | Out-Null
+        Write-JobsStatus ('已打开仓库网页：'+$web)
+    } else {
+        Set-Clipboard -Value $selected.Url -ErrorAction Stop
+        Write-JobsStatus '已复制原始远程地址到剪贴板。'
+    }
+}
+# 远程动作专用脱敏，覆盖所有协议查询串、片段、userinfo 与控制字符。
+function Protect-JobsRemoteText {
+    param([string]$Text)
+    $Text -replace '[\x00-\x1f\x7f]',' ' -replace '(?i)([a-z][a-z0-9+.-]*://)[^/\s]*@','$1***@' -replace '^[^/\s@:]+@','***@' -replace '[?#].*$','?[已省略]'
+}
+# 隔离 Sourcetree/调用终端继承的仓库寻址变量，结束后原样恢复。
+function Invoke-JobsRemoteAddress {
+    param([string]$Target,[switch]$Open,[switch]$SourceTree,[string]$EntryScript)
+    $keys=@('GIT_DIR','GIT_WORK_TREE','GIT_COMMON_DIR','GIT_INDEX_FILE','GIT_OBJECT_DIRECTORY','GIT_ALTERNATE_OBJECT_DIRECTORIES','GIT_PREFIX','GIT_NAMESPACE','GIT_CEILING_DIRECTORIES','GIT_DISCOVERY_ACROSS_FILESYSTEM','GIT_SUPER_PREFIX')
+    $saved=@{};$previousPath=$env:PATH
+    foreach ($key in $keys) { $saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process');Remove-Item -LiteralPath ('Env:'+$key) -ErrorAction SilentlyContinue }
+    try { Invoke-JobsRemoteAddressCore $Target -Open:$Open -SourceTree:$SourceTree -EntryScript $EntryScript }
+    finally {
+        $env:PATH=$previousPath
+        foreach ($key in $keys) { if ($null -eq $saved[$key]) { Remove-Item -LiteralPath ('Env:'+$key) -ErrorAction SilentlyContinue } else { [Environment]::SetEnvironmentVariable($key,$saved[$key],'Process') } }
+    }
+}
 # 根据稳定标识执行业务，传入路径不作为代码求值。
 function Invoke-JobsSourceTreeAction {
-    param([string]$Action,[string]$Target,[string]$Option,[string]$Value)
+    param([string]$Action,[string]$Target,[string]$Option,[string]$Value,[switch]$SourceTree,[string]$EntryScript)
     $script:LogFile=Join-Path ([IO.Path]::GetTempPath()) ('JobsSourceTree-'+$Action+'-'+(Get-Date -Format 'yyyyMMdd-HHmmss')+'-'+[guid]::NewGuid().ToString('N')+'.log')
     Write-JobsStatus "动作：$Action；目标：$Target；日志：$script:LogFile"
     $dir=Resolve-JobsDirectory $Target
@@ -453,15 +699,25 @@ function Invoke-JobsSourceTreeAction {
         'ohos' { Invoke-JobsFeatureModule 'JobsFlutterPackager' $dir 'ohos' }
         'pubget' { [void](Invoke-JobsTool (Get-JobsFlutter $dir) @('pub','get') $dir) }
         'run' {
-            $flutter=Get-JobsFlutter $dir
-            $result=Invoke-JobsTool $flutter @('devices','--machine') $dir -Quiet
-            $devices=@($result.Text | ConvertFrom-Json | Where-Object { $_.isSupported -ne $false -and $_.targetPlatform -notmatch 'ios|darwin' })
-            if (-not $devices.Count) { throw '没有 Android/Web/Windows 可运行设备，请先启动设备。' }
-            for($i=0;$i -lt $devices.Count;$i++){ Write-JobsStatus ("$($i+1)、"+$devices[$i].name+' ['+$devices[$i].id+']') }
-            $selection=Read-Host '输入设备编号，回车取消'
-            if ($selection -notmatch '^\d+$' -or [int]$selection -lt 1 -or [int]$selection -gt $devices.Count) { throw '已取消。' }
+            $runnerPath = Join-Path $PSScriptRoot 'Features/JobsFlutterRunner/Scripts/Action.psm1'
+            $runner = Import-Module $runnerPath -Force -PassThru -DisableNameChecking
+            $selection = & $runner {
+                param($Project)
+                Assert-JobsFlutterProject $Project
+                $flutter = Get-JobsRunnerFlutter $Project
+                $device = Select-JobsRunnerDevice $flutter $Project
+                if ($null -eq $device) { return $null }
+                return [pscustomobject]@{ Flutter = $flutter; Device = $device; AndroidSdk = $script:RunnerSelectedSdk }
+            } $dir
+            if ($null -eq $selection) { Write-JobsStatus '已取消运行。'; return }
+            $oldAndroidHome = $env:ANDROID_HOME
+            $oldAndroidRoot = $env:ANDROID_SDK_ROOT
             Push-Location -LiteralPath $dir
-            try { & $flutter run -d $devices[[int]$selection-1].id; if($LASTEXITCODE -ne 0){throw 'Flutter run 失败。'} } finally {Pop-Location}
+            try {
+                if ($selection.AndroidSdk) { $env:ANDROID_HOME = $selection.AndroidSdk; $env:ANDROID_SDK_ROOT = $selection.AndroidSdk }
+                & $selection.Flutter run -d $selection.Device
+                if ($LASTEXITCODE -ne 0) { throw 'Flutter run 失败。' }
+            } finally { Pop-Location; $env:ANDROID_HOME = $oldAndroidHome; $env:ANDROID_SDK_ROOT = $oldAndroidRoot }
         }
         'imports' { Repair-JobsFlutterImports $dir }
         'rollback' { Reset-JobsCommit (Resolve-JobsRepository $dir) $Option $Value }
@@ -469,7 +725,8 @@ function Invoke-JobsSourceTreeAction {
         'push' { Push-JobsRepositoryTree (Resolve-JobsRepository $dir) }
         'commit-repair' { Repair-JobsCommit (Resolve-JobsRepository $dir) }
         'fetch-repair' { Repair-JobsFetch (Resolve-JobsRepository $dir) }
-        'remote' { [void](Invoke-JobsGit (Resolve-JobsRepository $dir) @('remote','-v')) }
+        'remote' { Invoke-JobsRemoteAddress $dir -SourceTree:$SourceTree -EntryScript $EntryScript }
+        'remote-open' { Invoke-JobsRemoteAddress $dir -Open -SourceTree:$SourceTree -EntryScript $EntryScript }
         'path' { Write-JobsStatus $dir; Set-Clipboard -Value $dir }
         'terminal' { Start-Process powershell.exe -WorkingDirectory $dir }
         'code' { Open-JobsEditor 'code' $dir }

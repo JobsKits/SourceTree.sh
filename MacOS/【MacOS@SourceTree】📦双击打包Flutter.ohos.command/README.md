@@ -21,7 +21,9 @@
 
 ## 🔥 <span id="前言">前言</span>
 
-这是 [**Sourcetree**](https://www.sourcetreeapp.com/) 的 [**Flutter**](https://flutter.dev/) 鸿蒙打包动作，面向已经具备 `ohos/` 平台的工程。默认执行 `flutter build hap --release`，可选 APP 上架包或两种包。构建命令来自 [CPF-Flutter 鸿蒙适配项目](https://gitcode.com/CPF-Flutter/flutter_flutter)，需要匹配工程的鸿蒙适配版 SDK。
+这是 [**Sourcetree**](https://www.sourcetreeapp.com/) 的 [**Flutter**](https://flutter.dev/) 鸿蒙打包动作，面向已经具备 `ohos/` 平台的工程。默认一次执行 `flutter build hap --release` 和 `flutter build app --release`，同时生成 HAP 安装模块与 APP 发布包；显式 CLI 参数仍兼容单包。构建命令来自 [CPF-Flutter 鸿蒙适配项目](https://gitcode.com/CPF-Flutter/flutter_flutter)，需要匹配工程的鸿蒙适配版 SDK。
+
+菜单显示为 `📦打包生成HAP+APP文件（Flutter.ohos）`，与 Flutter Android / iOS 及原生 iOS 打包动作连续排列。脚本文件名与调用路径保持现有名称，菜单参数为 `$REPO --target all --mode release`。
 
 ## 一、<span id="package-types">Android 与鸿蒙包的区别</span> <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
@@ -34,7 +36,7 @@
 
 ## 二、<span id="usage">运行方式与参数</span> <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-Sourcetree 自定义操作传入 `$REPO`，显示完整输出、无交互连续执行。独立终端先展示内置自述，回车确认后执行，`Ctrl+C` 取消。非 Sourcetree 且没有 TTY 输入时停止，确认前不写日志、不修改工程；运行时不读取 README。
+Sourcetree 自定义操作固定传入 `$REPO --target all --mode release`，显示完整输出、无交互连续执行。独立终端先展示内置自述，回车确认后执行，`Ctrl+C` 取消。非 Sourcetree 且没有 TTY 输入时停止，确认前不写日志、不修改工程；运行时不读取 README。
 
 在本目录执行，SDK 路径替换为实际克隆或安装的鸿蒙适配 SDK 根目录：
 
@@ -49,7 +51,7 @@ zsh "./【MacOS@SourceTree】📦双击打包Flutter.ohos.command" \
 | 参数 / 环境变量 | 默认与作用 |
 | --- | --- |
 | 工程路径 | 位置参数优先，其次 `PROJECT_DIR`、`REPO`、当前目录。支持中文、空格、拖拽路径。 |
-| `--target` / `BUILD_TARGET` | `hap`；可选 `app`、`all`。APP 能力也单独检查。 |
+| `--target` | 默认固定 `all`，按 HAP、APP 顺序生成两种包，不读取遗留 `BUILD_TARGET` 环境值；CLI 可显式指定 `hap`、`app`。菜单固定 `all`。 |
 | `--mode` / `BUILD_MODE` | `release`；可选 `debug`、`profile`。 |
 | `--flutter-sdk` / `FLUTTER_OHOS_SDK` | 可选，指定含 `bin/flutter` 的 SDK 根目录。 |
 | `DEVECO_STUDIO_HOME` / `TOOL_HOME` | 可选，DevEco 应用或其 `Contents`、独立 command-line-tools 根目录。 |
@@ -78,10 +80,11 @@ zsh "./【MacOS@SourceTree】📦双击打包Flutter.ohos.command" \
 ```shell
 flutter pub get
 flutter build hap --release
-# target=app 时执行 flutter build app --release；all 按 HAP、APP 顺序执行。
+flutter build app --release
+# 显式 --target hap 或 app 时只执行对应单包构建。
 ```
 
-依赖源沿用工程、锁文件与现有 Pub / ohpm 配置。构建实时输出并记录到系统临时目录的 `【MacOS@SourceTree】📦双击打包Flutter.ohos.log`。Sourcetree、非彩色终端及设置 `NO_COLOR` 时使用纯文本，日志过滤 ANSI 控制码；外部命令或日志管道失败均返回非零状态。
+默认双包目标会在依赖解析前同时验证 SDK 的 HAP 与 APP 构建能力，任一种不支持都停止；两次构建、各阶段非空产物核对与最终已记录双包存续复核均成功才报告整体成功，第二次构建失败保留已生成的 HAP 并返回失败。依赖源沿用工程、锁文件与现有 Pub / ohpm 配置。构建实时输出并记录到系统临时目录的 `【MacOS@SourceTree】📦双击打包Flutter.ohos.log`。Sourcetree、非彩色终端及设置 `NO_COLOR` 时使用纯文本，日志过滤 ANSI 控制码；外部命令或日志管道失败均返回非零状态。
 
 不同适配 SDK 构建路径存在差异，入口扫描以下工程内目录中的非空 `.hap` / `.app` 文件，并打印完整实际路径：
 
@@ -100,7 +103,7 @@ flowchart TD
     C --> E[选择固定 SDK 和 DevEco 环境]
     E --> F[检查工具健康与包型能力]
     F --> G[flutter pub get]
-    G --> H[构建 HAP 或 APP]
+    G --> H[依次构建 HAP 与 APP]
     H --> I[核对非空产物并定位]
     C -->|失败| J[非零退出并保留日志]
     E -->|失败| J
@@ -114,7 +117,7 @@ flowchart TD
 
 执行会联网解析依赖、运行工程及其依赖的构建代码，并写入锁文件、缓存、平台构建配置和产物。仅在当前脚本进程及子进程配置工具路径，不修改 Shell 启动文件或系统代理，不清理旧产物、不提交、不推送、不上传市场。
 
-已通过两份脚本的 `zsh -n`、25 项假工具链隔离检查和终端 PTY 回车确认检查，覆盖 HAP / APP / all、失败退出码、空产物、SDK 能力拒绝、FVM 优先级、特殊路径、纯文本输出和确认前无写入。安装器另有 44 项隔离检查；当前用户菜单已备份并安装，重启 Sourcetree 后已在“自定义操作”页面核对新动作的目标及 `$REPO` 参数。
+脚本与安装器的运行、备灾两副本均通过 `zsh -n` 与逐字节一致性核验。[隔离回归](../Tests/FlutterHarmonyBuild.Tests.rb) 使用临时工程和假工具验证默认双包、CLI 单包兼容、菜单参数覆盖遗留环境、APP 能力缺失时不拉依赖、第二步失败、缺少 APP 产物，以及 APP 构建清掉 HAP 后最终复核失败。当前用户菜单写入前已备份，保留其它动作和用户标题；正常重启 Sourcetree 后已在“自定义操作”页面实际核对原显示标题、运行副本路径及 `$REPO --target all --mode release` 参数，未点击执行打包。
 
 这些检查独立于真实打包。真实鸿蒙 SDK、工程插件适配、签名、设备安装和上架仍须使用目标工程验证；本仓维护过程未执行真实鸿蒙构建。
 
