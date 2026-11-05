@@ -28,7 +28,9 @@
 
 两台 Mac 均使用不带 `1` 的当前主入口；同目录的 `【MacOS】安装SourceTree自定义菜单1.command` 保留为旧版对照。菜单路径按本次源库和目标目录重新解析，模板中另一位用户的旧路径会迁移；Flutter 运行入口的旧 ASCII 冒号路径也会迁移到现有全角冒号路径。
 
-安装菜单时会补齐 [⏬只拉取远程代码（终端）](../【MacOS@SourceTree】⏬只拉取远程代码.command/README.md) 动作，适用于没有推送权限的上游仓库。它打开独立终端执行，拉取当前父仓后逐层按 gitlink 检出子模块，不提交、不推送；纯子仓 HEAD 漂移自动对齐。当前父仓本地内容须红字列明并精确输入 `YES` 才舍弃，子仓源码和暂存指针仍单独保护。目标平台缺少子提交时停止并显示仓库、来源及 SHA，不能用消费端提交或 push 解决。
+安装菜单时会补齐 [⏬只拉取远程代码（终端）](../【MacOS@SourceTree】⏬只拉取远程代码.command/README.md) 动作，适用于没有推送权限的上游仓库。它打开独立终端执行，先抓取当前父仓的远程上游，抓取失败可空回车反复重试，非空输入或 Ctrl+C 取消；成功后进入安全预检与同步，再逐层按 gitlink 检出子模块，不提交、不推送；纯子仓 HEAD 漂移自动对齐。当前父仓本地内容须红字列明并精确输入 `YES` 才舍弃，子仓源码和暂存指针仍单独保护。目标平台缺少子提交时停止并显示仓库、来源及 SHA，不能用消费端提交或 push 解决。 Git 核验成功后输出真实待拉取数，并向运行中的 SourceTree 当前仓库发送清缓存刷新（`Cmd+R`）；自动化 / 辅助功能不可用时提示手动刷新，不删除账号、书签、自定义菜单或磁盘缓存。
+
+安装菜单会补齐 [📥修复Git无法Push（终端）](../【MacOS@SourceTree】📥修复Git无法Push.command/README.md)，与 Commit／Fetch 修复相邻。动作参数为 `$REPO`，打开独立终端执行，不在 Sourcetree 输出窗口等待输入；缺项补齐、已有自定义标题保留。该动作只处理当前仓库的选定线路，先获取整合再普通推送，服务端提交号一致才成功。
 
 安装菜单也会补齐 [📦打包生成HAP+APP文件（Flutter.ohos）](../【MacOS@SourceTree】📦双击打包Flutter.ohos.command/README.md)。[**Android**](https://developer.android.com) 打包产物为 APK / AAB，[**HarmonyOS**](https://developer.huawei.com/consumer/cn/harmonyos/) 入口同时生成 HAP 安装模块与 APP 发布包；该入口只处理已适配鸿蒙的 [**Flutter**](https://flutter.dev/) 工程，需要同时支持 `flutter build hap` 与 `flutter build app` 的 [适配 SDK](https://gitcode.com/CPF-Flutter/flutter_flutter) 和既有 `ohos/` 目录。安装菜单不会安装 SDK、迁移工程或生成签名配置。
 

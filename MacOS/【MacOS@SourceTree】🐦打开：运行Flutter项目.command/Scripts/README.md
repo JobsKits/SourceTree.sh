@@ -9,6 +9,7 @@
 
 - [一、文件与入口](#jobs-toc-heading-1)
 - [二、操作与边界](#jobs-toc-heading-2)
+  - [SDK获取前网络检测](#jobs-toc-heading-3)
 
 </details>
 <!-- jobs-toc:end -->
@@ -34,6 +35,13 @@
 
 先展示内置自述，回车继续，非空或 `Ctrl+C` 取消。设备选择、已有模拟器启动及缺失时的型号 / 系统镜像初始化均在独立终端中处理；下载和创建前确认，取消不继续业务。项目 SDK 缺失时沿原 FVM 流程确认，不静默切换全局 SDK。
 
+设备枚举前先检查所选 SDK 的公共缓存；完整本地 stamp、组件目录及工具依赖均就绪时直接复用，不新增联网前提。否则先执行 `flutter precache --universal`，沿用本次网络选路、真实进度和持续重试，单次窗口为 1800 秒，直到就绪或 `Ctrl+C` 结束；这一步不下载所有目标平台。输出保存到 `<操作日志>.discovery-sdk`；每次尝试结束后，将输出和退出码追加到 `<操作日志>.discovery-sdk.attempts.log`，中断时保留当次日志。公共组件完成后才运行短时 `flutter devices --machine`，避免机器模式下的隐式下载被设备查询超时反复中止。
+
 运行后 `r` 热重载、`R` 热重启、`d` 离开日志、`s` 停止，均需回车。关闭终端仅离开日志，后台任务继续；操作日志、持久会话和模拟器日志的位置均由运行器打印。完整工具依赖、创建副作用、失败与验证边界见 [动作说明](../README.md)。
 
 <a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>
+
+
+### <span id="jobs-toc-heading-3" data-jobs-toc="v2">SDK获取前网络检测</span><!-- jobs-toc:heading-end -->
+
+Flutter SDK 源码、Dart 首次补齐、设备发现公共组件及目标平台制品获取前，先以目标版本/engine/架构的小Range正文核对来源与现有网络路线；显式源和代理（包含空值）保留。AUTO只在获准的官方/CFUG等价公开对象及当前已配置网络中选择，配置仅传当前SDK子进程，不持久修改Shell、Git或系统代理。健康本地Dart缓存可直接复用；获取失败自动使路线缓存失效并持续退避重测，Ctrl+C结束。构建、运行及项目依赖业务不因SDK网络错误被整段重放。

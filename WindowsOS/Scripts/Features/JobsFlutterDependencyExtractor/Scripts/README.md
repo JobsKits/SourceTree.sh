@@ -37,4 +37,6 @@
 
 需要 Windows PowerShell 5.1+ 及该动作要求的项目工具。体检只读；生成、pub get 与构建会改写对应项目产物，依赖提取只写选择的输出目录；网络与签名边界按动作声明。复用核心日志在系统临时目录的 JobsSourceTree/logs，由实际运行输出位置。本文仅静态核对，未执行构建、下载或源码生成。
 
+**原生 Dart 本地提取：** 本功能健康检查与提取仅执行已验证PE签名的现有`dart.exe`，通过专用native-only上下文调用原进程执行器；不以Flutter缓存stamp缺失为由准备SDK，不运行Flutter或网络探测。取消保留为取消，不继续尝试其它Dart候选。共享SDK辅助资源随包保留供通用库使用，本提取流程不进入SDK获取逻辑。
+
 <a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>

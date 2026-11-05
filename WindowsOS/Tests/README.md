@@ -38,3 +38,9 @@
 `HarmonyBuild.Tests.ps1` 用临时工程与内存工具替身覆盖双产物顺序、能力缺失、任一构建失败、非空文件检查和环境恢复，并单独验证实际调度强制 `all` 与传入会话日志；不会运行真实 Flutter / DevEco。
 
 <a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>
+
+[PushRepair.Tests.ps1](./PushRepair.Tests.ps1/README.md) 覆盖当前仓库单线路 Push 诊断、安全整合、内容保护与提交号核验；仅使用临时工作树和本地 bare 远端。
+
+```powershell
+pwsh -NoProfile -File ./WindowsOS/Tests/PushRepair.Tests.ps1/PushRepair.Tests.ps1
+```

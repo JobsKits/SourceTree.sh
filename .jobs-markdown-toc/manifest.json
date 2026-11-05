@@ -76,6 +76,10 @@
     "MacOS/【MacOS@SourceTree】🌍打开远程仓库地址.command/README.md",
     "WindowsOS/【WindowsOS@SourceTree】🌍打开远程仓库地址/README.md",
     "MacOS/【MacOS@SourceTree】🐦打开：运行Flutter项目.command/Scripts/README.md",
-    "WindowsOS/Scripts/Features/JobsFlutterRunner/Scripts/README.md"
+    "WindowsOS/Scripts/Features/JobsFlutterRunner/Scripts/README.md",
+    "MacOS/【MacOS@SourceTree】📥修复Git无法Push.command/README.md",
+    "WindowsOS/【WindowsOS@SourceTree】📥修复Git无法Push/README.md",
+    "WindowsOS/Scripts/Features/JobsGitPushRepair/Scripts/README.md",
+    "WindowsOS/Tests/PushRepair.Tests.ps1/README.md"
   ]
 }

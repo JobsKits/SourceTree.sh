@@ -1,7 +1,7 @@
 #!/bin/zsh
 # 脚本自述：
 # - 脚本名称：【MacOS@SourceTree】📥修复Git无法Commit.command
-# - 核心用途：按 7 个独立场景逐项检测/修复 Commit 的索引、gitdir、.gitmodules 与子模块阻塞，并复验暂存入口。
+# - 核心用途：自动识别 Sourcetree 旧路径/文件变目录故障，精确暂存旧文件删除；其它故障沿用 7 场景修复。
 # - 关键场景：工作树绑定错位、残留索引锁、gitlink 顺序错误、嵌套路径迁移、子模块异常，以及文件/目录形态互换。
 # - 影响范围：修改 Git 索引；可归档确认无进程占用的残留锁并初始化缺失子模块，但不清理已有子模块的真实修改。
 # - 运行提示：Sourcetree 模式无交互连续执行；终端独立运行需先按回车确认。
@@ -31,8 +31,8 @@ jobs_intro_style() {
 }
 # 解析脚本真实路径，兼容 Sourcetree 只传入脚本名的运行环境。
 resolve_script_path() {
-  local script_source="${BASH_SOURCE[0]:-${(%):-%x}}"
-  local script_name="${0:t}"
+  local script_source="$SCRIPT_SOURCE"
+  local script_name="$SCRIPT_NAME"
   local candidate=""
 
   for candidate in \
@@ -48,6 +48,7 @@ resolve_script_path() {
   printf '%s/%s\n' "$PWD" "$script_name"
 }
 
+SCRIPT_SOURCE="${BASH_SOURCE[0]:-${(%):-%x}}"
 SCRIPT_NAME="${0:t}"
 SCRIPT_BASENAME="${SCRIPT_NAME:r}"
 SCRIPT_PATH=""
@@ -63,6 +64,11 @@ REPO_ROOT=""
 INDEX_LOCK_PATH=""
 COMMIT_SCENARIO_STEP=0
 COMMIT_SCENARIO_TOTAL=7
+COMMIT_REPAIR_MODE="auto"
+PATH_REPAIR_ACTIVE=0
+PATH_REPAIR_TEMP=""
+PATH_REPAIR_LOCK=""
+PATH_REPAIR_LOCK_OWNED=0
 typeset -ga GITLINK_PATHS
 GITLINK_PATHS=()
 
@@ -183,6 +189,7 @@ show_script_intro_and_wait() {
   highlight_echo "============================== 脚本内置自述 ==============================" | jobs_intro_style title
   note_echo "脚本名称：${SCRIPT_BASENAME}.command" | jobs_intro_style title
   note_echo "核心行为：把 Commit 阻塞拆成 7 个独立场景，逐项检测/修复，最后验证索引入口已经解锁。" | jobs_intro_style body
+  note_echo "路径修复：检测到原文件已变目录时，只暂存旧文件删除，保留目录新文件、无关修改和部分暂存；--repair-paths 可显式启用，--stage-all 沿用完整暂存。" | jobs_intro_style body
   note_echo "适用场景：Git 异常退出遗留索引锁、普通变更、文件与同名目录转换、缺失子模块工作树、旧 gitlink 删除，以及 .git/core.worktree 路径错位。" | jobs_intro_style body
   note_echo "锁处理策略：锁仍被进程持有时立即停止；只有确认无人占用时才移动到 Git 元数据备份目录。" | jobs_intro_style body
   note_echo "路径迁移：旧 gitlink 已登记但目录已改名时，会同步修复 .gitmodules、core.worktree 和父仓索引。" | jobs_intro_style body
@@ -205,6 +212,48 @@ show_script_intro_and_wait() {
 
   echo "" | jobs_intro_style body
   read -r "?👉 已阅读说明，按回车继续执行；按 Ctrl+C 取消：" _ || exit 1
+}
+# 解析兼容的仓库参数与可选修复范围，未知参数在业务前停止。
+parse_commit_repair_mode() {
+  case "${2:-}" in
+    "") COMMIT_REPAIR_MODE="auto" ;;
+    --repair-paths) COMMIT_REPAIR_MODE="paths"; PATH_REPAIR_ACTIVE=1 ;;
+    --stage-all) COMMIT_REPAIR_MODE="all" ;;
+    *) error_echo "未知修复选项：${2}"; return 1 ;;
+  esac
+  if (( $# > 2 )); then
+    error_echo "用法：脚本 [仓库路径] [--repair-paths|--stage-all]"
+    return 1
+  fi
+}
+# 冲突索引不能交给 add -A，否则会把未解决的冲突误标记为已解决。
+ensure_no_unmerged_entries() {
+  local unmerged="$(git -C "$REPO_ROOT" ls-files -u)"
+  if [[ -n "$unmerged" ]]; then
+    error_echo "存在未解决冲突，保留索引与工作区，请先解决冲突。"
+    return 1
+  fi
+}
+# 自动识别 HEAD 中的普通文件已变同名目录，包括旧条目已经暂存删除的 GUI 旧路径。
+select_commit_repair_scope() {
+  ensure_no_unmerged_entries || return 1
+  local record="" metadata="" relative_path=""
+  if [[ "$COMMIT_REPAIR_MODE" == auto ]] && git -C "$REPO_ROOT" rev-parse --verify HEAD >/dev/null 2>&1; then
+    while IFS= read -r -d '' record; do
+      metadata="${record%%$'\t'*}"
+      relative_path="${record#*$'\t'}"
+      [[ "$metadata" == 100644\ * || "$metadata" == 100755\ * ]] || continue
+      if [[ -d "${REPO_ROOT}/${relative_path}" && ! -L "${REPO_ROOT}/${relative_path}" ]]; then
+        PATH_REPAIR_ACTIVE=1
+        break
+      fi
+    done < <(git -C "$REPO_ROOT" ls-tree -rz HEAD)
+  fi
+  if [[ "$PATH_REPAIR_ACTIVE" == 1 ]]; then
+    warn_echo "已选择旧路径精确修复：不执行全量 add，不初始化或迁移子模块。"
+  else
+    warn_echo "已选择原完整修复流程：C06 将暂存当前仓库全部改动。"
+  fi
 }
 # 解析 .git 文件指向的真实 gitdir 路径。
 resolve_gitdir_from_git_file() {
@@ -315,11 +364,25 @@ resolve_target_path() {
 }
 # 场景 C01：修复当前工作树自身的 .git/core.worktree 错位并识别仓库。
 run_commit_scenario_c01_worktree_binding() {
+  local scope_selected=0
   begin_commit_scenario "C01" "工作树定位与 gitdir 绑定" "目录改名、Sourcetree 书签指错目录，或 .git 指针仍绑定旧 core.worktree。"
-  repair_invoked_gitdir_worktree_if_safe "$TARGET_PATH"
+  if REPO_ROOT="$(git -C "$TARGET_PATH" rev-parse --show-toplevel 2>/dev/null)"; then
+    select_commit_repair_scope || return 1
+    scope_selected=1
+  fi
+  if [[ "$PATH_REPAIR_ACTIVE" != 1 ]]; then
+    repair_invoked_gitdir_worktree_if_safe "$TARGET_PATH"
+  fi
   if ! REPO_ROOT="$(git -C "$TARGET_PATH" rev-parse --show-toplevel 2>/dev/null)"; then
     error_echo "目标路径不在 Git 工作树内：${TARGET_PATH}"
     return 1
+  fi
+  if [[ "$PATH_REPAIR_ACTIVE" == 1 && "$TARGET_PATH" != "${REPO_ROOT:A}" && "$TARGET_PATH" != "${REPO_ROOT:A}/"* ]]; then
+    error_echo "路径修复发现工作树绑定错位，保留元数据并停止：${REPO_ROOT}"
+    return 1
+  fi
+  if [[ "$scope_selected" != 1 ]]; then
+    select_commit_repair_scope || return 1
   fi
 
   success_echo "已识别仓库：${REPO_ROOT}"
@@ -414,6 +477,15 @@ repair_stale_index_lock() {
 # 场景 C02：识别活锁与残留 index.lock，只归档已经确认无人占用的残留锁。
 run_commit_scenario_c02_index_lock() {
   begin_commit_scenario "C02" "索引锁阻塞" "Git 索引写进程仍在运行，或异常退出后遗留 .git/index.lock。"
+  if [[ "$PATH_REPAIR_ACTIVE" == 1 ]]; then
+    INDEX_LOCK_PATH="$(git -C "$REPO_ROOT" rev-parse --absolute-git-dir)/index.lock"
+    if [[ -e "$INDEX_LOCK_PATH" || -L "$INDEX_LOCK_PATH" ]]; then
+      error_echo "路径修复保留现有 index.lock，请等待索引写操作结束：${INDEX_LOCK_PATH}"
+      return 1
+    fi
+    complete_commit_scenario "C02"
+    return 0
+  fi
   repair_stale_index_lock
   complete_commit_scenario "C02"
 }
@@ -772,6 +844,12 @@ preflight_gitdir_worktree_aliases() {
 }
 # 场景 C04：扫描并收口嵌套工作树、子模块副本及未完成路径迁移。
 run_commit_scenario_c04_nested_worktrees() {
+  if [[ "$PATH_REPAIR_ACTIVE" == 1 ]]; then
+    begin_commit_scenario "C04" "嵌套工作树保护" "本轮只修复旧文件索引，不需要修复嵌套元数据。"
+    info_echo "C04 跳过：路径修复不改嵌套工作树元数据。"
+    complete_commit_scenario "C04"
+    return 0
+  fi
   begin_commit_scenario "C04" "嵌套工作树与路径迁移" "子模块目录被移动/复制后，.git 指针、core.worktree、.gitmodules 与父仓 gitlink 没有同步。"
   preflight_gitdir_worktree_aliases
   complete_commit_scenario "C04"
@@ -913,6 +991,12 @@ preflight_submodules() {
 }
 # 场景 C05：检查缺失、迁移、退役或带内部修改的子模块工作树。
 run_commit_scenario_c05_submodules() {
+  if [[ "$PATH_REPAIR_ACTIVE" == 1 ]]; then
+    begin_commit_scenario "C05" "子模块保护" "本轮不需要初始化或迁移子模块。"
+    info_echo "C05 跳过：路径修复保留所有 gitlink 和子模块。"
+    complete_commit_scenario "C05"
+    return 0
+  fi
   begin_commit_scenario "C05" "子模块工作树与 gitlink 一致性" "父仓 gitlink、.gitmodules 和子模块工作树状态不一致，或父仓锁定提交已经不可用。"
   preflight_submodules
   complete_commit_scenario "C05"
@@ -939,19 +1023,136 @@ stage_gitmodules_first() {
 }
 # 场景 C03：先让 .gitmodules 与待删除或迁移的 gitlink 建立正确索引顺序。
 run_commit_scenario_c03_gitmodules_order() {
+  if [[ "$PATH_REPAIR_ACTIVE" == 1 ]]; then
+    begin_commit_scenario "C03" ".gitmodules 保护" "普通旧文件删除无需改变子模块配置。"
+    info_echo "C03 跳过：路径修复不改变 .gitmodules 的暂存内容。"
+    complete_commit_scenario "C03"
+    return 0
+  fi
   begin_commit_scenario "C03" ".gitmodules 暂存顺序" "Sourcetree 先删除/迁移 gitlink，但 .gitmodules 的对应路径变化尚未进入索引。"
   stage_gitmodules_first
   complete_commit_scenario "C03"
 }
-# 统一暂存工作区与索引中的全部改动。
+# 清理本轮临时索引与自己持有的锁，保留可恢复备份。
+cleanup_path_repair() {
+  [[ -z "$PATH_REPAIR_TEMP" ]] || /bin/rm -f -- "$PATH_REPAIR_TEMP"
+  if [[ "$PATH_REPAIR_LOCK_OWNED" == 1 ]]; then
+    /bin/rm -f -- "$PATH_REPAIR_LOCK"
+    PATH_REPAIR_LOCK_OWNED=0
+  fi
+}
+# 检查旧文件确已缺失或变真实目录；祖先必须仍为真实目录，不穿越符号链接或文件。
+is_obsolete_index_file() {
+  local relative_path="$1" parent_path="${1:h}" absolute_parent=""
+  while [[ "$parent_path" != . ]]; do
+    absolute_parent="${REPO_ROOT}/${parent_path}"
+    [[ ! -L "$absolute_parent" ]] || return 1
+    [[ ! -e "$absolute_parent" || -d "$absolute_parent" ]] || return 1
+    parent_path="${parent_path:h}"
+  done
+  [[ ! -L "${REPO_ROOT}/${relative_path}" && ( ! -e "${REPO_ROOT}/${relative_path}" || -d "${REPO_ROOT}/${relative_path}" ) ]]
+}
+# 在独占锁和索引备份保护下，只移除未暂存过且确已消失的普通旧文件条目。
+repair_sourcetree_obsolete_paths() {
+  local index_path="" backup_path="" snapshot="" record="" metadata="" relative_path="" flag="" candidate="" entry_i=0
+  local -a candidates expected_entries actual_entries
+  local -A protected_paths
+  index_path="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-path index)" || return 1
+  if [[ ! -f "$index_path" || -L "$index_path" ]]; then
+    error_echo "路径修复需要现有普通索引文件：${index_path}"
+    return 1
+  fi
+  PATH_REPAIR_LOCK="${index_path}.lock"
+  if ! ( setopt NO_CLOBBER; : > "$PATH_REPAIR_LOCK" ) 2>/dev/null; then
+    error_echo "无法取得索引锁，保留现状：${PATH_REPAIR_LOCK}"
+    return 1
+  fi
+  PATH_REPAIR_LOCK_OWNED=1
+  trap 'cleanup_path_repair' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM HUP
+  PATH_REPAIR_TEMP="$(mktemp "${index_path}.jobs-paths.XXXXXX")" || return 1
+  snapshot="$(mktemp "${index_path}.jobs-paths-before.XXXXXX")" || return 1
+  /bin/cp -p -- "$index_path" "$snapshot" || return 1
+  /bin/cp -p -- "$snapshot" "$PATH_REPAIR_TEMP" || return 1
+  backup_path="$snapshot"
+  info_echo "原索引备份：${backup_path}"
+  while IFS= read -r -d '' record; do
+    flag="${record[1]}"
+    [[ "$flag" == H ]] || protected_paths["${record[3,-1]}"]=1
+  done < <(GIT_INDEX_FILE="$snapshot" git -C "$REPO_ROOT" ls-files -v -z)
+  while IFS= read -r -d '' record; do
+    metadata="${record[3,-1]}"
+    metadata="${metadata%%$'\t'*}"
+    relative_path="${record#*$'\t'}"
+    if [[ ( "$metadata" == 100644\ *\ 0 || "$metadata" == 100755\ *\ 0 ) &&
+          "$relative_path" != .gitmodules && -z "${protected_paths["$relative_path"]:-}" ]] && is_obsolete_index_file "$relative_path"; then
+      if GIT_INDEX_FILE="$snapshot" git -C "$REPO_ROOT" diff --cached --quiet --ita-visible-in-index -- ":(literal)${relative_path}"; then
+        candidates+=("$relative_path")
+        continue
+      fi
+      warn_echo "保留已有暂存内容的旧路径：${relative_path}"
+    fi
+    expected_entries+=("$record")
+  done < <(GIT_INDEX_FILE="$snapshot" git -C "$REPO_ROOT" ls-files -v --stage -z)
+  if (( ${#candidates[@]} == 0 )); then
+    info_echo "没有可安全移除的旧索引条目；旧路径可能已暂存删除，请刷新 Sourcetree 文件状态后重试。"
+    cleanup_path_repair
+    return 0
+  fi
+  for candidate in "${candidates[@]}"; do
+    info_echo "仅暂存旧文件删除：${candidate}"
+  done
+  if ! printf '%s\0' "${candidates[@]}" | GIT_INDEX_FILE="$PATH_REPAIR_TEMP" git -C "$REPO_ROOT" update-index --force-remove -z --stdin; then
+    error_echo "临时索引修复失败，真实索引保持原样。"
+    return 1
+  fi
+  while IFS= read -r -d '' record; do
+    actual_entries+=("$record")
+  done < <(GIT_INDEX_FILE="$PATH_REPAIR_TEMP" git -C "$REPO_ROOT" ls-files -v --stage -z)
+  if (( ${#expected_entries[@]} != ${#actual_entries[@]} )); then
+    error_echo "临时索引条目校验失败，真实索引保持原样。"
+    return 1
+  fi
+  for (( entry_i=1; entry_i<=${#expected_entries[@]}; entry_i++ )); do
+    if [[ "${expected_entries[$entry_i]}" != "${actual_entries[$entry_i]}" ]]; then
+      error_echo "临时索引内容或 flags 发生意外变化，真实索引保持原样。"
+      return 1
+    fi
+  done
+  for candidate in "${candidates[@]}"; do
+    if ! is_obsolete_index_file "$candidate"; then
+      error_echo "工作区路径在检测后发生变化，保留真实索引：${candidate}"
+      return 1
+    fi
+  done
+  if ! /usr/bin/cmp -s -- "$snapshot" "$index_path"; then
+    error_echo "真实索引发生并发变化，停止写回；备份：${backup_path}"
+    return 1
+  fi
+  /bin/cp -p -- "$PATH_REPAIR_TEMP" "$PATH_REPAIR_LOCK" || return 1
+  /bin/mv -f -- "$PATH_REPAIR_LOCK" "$index_path" || return 1
+  PATH_REPAIR_LOCK_OWNED=0
+  cleanup_path_repair
+  success_echo "已精确暂存 ${#candidates[@]} 个旧文件删除；新目录及其它暂存内容保持原样。"
+}
+# 按选定范围暂存旧路径删除，或沿用完整索引刷新。
 stage_all_changes() {
+  if [[ "$PATH_REPAIR_ACTIVE" == 1 ]]; then
+    repair_sourcetree_obsolete_paths
+    return $?
+  fi
   info_echo "正在安全暂存全部改动 ..."
   git -C "$REPO_ROOT" -c advice.addEmbeddedRepo=false add -A -- .
   success_echo "Git 索引已刷新。"
 }
 # 场景 C06：用一次完整索引刷新处理普通变更及文件/目录形态互换。
 run_commit_scenario_c06_full_index_refresh() {
-  begin_commit_scenario "C06" "完整索引刷新" "Sourcetree 对新增、删除、重命名或文件/同名目录互换执行分步 add/rm，命令顺序互相阻塞。"
+  if [[ "$PATH_REPAIR_ACTIVE" == 1 ]]; then
+    begin_commit_scenario "C06" "旧路径精确修复" "Sourcetree 对已变目录或已不在索引的旧文件路径执行 git rm，出现 without -r 或 pathspec did not match。"
+  else
+    begin_commit_scenario "C06" "完整索引刷新" "Sourcetree 对新增、删除、重命名或文件/同名目录互换执行分步 add/rm，命令顺序互相阻塞。"
+  fi
   stage_all_changes
   complete_commit_scenario "C06"
 }
@@ -965,6 +1166,12 @@ run_commit_scenario_c07_verify_unlock() {
   if ! git -C "$REPO_ROOT" ls-files --stage >/dev/null 2>&1; then
     error_echo "复验失败：Git 索引仍不可读取。"
     return 1
+  fi
+  if [[ "$PATH_REPAIR_ACTIVE" == 1 ]]; then
+    success_echo "索引可读且无遗留锁；本轮只处理旧文件删除，未执行全量暂存。"
+    warn_echo "请在 Sourcetree 刷新文件状态，重新选择待提交文件，避免沿用旧 git rm 路径列表。"
+    complete_commit_scenario "C07"
+    return 0
   fi
   if ! git -C "$REPO_ROOT" add --dry-run -A -- . >> "$LOG_FILE" 2>&1; then
     error_echo "复验失败：git add --dry-run -A -- . 仍无法通过。"
@@ -996,6 +1203,7 @@ print_completion_message() {
 main() {
   show_script_intro_and_wait # 首先打印内置自述，并按真实运行入口决定是否等待确认。
   initialize_script_runtime # 用户确认后初始化 zsh、命令路径、日志和纯文本输出策略。
+  parse_commit_repair_mode "$@" # 保留原仓库参数，解析精确旧路径或完整暂存选项。
   resolve_target_path "${1:-$PWD}" # 规范化 Sourcetree 参数或当前目录，不提前修改 Git 状态。
   run_commit_scenario_c01_worktree_binding # C01：修复当前工作树自身的 gitdir/core.worktree 错位并识别仓库。
   run_commit_scenario_c02_index_lock # C02：区分活锁与残留锁，只归档可安全处理的 index.lock。

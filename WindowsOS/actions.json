@@ -144,6 +144,12 @@
     "Purpose": "分阶段 fetch、prune、pack-refs 并传播错误"
   },
   {
+    "Id": "push-repair",
+    "Name": "📥修复Git无法Push",
+    "Script": "【WindowsOS@SourceTree】📥修复Git无法Push/Run.ps1",
+    "Purpose": "当前仓库单条线路的 Push 排障、保留历史整合、普通推送和 OID 核验"
+  },
+  {
     "Id": "android",
     "Name": "📦双击打包Flutter.android",
     "Script": "【WindowsOS@SourceTree】📦双击打包Flutter.android/Run.ps1",

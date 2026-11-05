@@ -38,24 +38,35 @@ try {
                 $script:RunnerSelectedSdk = '/fixture/selected-sdk'
                 function Assert-JobsFlutterProject { param($Project) }
                 function Get-JobsRunnerFlutter { param($Project) return 'Invoke-FakeFlutter' }
-                function Select-JobsRunnerDevice { param($Flutter, $Project) if ($script:Cancel) { return $null }; return 'emulator-selected' }
+                function Initialize-JobsRunnerDiscoverySdk { param($Flutter, $Project) $global:JobsRunnerDiscoveryCalls.Add('universal'); if($global:JobsRunnerDiscoveryFailure){throw 'fixture SDK cancelled'} }
+                function Select-JobsRunnerDevice { param($Flutter, $Project) $global:JobsRunnerDiscoveryCalls.Add('devices'); if ($script:Cancel) { return $null }; return 'emulator-selected' }
             }
         }
     }
+    $global:JobsRunnerDiscoveryCalls = New-Object 'Collections.Generic.List[string]'
+    $global:JobsRunnerDiscoveryFailure = $false
     $env:ANDROID_HOME = 'old-home'
     $env:ANDROID_SDK_ROOT = 'old-root'
     & $module { Invoke-JobsSourceTreeAction -Action run -Target 'Fixture Project' }
     $calls = @(& $module { $script:Calls.ToArray() })
     Assert-Run (@($calls | Where-Object { $_.Replace('\','/') -like '*Features/JobsFlutterRunner/Scripts/Action.psm1' }).Count -eq 1) '运行动作调用随包设备选择模块'
     Assert-Run ($calls -contains 'flutter:run -d emulator-selected') ('使用选择器返回的明确设备继续前台Flutter：' + ($calls -join ' | '))
+    Assert-Run (($global:JobsRunnerDiscoveryCalls-join'|')-ceq'universal|devices') 'SourceTree真实调度在设备选择前准备通用SDK'
     Assert-Run ($calls -contains 'pop') '运行后恢复工作目录'
     Assert-Run ($calls -contains 'sdk:/fixture/selected-sdk|/fixture/selected-sdk') '前台Flutter继承选定SDK'
     Assert-Run ($env:ANDROID_HOME -ceq 'old-home' -and $env:ANDROID_SDK_ROOT -ceq 'old-root') 'Flutter结束后恢复SDK环境'
     & $module { $script:Calls.Clear(); $script:CancelDevice = $true; Invoke-JobsSourceTreeAction -Action run -Target 'Fixture Project' }
     $calls = @(& $module { $script:Calls.ToArray() })
     Assert-Run (@($calls | Where-Object { $_ -like 'flutter:*' -or $_ -like 'push:*' }).Count -eq 0) '取消设备选择不启动Flutter'
+    & $module { $script:Calls.Clear(); $script:CancelDevice = $false }
+    $global:JobsRunnerDiscoveryCalls.Clear()
+    $global:JobsRunnerDiscoveryFailure = $true
+    $stopped = $false
+    try { & $module { Invoke-JobsSourceTreeAction -Action run -Target 'Fixture Project' } } catch { $stopped = $_.Exception.Message -ceq 'fixture SDK cancelled' }
+    $calls = @(& $module { $script:Calls.ToArray() })
+    Assert-Run ($stopped -and ($global:JobsRunnerDiscoveryCalls-join'|')-ceq'universal' -and @($calls | Where-Object { $_ -like 'flutter:*' -or $_ -like 'push:*' }).Count -eq 0) '通用SDK取消直接停止SourceTree运行，不开始业务'
     foreach ($relative in @('Extension.json', 'Scripts/Action.psm1', 'Scripts/AndroidRuntime.ps1', 'Scripts/Common.psm1')) {
         Assert-Run (Test-Path -LiteralPath (Join-Path $root ('Scripts/Features/JobsFlutterRunner/' + $relative)) -PathType Leaf) ('完整随包资源：' + $relative)
     }
     Write-Host ('PASS: FlutterRunner.Tests.ps1 (' + $script:checks + ' assertions)')
-} finally { Remove-Module $module; $env:ANDROID_HOME = $oldAndroidHome; $env:ANDROID_SDK_ROOT = $oldAndroidRoot }
+} finally { Remove-Variable JobsRunnerDiscoveryCalls, JobsRunnerDiscoveryFailure -Scope Global -ErrorAction SilentlyContinue; Remove-Module $module; $env:ANDROID_HOME = $oldAndroidHome; $env:ANDROID_SDK_ROOT = $oldAndroidRoot }

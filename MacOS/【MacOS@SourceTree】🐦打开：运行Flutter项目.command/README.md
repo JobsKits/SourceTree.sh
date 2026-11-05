@@ -15,6 +15,7 @@
 - [五、日志与产物](#jobs-toc-heading-6)
 - [六、验证边界](#jobs-toc-heading-7)
 - [七、流程图](#jobs-toc-heading-8)
+  - [SDK获取前网络检测](#jobs-toc-heading-9)
 
 </details>
 <!-- jobs-toc:end -->
@@ -45,7 +46,9 @@ zsh "./【MacOS@SourceTree】🐦打开：运行Flutter项目.command" "<工程�
 
 ## <span id="jobs-toc-heading-4" data-jobs-toc="v2">三、实际执行流程 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-显式无效路径不会回退到其它当前工程。先查找工程根目录、`tool/setup/`，再检查递归唯一的 `setup.command`；多个候选停止。找到时仍由工程脚本负责运行。没有时验证 Flutter 根目录，再转交同包 `Scripts/RunFlutterProject.zsh`，在 Terminal 中先展示运行器自述并回车确认，然后选择设备。
+显式无效路径不会回退到其它当前工程。先查找工程根目录、`tool/setup/`，再检查递归唯一的 `setup.command`；多个候选停止。找到时仍由工程脚本负责运行。没有时验证 Flutter 根目录，再转交同包 `Scripts/RunFlutterProject.zsh`，在 Terminal 中先展示运行器自述并回车确认，然后准备设备发现所需的公共组件，再选择设备。
+
+设备枚举前先检查所选 SDK 的公共缓存；完整本地 stamp、组件目录及工具依赖均就绪时直接复用，不新增联网前提。否则先执行 `flutter precache --universal`，沿用本次网络选路、真实进度和持续重试，单次窗口为 1800 秒，直到就绪或 `Ctrl+C` 结束；这一步不下载所有目标平台。输出保存到 `<操作日志>.discovery-sdk`；每次尝试结束后，将输出和退出码追加到 `<操作日志>.discovery-sdk.attempts.log`，中断时保留当次日志。公共组件完成后才运行短时 `flutter devices --machine`，避免机器模式下的隐式下载被设备查询超时反复中止。
 
 | 选择 | 实际行为 |
 | --- | --- |
@@ -97,3 +100,8 @@ flowchart TD
 ```
 
 <a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>
+
+
+### <span id="jobs-toc-heading-9" data-jobs-toc="v2">SDK获取前网络检测</span><!-- jobs-toc:heading-end -->
+
+运行器在 SDK 自举、设备发现公共组件补齐与选定平台预缓存前检测真实制品与当前网络路线，失败持续自动重试，Ctrl+C终止。显式源和代理包含空值优先，AUTO选路仅当前SDK进程生效；版本/引擎资源完成后，原run业务只启动一次。内部模块已嵌入运行脚本，整体迁移不依赖开发机仓库路径。

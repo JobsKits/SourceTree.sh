@@ -4,6 +4,7 @@
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Common.psm1') -DisableNameChecking
+. (Join-Path $PSScriptRoot 'SdkDownloadOutput.ps1')
 
 function Assert-JobsRunnerDirectory {
     param([string]$Path)
@@ -236,6 +237,12 @@ function New-JobsFlutterToolStartInfo {
 
 function Invoke-JobsFlutterTool {
     param([string]$Executable, [string[]]$Arguments, [string]$Project, [int]$TimeoutSeconds = 1800)
+    if ([IO.Path]::GetFileName($Executable) -match '^(flutter|dart)(\.(bat|cmd|exe))?$') {
+        Import-JobsSdkDownloadRoute # Invoke-JobsFlutterTool
+        $routed = Invoke-JobsSdkRoutedCommand $Executable $Arguments $Project $TimeoutSeconds
+        if ($routed.ExitCode -ne 0) { $failure=New-Object InvalidOperationException ('Flutter/Dart命令失败，退出码 '+$routed.ExitCode); $failure.Data['JobsExitCode']=$routed.ExitCode; throw $failure }
+        return
+    }
     Write-JobsFlutterMessage ('执行：' + $Executable + ' ' + ($Arguments -join ' '))
     $process = New-Object Diagnostics.Process
     $process.StartInfo = New-JobsFlutterToolStartInfo $Executable $Arguments $Project

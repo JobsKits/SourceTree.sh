@@ -15,6 +15,7 @@
 - [五、日志与产物](#jobs-toc-heading-6)
 - [六、验证边界](#jobs-toc-heading-7)
 - [七、流程图](#jobs-toc-heading-8)
+  - [SDK获取前网络检测](#jobs-toc-heading-9)
 
 </details>
 <!-- jobs-toc:end -->
@@ -92,3 +93,8 @@ flowchart TD
 Sourcetree 动作不能交互时，缺少 Homebrew 会停止并提示先在终端完成安装路径选择；已有 Homebrew 时保留原有运行方式。
 
 <a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>
+
+
+### <span id="jobs-toc-heading-9" data-jobs-toc="v2">SDK获取前网络检测</span><!-- jobs-toc:heading-end -->
+
+原业务前先准备Flutter/Dart，平台打包前独立预缓存目标SDK；获取失败持续退避重试并重新检测来源与网络，Ctrl+C终止。显式源/代理包含空值保留，AUTO仅在获准公开等价制品及现有配置路线中选择；只注入当前SDK子进程，不写系统网络或Shell/Git配置。业务clean/pub/build保持原顺序且仅执行一次。

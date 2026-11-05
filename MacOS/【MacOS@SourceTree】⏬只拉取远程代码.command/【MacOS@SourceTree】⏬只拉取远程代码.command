@@ -1,7 +1,7 @@
 #!/bin/zsh
 # 脚本自述：
 # - 脚本名称：【MacOS@SourceTree】⏬只拉取远程代码.command
-# - 核心用途：将当前仓库同步到明确的远程上游，逐层按父仓 gitlink 检出子模块，不提交、不推送。
+# - 核心用途：先抓取明确的远程上游，失败可回车重试；同步并核验父子仓后刷新 SourceTree 仓库界面缓存，不提交、不推送。
 # - 影响范围：先 fetch；发现本地改动、未跟踪文件或独有提交时，终端红字列明范围，精确输入 YES 才舍弃。
 # - 保护边界：忽略文件保留；未完成操作、游离 HEAD、上游不明确、子仓风险或忽略文件覆盖风险时停止。
 # - 运行提示：SourceTree 只打开 Terminal.app；终端先回车确认，危险操作另需 YES，Ctrl+C 取消。
@@ -43,6 +43,8 @@ COLOR_RED=""
 COLOR_BLUE=""
 COLOR_GREEN=""
 COLOR_RESET=""
+SOURCETREE_APP=""
+SOURCETREE_BUNDLE_ID=""
 # 只读解析入口和展示变量，不在确认前写入文件。
 prepare_display_context() {
   local candidate="${RAW_SCRIPT_PATH:A}"
@@ -93,9 +95,10 @@ show_script_intro_and_wait() {
   prepare_display_context "$@"
   print -r -- "${COLOR_RED}================ 只拉取远程代码 ================${COLOR_RESET}"
   print -r -- "${COLOR_BLUE}1、同步当前仓库明确的远程上游，再向下按各层父仓记录的提交检出子模块；不提交、不推送。${COLOR_RESET}"
-  print -r -- "${COLOR_BLUE}2、先获取远程；本地改动、未跟踪文件和独有提交须精确输入 YES 才舍弃。${COLOR_RESET}"
+  print -r -- "${COLOR_BLUE}2、先抓取远程，失败后空回车重试，直到成功；任意非空输入或 Ctrl+C 取消。本地内容须另行精确输入 YES 才舍弃。${COLOR_RESET}"
   print -r -- "${COLOR_BLUE}3、子模块只跟随 gitlink，不追分支最新；子仓源码、暂存指针、独有游离提交和有损路径变更均停止。${COLOR_RESET}"
   print -r -- "${COLOR_BLUE}4、SourceTree 打开独立终端；回车继续，Ctrl+C 取消；日志：${LOG_FILE}${COLOR_RESET}"
+  print -r -- "${COLOR_BLUE}5、成功后刷新运行中的 SourceTree 当前仓库缓存，可能切到该仓库窗口；不删除账号、书签或设置，自动化 / 辅助功能不可用时提示手动 Cmd+R。${COLOR_RESET}"
   if (( IS_SOURCETREE_RUNTIME )); then
     open_terminal_for_repository "$@"
     exit $?
@@ -252,16 +255,48 @@ resolve_upstream() {
   [[ -n "$SOURCE_URL" && "$SOURCE_URL" != *$'\n'* ]] || fail '远程地址必须唯一。'
   EFFECTIVE_URL="$(repo_git ls-remote --get-url "$REMOTE")" || fail '无法展开当前 Git URL 配置。'
 }
-# 来源先于传输展示；只获取目标分支，失败时绝不清理工作区。
+# 每轮抓取前后核对原分支、上游和来源，不沿用等待期间失效的目标。
+assert_fetch_context_unchanged() {
+  assert_repository_ready
+  [[ "$(repo_git symbolic-ref --quiet --short HEAD)" == "$BRANCH" && "$(repo_git rev-parse HEAD)" == "$ORIGINAL_HEAD" ]] || fail '抓取期间分支或 HEAD 已变化，请重新运行。'
+  [[ "$(repo_git config --get-all "branch.${BRANCH}.remote")" == "$REMOTE" && "$(repo_git config --get-all "branch.${BRANCH}.merge")" == "$MERGE_REF" ]] || fail '抓取期间上游配置已变化，请重新运行。'
+  [[ "$(repo_git for-each-ref --format='%(upstream)' "refs/heads/${BRANCH}")" == "$TRACKING_REF" ]] || fail '抓取期间远程跟踪映射已变化，请重新运行。'
+  [[ "$(repo_git config --get-all "remote.${REMOTE}.url")" == "$SOURCE_URL" && "$(repo_git ls-remote --get-url "$REMOTE")" == "$EFFECTIVE_URL" ]] || fail '抓取期间远程来源已变化，请重新运行。'
+}
+# 抓取失败只授权再次抓取；非空输入、输入结束及无终端均不进入同步。
+wait_for_fetch_retry() {
+  local fetch_result="$1" answer=""
+  log_message danger "✖ 远程抓取失败（退出码：${fetch_result}），未舍弃本地内容。"
+  log_message info '若出现 cannot lock ref / expected，可能有 SourceTree 自动抓取或其它 Git 进程同时更新引用；请等待其结束。持续失败请按上方原始错误处理。'
+  log_message info "日志：${LOG_FILE}"
+  [[ -t 0 && -t 1 ]] && (( ! IS_SOURCETREE_RUNTIME && ! SYNC_STARTED )) || fail '重试抓取必须在独立交互终端、开始同步之前进行。'
+  IFS= read -r 'answer?👉 空回车重新抓取远程；输入任意字符后回车或 Ctrl+C 取消：' || { log_message info '输入结束，已取消；未舍弃本地内容。'; exit 2; }
+  [[ -z "$answer" ]] || { log_message info '已取消，未舍弃本地内容。'; exit 2; }
+  log_message info '已按回车，将重新核对状态并再次抓取远程；这不授权舍弃本地内容。'
+}
+# 来源先于每轮传输展示；只抓取目标分支，成功后才固定提交并进入同步预检。
 fetch_target() {
-  log_message info '━━━━━━━━━━ 来源｜只拉取 ━━━━━━━━━━'
-  log_message info "对象：${BRANCH} → ${REMOTE}/${MERGE_REF#refs/heads/}"
-  log_message info "配置来源：${SOURCE_URL}"
-  log_message info "拉取地址（本地 Git 配置展开）：${EFFECTIVE_URL}"
-  log_message info "目标位置：${REPOSITORY}"
-  run_git fetch --no-tags --no-recurse-submodules -- "$REMOTE" "+${MERGE_REF}:${TRACKING_REF}" || fail '远程获取失败，未舍弃本地内容。'
+  local attempt=0 fetch_result=0
+  while true; do
+    assert_fetch_context_unchanged
+    attempt=$((attempt + 1))
+    log_message info "━━━━━━━━━━ 阶段 1/2｜抓取远程（第 ${attempt} 次） ━━━━━━━━━━"
+    log_message info '━━━━━━━━━━ 来源｜只拉取 ━━━━━━━━━━'
+    log_message info "对象：${BRANCH} → ${REMOTE}/${MERGE_REF#refs/heads/}"
+    log_message info "配置来源：${SOURCE_URL}"
+    log_message info "拉取地址（本地 Git 配置展开）：${EFFECTIVE_URL}"
+    log_message info "目标位置：${REPOSITORY}"
+    if run_git fetch --no-tags --no-recurse-submodules -- "$REMOTE" "+${MERGE_REF}:${TRACKING_REF}"; then
+      break
+    else
+      fetch_result=$?
+      wait_for_fetch_retry "$fetch_result"
+    fi
+  done
+  assert_fetch_context_unchanged
   TARGET_HEAD="$(repo_git rev-parse --verify "${TRACKING_REF}^{commit}")" || fail '远程目标不是有效提交。'
-  log_message info "本次固定目标：${TARGET_HEAD}"
+  log_message success "✔ 远程抓取成功；本次固定目标：${TARGET_HEAD}"
+  log_message info '━━━━━━━━━━ 阶段 2/2｜检查并同步工作树 ━━━━━━━━━━'
 }
 # 完整检查可能被覆盖或清理的目录，枚举失败也必须停止。
 assert_directory_has_no_nested_git() {
@@ -674,6 +709,113 @@ synchronize_repository() {
   log_message success "来源：${EFFECTIVE_URL}；${#PLAN_PATHS} 个子模块已按父仓固定提交核验；未执行提交或推送。"
   log_message info "日志：${LOG_FILE}"
 }
+# 从正在运行的进程解析真实 App 位置，只接受官方 SourceTree 标识。
+find_running_sourcetree() {
+  SOURCETREE_APP=""
+  SOURCETREE_BUNDLE_ID=""
+  local process_ids="" process_id="" process_path="" app_path="" bundle_id=""
+  process_ids="$(/usr/bin/pgrep -x 'Sourcetree|SourceTree' 2>/dev/null)" || return 1
+  for process_id in "${(@f)process_ids}"; do
+    process_path="$(/bin/ps -p "$process_id" -o comm= 2>/dev/null)" || continue
+    [[ "$process_path" == /*.app/Contents/MacOS/* ]] || continue
+    app_path="${process_path%%.app/Contents/MacOS/*}.app"
+    bundle_id="$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "${app_path}/Contents/Info.plist" 2>/dev/null)" || continue
+    case "$bundle_id" in
+      com.torusknot.SourceTreeNotMAS|com.torusknot.SourceTree)
+        SOURCETREE_APP="$app_path"
+        SOURCETREE_BUNDLE_ID="$bundle_id"
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+# 用运行时解析的 App 打开精确目标目录，不另开未知安装副本。
+open_sourcetree_repository() {
+  /usr/bin/open -a "$SOURCETREE_APP" "$REPOSITORY"
+}
+# 只在已核对路径的仓库窗口点“刷新”，避免按键落到其它仓库或对话框。
+request_sourcetree_refresh() {
+  /usr/bin/osascript - "$SOURCETREE_BUNDLE_ID" "$REPOSITORY" <<'APPLESCRIPT'
+on run argv
+  set bundleId to item 1 of argv
+  set repositoryPath to item 2 of argv
+  set repositoryIdentifier to "repo:" & repositoryPath
+  considering case
+    with timeout of 15 seconds
+      tell application "System Events"
+        if not UI elements enabled then error "辅助功能不可用，请在目标仓库手动按 Cmd+R。"
+        set targetProcess to first application process whose bundle identifier is bundleId
+        tell targetProcess
+          set targetWindow to missing value
+          repeat 40 times
+            repeat with candidateWindow in windows
+              try
+                if (value of attribute "AXIdentifier" of candidateWindow) is repositoryIdentifier then
+                  set targetWindow to candidateWindow
+                  exit repeat
+                end if
+              end try
+            end repeat
+            if targetWindow is not missing value then exit repeat
+            delay 0.1
+          end repeat
+          if targetWindow is missing value then error "未找到目标仓库窗口，未发送刷新。"
+          if (count of sheets of targetWindow) > 0 then error "目标仓库存在对话框，未发送刷新。"
+          perform action "AXRaise" of targetWindow
+          set frontmost to true
+          if (value of attribute "AXIdentifier" of window 1) is not repositoryIdentifier then error "前台仓库与目标不符，未发送刷新。"
+          set repositoryMenu to missing value
+          repeat with menuLabel in {"仓库", "Repository"}
+            if exists menu bar item (contents of menuLabel) of menu bar 1 then
+              set repositoryMenu to menu 1 of menu bar item (contents of menuLabel) of menu bar 1
+              exit repeat
+            end if
+          end repeat
+          if repositoryMenu is missing value then error "未找到仓库菜单，请手动按 Cmd+R。"
+          repeat with refreshLabel in {"刷新", "Refresh"}
+            if exists menu item (contents of refreshLabel) of repositoryMenu then
+              if not enabled of menu item (contents of refreshLabel) of repositoryMenu then error "刷新命令不可用，未发送刷新。"
+              if (value of attribute "AXIdentifier" of window 1) is not repositoryIdentifier then error "前台仓库已变化，未发送刷新。"
+              click menu item (contents of refreshLabel) of repositoryMenu
+              return "已发送当前仓库刷新"
+            end if
+          end repeat
+          error "未找到刷新命令，请手动按 Cmd+R。"
+        end tell
+      end tell
+    end timeout
+  end considering
+end run
+APPLESCRIPT
+}
+# Git 成功后单独刷新界面；UI 失败只提示，不重复同步或清理用户配置。
+refresh_sourcetree_after_pull() {
+  local counts="" ahead="" behind="" refresh_output=""
+  counts="$(repo_git rev-list --left-right --count "HEAD...${TRACKING_REF}")" || counts=""
+  if [[ "$counts" == <->$'\t'<-> ]]; then
+    ahead="${counts%%$'\t'*}"
+    behind="${counts#*$'\t'}"
+    log_message info "Git 实际状态：${BRANCH} 相对 ${REMOTE}/${MERGE_REF#refs/heads/}，待推送 ${ahead}，待拉取 ${behind}。"
+  else
+    log_message info '⚠ 无法读出最新待推送 / 待拉取计数；Git 同步核验已完成。'
+  fi
+  if ! find_running_sourcetree; then
+    log_message info 'SourceTree 未运行或无法识别，跳过界面缓存刷新；下次打开目标仓库后可按 Cmd+R。'
+    return 0
+  fi
+  log_message info "正在请求 SourceTree 刷新仓库界面缓存：${REPOSITORY}；不删除磁盘缓存或用户配置。"
+  if ! refresh_output="$(open_sourcetree_repository 2>&1)"; then
+    log_message info "⚠ Git 已同步，但无法在 SourceTree 打开目标仓库：${refresh_output}；请在该仓库手动按 Cmd+R，无需重跑同步。"
+    return 0
+  fi
+  if refresh_output="$(request_sourcetree_refresh 2>&1)"; then
+    log_message success '✔ 已向 SourceTree 当前仓库发送清缓存刷新（仓库 → 刷新 / Cmd+R）；界面数字由应用重新计算。'
+  else
+    log_message info "⚠ Git 已同步，SourceTree 自动刷新未完成：${refresh_output}；请在目标仓库手动按 Cmd+R。自动化或辅助功能权限不足时，在系统设置中授权实际启动终端后再用；不需要重跑 Git 同步。"
+  fi
+  return 0
+}
 # 逐步完成根仓及固定子模块的安全拉取，任何失败立即停止后续步骤。
 main() {
   show_script_intro_and_wait "$@" # 先显示自述，由 SourceTree 转交终端并确认。
@@ -681,12 +823,13 @@ main() {
   resolve_repository "$@" # 校验目标并防止同一动作并行运行。
   assert_repository_ready # 未完成 Git 操作和隐藏状态先停止。
   resolve_upstream # 仅使用当前分支明确配置的远程上游。
-  fetch_target # 成功获取并固定提交后才考虑舍弃。
+  fetch_target # 先抓取，失败可回车重试，成功固定提交后才进入同步预检。
   assert_nested_repositories_safe # 子模块及嵌套仓库不纳入清理授权。
   assert_ignored_paths_safe # 防止 hard reset 间接覆盖忽略内容。
   review_local_risk # 红字列明风险，危险操作强制精确 YES。
   assert_plan_unchanged # 写操作前重新核对确认计划。
   synchronize_repository # 安全快进或按 YES 授权舍弃并核验结果。
+  refresh_sourcetree_after_pull # Git 核验成功后刷新当前仓库的界面缓存并显示真实计数。
 }
 
 main "$@"

@@ -4,6 +4,7 @@
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Common.psm1') -DisableNameChecking
+. (Join-Path $PSScriptRoot 'SdkDownloadOutput.ps1')
 
 function Assert-JobsExtractorDirectory {
     param([string]$Path)
@@ -237,28 +238,13 @@ function Get-JobsExtractorDartCandidates {
     return @($candidates | Select-Object -Unique)
 }
 
-function Test-JobsExtractorNativeExecutable {
-    param([string]$Path)
-    if (-not [IO.File]::Exists($Path) -or [IO.Path]::GetExtension($Path) -ine '.exe') { return $false }
-    $stream = $null
-    $reader = $null
-    try {
-        # 仅读 PE 签名后才体检，避免把伪装 .exe 的批处理或脚本交给系统关联执行。
-        $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
-        if ($stream.Length -lt 64) { return $false }
-        $reader = New-Object IO.BinaryReader ($stream)
-        if ($reader.ReadUInt16() -ne 0x5A4D) { return $false }
-        $stream.Position = 0x3C
-        $header = $reader.ReadInt32()
-        if ($header -lt 64 -or $header -gt $stream.Length - 24) { return $false }
-        $stream.Position = $header
-        if ($reader.ReadUInt32() -ne 0x00004550) { return $false }
-        return $reader.ReadUInt16() -in @(0x014C, 0x8664, 0xAA64)
-    } catch { return $false }
-    finally {
-        if ($null -ne $reader) { $reader.Dispose() }
-        elseif ($null -ne $stream) { $stream.Dispose() }
-    }
+# 只供已验PE的本地提取使用；Flutter stamp不参与此原生Dart能力判断。
+function Invoke-JobsExtractorNativeDart {
+    param([string]$Dart, [string[]]$Arguments, [string]$Directory, [int]$TimeoutSeconds)
+    if ([IO.Path]::GetFileName($Dart) -ine 'dart.exe' -or -not (Test-JobsExtractorNativeExecutable $Dart)) { throw '本地提取要求已验证的PE原生dart.exe。' }
+    $result = Invoke-JobsProcess -FilePath $Dart -Arguments $Arguments -WorkingDirectory $Directory -TimeoutSeconds $TimeoutSeconds -ExtractorNativeDartOnly
+    if ($result.ExitCode -in @(129,130,137,143,-1073741510)) { throw (New-Object OperationCanceledException('原生Dart提取已取消。')) }
+    return $result
 }
 
 function Find-JobsExtractorDart {
@@ -266,9 +252,11 @@ function Find-JobsExtractorDart {
     foreach ($candidate in @(Get-JobsExtractorDartCandidates $Directory)) {
         if (-not (Test-JobsExtractorNativeExecutable $candidate)) { continue }
         try {
-            $probe = Invoke-JobsProcess -FilePath $candidate -Arguments @('--version') -WorkingDirectory $Directory -TimeoutSeconds 15
+            $probe = Invoke-JobsExtractorNativeDart -Dart $candidate -Arguments @('--version') -Directory $Directory -TimeoutSeconds 15
             if ($probe.ExitCode -eq 0 -and ($probe.StdOut + $probe.StdErr) -match 'Dart SDK version:') { return $candidate }
-        } catch { }
+        } catch [OperationCanceledException] { throw }
+        catch [Management.Automation.PipelineStoppedException] { throw }
+        catch { }
     }
     throw '未找到健康的 Dart SDK。请初始化项目 FVM/Flutter SDK 或将 dart.exe 加入 PATH 后重试；本工具不会自动下载。'
 }
@@ -297,7 +285,7 @@ function Invoke-JobsFlutterDependencyAction {
     Write-JobsExtractorMessage ('输出父目录：' + $destination)
     Write-JobsExtractorMessage ('复用 Dart：' + $dart)
     Write-JobsExtractorMessage '正在核对锁定依赖并复制源码，请等待完成提示。'
-    $result = Invoke-JobsProcess -FilePath $dart -Arguments @($engine, '--project', $Directory, '--destination', $destination) -WorkingDirectory $Directory -TimeoutSeconds 21600
+    $result = Invoke-JobsExtractorNativeDart -Dart $dart -Arguments @($engine, '--project', $Directory, '--destination', $destination) -Directory $Directory -TimeoutSeconds 21600
     foreach ($output in @($result.StdOut, $result.StdErr)) {
         if (-not [string]::IsNullOrWhiteSpace($output)) { Write-JobsExtractorMessage $output.TrimEnd() }
     }

@@ -20,7 +20,7 @@
 
 ## 🔥 <span id="前言">前言</span>
 
-> 28 个原生 Windows 动作（按 `actions.json` 登记计，2026-10-28；不含安装器）和一个菜单安装入口，使用 [**PowerShell**](https://learn.microsoft.com/powershell/) 5.1+。可双击各包 `.cmd` 或显式传入工程路径。
+> 29 个原生 Windows 动作（按 `actions.json` 登记计，2026-11-05；不含安装器）和一个菜单安装入口，使用 [**PowerShell**](https://learn.microsoft.com/powershell/) 5.1+。可双击各包 `.cmd` 或显式传入工程路径。
 
 ## <span id="jobs-toc-heading-2" data-jobs-toc="v2">一、运行与安装 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
@@ -58,6 +58,7 @@
 | 📘用Typora打开蓝皮书 | [Run.ps1](<./【WindowsOS@SourceTree】📘用Typora打开蓝皮书/Run.ps1>) | 使用 Windows Typora 打开项目 README |
 | 📥修复Git无法Commit | [Run.ps1](<./【WindowsOS@SourceTree】📥修复Git无法Commit/Run.ps1>) | 检查 Git 元数据与锁，确认后归档残留锁 |
 | 📥修复Git无法Fetch | [Run.ps1](<./【WindowsOS@SourceTree】📥修复Git无法Fetch/Run.ps1>) | 分阶段 fetch、prune、pack-refs 并传播错误 |
+| 📥修复Git无法Push | [Run.ps1](<./【WindowsOS@SourceTree】📥修复Git无法Push/Run.ps1>) | 当前仓库单线路诊断、安全整合、普通推送与服务端 OID 核验；平台限制分类停止 |
 | 📦双击打包Flutter.android | [Run.ps1](<./【WindowsOS@SourceTree】📦双击打包Flutter.android/Run.ps1>) | 使用工程 SDK 构建 Android APK 和 AAB |
 | 📦双击打包Flutter.ohos | [Run.ps1](<./【WindowsOS@SourceTree】📦双击打包Flutter.ohos/Run.ps1>) | 使用已有鸿蒙适配 SDK 一次同时构建 HAP 和 APP，核验两种产物 |
 | 🚀逐层空白提交并Push | [Run.ps1](<./【WindowsOS@SourceTree】🚀逐层空白提交并Push/Run.ps1>) | 子仓先于父仓，以已有本地分支同步明确远端分支 |

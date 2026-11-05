@@ -4,8 +4,10 @@
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Common.psm1') -DisableNameChecking
+. (Join-Path $PSScriptRoot 'SdkDownloadOutput.ps1')
 . (Join-Path $PSScriptRoot 'AndroidRuntime.ps1')
 $script:RunnerSelectedSdk = $null
+    $script:RunnerSelectedPlatform = ''
 
 function Assert-JobsRunnerDirectory {
     param([string]$Path)
@@ -186,6 +188,12 @@ function Get-JobsRunnerFlutter {
 
 function Invoke-JobsRunnerTool {
     param([string]$Flutter, [string[]]$Arguments, [string]$Project, [int]$TimeoutSeconds = 60)
+    if ([IO.Path]::GetFileName($Flutter) -match '^(flutter|dart)(\.(bat|cmd|exe))?$') {
+        Import-JobsSdkDownloadRoute # Invoke-JobsRunnerTool
+        $routed = Invoke-JobsSdkRoutedCommand $Flutter $Arguments $Project $TimeoutSeconds
+        if ($routed.ExitCode -ne 0) { $failure=New-Object InvalidOperationException ('Flutter/Dart命令失败，退出码 '+$routed.ExitCode); $failure.Data['JobsExitCode']=$routed.ExitCode; throw $failure }
+        return $routed.StdOut
+    }
     if ($Flutter -match '["\x00-\x1f]' -or @($Arguments | Where-Object { $_ -cnotmatch '^[A-Za-z0-9._:@/+=-]+$' }).Count -gt 0) {
         throw '工具参数不合法。'
     }
@@ -416,13 +424,14 @@ function Wait-JobsRunnerAndroidDevice {
 function Select-JobsRunnerDevice {
     param([string]$Flutter, [string]$Project)
     $script:RunnerSelectedSdk = $null
+    $script:RunnerSelectedPlatform = ''
     while ($true) {
         Write-Host '正在读取 Flutter 运行设备……'
         $devices = @()
         try { $devices = @(Get-JobsRunnerSupportedDevices @(ConvertFrom-JobsRunnerList (Invoke-JobsRunnerTool $Flutter @('devices', '--machine') $Project)) $Project) }
         catch { Write-Host ('设备查询暂不可用，可重新加载或初始化 Android 模拟器：' + $_.Exception.Message) -ForegroundColor Yellow }
         $choices = @()
-        foreach ($device in $devices) { $choices += [pscustomobject]@{ Kind = 'Device'; Id = [string]$device.id; Name = ([string]$device.name + ' · ' + [string]$device.id) } }
+        foreach ($device in $devices) { $choices += [pscustomobject]@{ Kind = 'Device'; Id = [string]$device.id; Platform = [string]$device.targetPlatform; Name = ([string]$device.name + ' · ' + [string]$device.id) } }
         if ((Test-Path -LiteralPath (Join-Path $Project 'android') -PathType Container) -or (Test-Path -LiteralPath (Join-Path $Project '.android') -PathType Container)) {
             $choices += [pscustomobject]@{ Kind = 'Android'; Id = ''; Name = 'Android 模拟器（启动已有 / 缺失时初始化）' }
         }
@@ -431,10 +440,10 @@ function Select-JobsRunnerDevice {
         $selection = Select-JobsRunnerChoice '选择 Flutter 运行设备' @($choices | ForEach-Object { $_.Name })
         if ($null -eq $selection) { return $null }
         $choice = $choices[$selection.Index]
-        if ($choice.Kind -eq 'Device') { return $choice.Id }
+        if ($choice.Kind -eq 'Device') { $script:RunnerSelectedPlatform = if ($choice.Platform -like 'windows-*') { 'windows' } elseif ($choice.Platform -like 'web*') { 'web' } else { $choice.Platform }; return $choice.Id }
         if ($choice.Kind -eq 'Android') {
             $device = Start-JobsRunnerAndroid $Flutter $Project
-            if ($null -ne $device) { return $device }
+            if ($null -ne $device) { $script:RunnerSelectedPlatform = 'android'; return $device }
         }
     }
 }
@@ -530,6 +539,13 @@ function Start-JobsRunnerSession {
     throw ('后台未按时返回状态，请查看：' + $session)
 }
 
+# 设备枚举本身也需要通用制品；先准备，避免短发现超时反复打断首次下载。
+function Initialize-JobsRunnerDiscoverySdk {
+    param([string]$Flutter,[string]$Project)
+    Write-Host '正在准备 Flutter 设备发现所需的通用 SDK 资源；失败自动重试，Ctrl+C 停止。'
+    [void](Invoke-JobsRunnerTool $Flutter @('precache','--universal') $Project 1800)
+}
+
 function Invoke-JobsFlutterRunAction {
     param([string]$Target)
     Assert-JobsFlutterProject $Target
@@ -548,6 +564,7 @@ function Invoke-JobsFlutterRunAction {
     $health = Invoke-JobsRunnerTool $flutter @('--version', '--machine') $Target
     Write-Host ('Flutter：' + $flutter)
     try { $version = $health | ConvertFrom-Json; Write-Host ('版本：' + $version.frameworkVersion) } catch { throw 'Flutter SDK 体检失败，请先运行 flutter doctor。' }
+    Initialize-JobsRunnerDiscoverySdk $flutter $Target
     $device = Select-JobsRunnerDevice $flutter $Target
     if ($null -eq $device) { return }
     $oldHome = $env:ANDROID_HOME
@@ -555,6 +572,8 @@ function Invoke-JobsFlutterRunAction {
     try {
         # 后台宿主必须继承本次所选 AVD 的 SDK，避免旧环境冲突或 PATH SDK 丢失。
         if ($script:RunnerSelectedSdk) { $env:ANDROID_HOME = $script:RunnerSelectedSdk; $env:ANDROID_SDK_ROOT = $script:RunnerSelectedSdk }
+        Import-JobsSdkDownloadRoute
+        Initialize-JobsSdkCommandPrerequisites $flutter @('run','-d',$device) $Target $script:RunnerSelectedPlatform
         $session = Start-JobsRunnerSession $Target $flutter $device $projectRoot
         Show-JobsRunnerLog $session
     } finally { $env:ANDROID_HOME = $oldHome; $env:ANDROID_SDK_ROOT = $oldRoot }

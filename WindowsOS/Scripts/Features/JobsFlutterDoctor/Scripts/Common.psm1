@@ -100,6 +100,13 @@ function Invoke-JobsProcess {
         [ValidateRange(1, 86400)][int]$TimeoutSeconds = 30
     )
 
+    if ([IO.Path]::GetFileName($FilePath) -match '^(flutter|dart|fvm)(\.(bat|cmd|exe))?$') {
+        . (Join-Path $PSScriptRoot 'SdkDownloadOutput.ps1')
+        Import-JobsSdkDownloadRoute
+        $directory = if ($WorkingDirectory) { $WorkingDirectory } else { (Get-Location).ProviderPath }
+        return Invoke-JobsSdkRoutedCommand $FilePath $Arguments $directory $TimeoutSeconds
+    }
+
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
     $startInfo.FileName = $FilePath
     $quotedArguments = @($Arguments | ForEach-Object { Quote-JobsArgument -Value $_ })

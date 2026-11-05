@@ -4,6 +4,7 @@
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Common.psm1') -DisableNameChecking
+. (Join-Path $PSScriptRoot 'SdkDownloadOutput.ps1')
 
 function Assert-JobsPackagerDirectory {
     param([string]$Path)
@@ -277,6 +278,12 @@ function Assert-JobsPackagerJava17 {
 
 function Invoke-JobsPackagerTool {
     param([string]$File, [string[]]$Arguments, [string]$Project)
+    if ([IO.Path]::GetFileName($File) -match '^(flutter|dart)(\.(bat|cmd|exe))?$') {
+        Import-JobsSdkDownloadRoute # Invoke-JobsPackagerTool
+        $routed = Invoke-JobsSdkRoutedCommand $File $Arguments $Project 1800
+        if ($routed.ExitCode -ne 0) { $failure=New-Object InvalidOperationException ('Flutter/Dart命令失败，退出码 '+$routed.ExitCode); $failure.Data['JobsExitCode']=$routed.ExitCode; throw $failure }
+        return
+    }
     if (@($Arguments | Where-Object { $_ -cnotmatch '^[A-Za-z0-9._-]+$' }).Count -gt 0) { throw '构建参数不合法。' }
     Write-JobsPackagerMessage ('执行：' + $File + ' ' + ($Arguments -join ' '))
     Push-Location -LiteralPath $Project
@@ -422,6 +429,11 @@ function Initialize-JobsPackagerHarmonyEnvironment {
 
 function Invoke-JobsPackagerProbe {
     param([string]$File, [string[]]$Arguments, [string]$Project)
+    if ([IO.Path]::GetFileName($File) -match '^(flutter|dart)(\.(bat|cmd|exe))?$') {
+        Import-JobsSdkDownloadRoute # Invoke-JobsPackagerProbe
+        $routed = Invoke-JobsSdkRoutedCommand $File $Arguments $Project 300
+        return [pscustomobject]@{ExitCode=$routed.ExitCode;Output=(ConvertTo-JobsPackagerPlainText ($routed.StdOut+$routed.StdErr))}
+    }
     if (@($Arguments | Where-Object { $_ -cnotmatch '^[A-Za-z0-9._-]+$' }).Count -gt 0) { throw '工具检查参数不合法。' }
     Push-Location -LiteralPath $Project
     try {

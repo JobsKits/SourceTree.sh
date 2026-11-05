@@ -2,6 +2,7 @@
 # Created by Jobs on 2026年10月23日，星期五.
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'SdkDownloadOutput.ps1')
 $script:LogFile = $null
 # 清除展示中的认证信息，不修改业务参数。
 function Protect-JobsText {
@@ -19,6 +20,12 @@ function Write-JobsStatus {
 function Invoke-JobsTool {
     param([string]$Tool, [string[]]$Arguments, [string]$Directory, [switch]$Quiet, [switch]$AllowFailure)
     $command = Get-Command $Tool -ErrorAction Stop
+    if ([IO.Path]::GetFileName($command.Source) -match '^(flutter|dart|fvm)(\.(bat|cmd|exe))?$') {
+        Import-JobsSdkDownloadRoute
+        $sdkResult = Invoke-JobsSdkRoutedCommand $command.Source $Arguments $Directory 1800
+        if ($sdkResult.ExitCode -ne 0 -and -not $AllowFailure) { throw ('SDK/Flutter命令失败，退出码 '+$sdkResult.ExitCode) }
+        return [pscustomobject]@{Code=$sdkResult.ExitCode;Text=($sdkResult.StdOut+[Environment]::NewLine+$sdkResult.StdErr)}
+    }
     Push-Location -LiteralPath $Directory
     $previousPreference = $ErrorActionPreference
     $previousOutputEncoding = $OutputEncoding
@@ -687,7 +694,7 @@ function Invoke-JobsRemoteAddress {
 }
 # 根据稳定标识执行业务，传入路径不作为代码求值。
 function Invoke-JobsSourceTreeAction {
-    param([string]$Action,[string]$Target,[string]$Option,[string]$Value,[switch]$SourceTree,[string]$EntryScript)
+    param([string]$Action,[string]$Target,[string]$Option,[string]$Value,[switch]$SourceTree,[string]$EntryScript,[switch]$Diagnose)
     $script:LogFile=Join-Path ([IO.Path]::GetTempPath()) ('JobsSourceTree-'+$Action+'-'+(Get-Date -Format 'yyyyMMdd-HHmmss')+'-'+[guid]::NewGuid().ToString('N')+'.log')
     Write-JobsStatus "动作：$Action；目标：$Target；日志：$script:LogFile"
     $dir=Resolve-JobsDirectory $Target
@@ -705,9 +712,10 @@ function Invoke-JobsSourceTreeAction {
                 param($Project)
                 Assert-JobsFlutterProject $Project
                 $flutter = Get-JobsRunnerFlutter $Project
+                Initialize-JobsRunnerDiscoverySdk $flutter $Project
                 $device = Select-JobsRunnerDevice $flutter $Project
                 if ($null -eq $device) { return $null }
-                return [pscustomobject]@{ Flutter = $flutter; Device = $device; AndroidSdk = $script:RunnerSelectedSdk }
+                return [pscustomobject]@{ Flutter = $flutter; Device = $device; AndroidSdk = $script:RunnerSelectedSdk; Platform = $script:RunnerSelectedPlatform }
             } $dir
             if ($null -eq $selection) { Write-JobsStatus '已取消运行。'; return }
             $oldAndroidHome = $env:ANDROID_HOME
@@ -715,6 +723,8 @@ function Invoke-JobsSourceTreeAction {
             Push-Location -LiteralPath $dir
             try {
                 if ($selection.AndroidSdk) { $env:ANDROID_HOME = $selection.AndroidSdk; $env:ANDROID_SDK_ROOT = $selection.AndroidSdk }
+                Import-JobsSdkDownloadRoute
+                Initialize-JobsSdkCommandPrerequisites $selection.Flutter @('run','-d',$selection.Device) $dir $selection.Platform
                 & $selection.Flutter run -d $selection.Device
                 if ($LASTEXITCODE -ne 0) { throw 'Flutter run 失败。' }
             } finally { Pop-Location; $env:ANDROID_HOME = $oldAndroidHome; $env:ANDROID_SDK_ROOT = $oldAndroidRoot }
@@ -725,6 +735,10 @@ function Invoke-JobsSourceTreeAction {
         'push' { Push-JobsRepositoryTree (Resolve-JobsRepository $dir) }
         'commit-repair' { Repair-JobsCommit (Resolve-JobsRepository $dir) }
         'fetch-repair' { Repair-JobsFetch (Resolve-JobsRepository $dir) }
+        'push-repair' {
+            $repair = Import-Module (Join-Path $PSScriptRoot 'Features/JobsGitPushRepair/Scripts/Action.psm1') -Force -DisableNameChecking -PassThru
+            & $repair { param($r,$remote,$branch,$diagnose,$log) Repair-JobsPush -Repository $r -Remote $remote -Branch $branch -Diagnose:$diagnose -LogFile $log | Out-Null } $dir $Option $Value $Diagnose $script:LogFile
+        }
         'remote' { Invoke-JobsRemoteAddress $dir -SourceTree:$SourceTree -EntryScript $EntryScript }
         'remote-open' { Invoke-JobsRemoteAddress $dir -Open -SourceTree:$SourceTree -EntryScript $EntryScript }
         'path' { Write-JobsStatus $dir; Set-Clipboard -Value $dir }

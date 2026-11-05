@@ -675,6 +675,10 @@ function run(argv) {
   var remoteOpenScriptPath = argv[3] + '/MacOS/' + remoteOpenScriptName + '/' + remoteOpenScriptName;
   var remoteOpenDefault = { target: remoteOpenScriptPath, params: '$REPO', name: '🌍打开远程仓库地址', repoAction: true, fileAction: false, separateWindow: false, showFullOutput: true, logAction: false, shortcutKeyCode: -1, shortcutKeyModifiers: 0, shortcutKeyDisplay: '' };
   if (!templates.some(function(item) { return canonical(item.target) === remoteOpenScriptPath; })) templates.push(remoteOpenDefault);
+  var pushRepairScriptName = '【MacOS@SourceTree】📥修复Git无法Push.command';
+  var pushRepairScriptPath = argv[3] + '/MacOS/' + pushRepairScriptName + '/' + pushRepairScriptName;
+  var pushRepairDefault = { target: pushRepairScriptPath, params: '$REPO', name: '📥修复Git无法Push（终端）', repoAction: true, fileAction: false, separateWindow: false, showFullOutput: true, logAction: false, shortcutKeyCode: -1, shortcutKeyModifiers: 0, shortcutKeyDisplay: '' };
+  if (!templates.some(function(item) { return canonical(item.target) === pushRepairScriptPath; })) templates.push(pushRepairDefault);
   var updates = {}, seen = {}, result = [];
   templates.forEach(function(item) {
     item.target = canonical(item.target);
@@ -735,6 +739,7 @@ function run(argv) {
     // 修复：Git 与 Flutter 的修复入口连续排列。
     '【MacOS@SourceTree】📥修复Git无法Commit.command',
     '【MacOS@SourceTree】📥修复Git无法Fetch.command',
+    '【MacOS@SourceTree】📥修复Git无法Push.command',
     '【MacOS@SourceTree】♻️修复Flutter项目中文路径.command',
     // Flutter 工程维护。
     '【MacOS@SourceTree】🐦Flutter项目体检.command',

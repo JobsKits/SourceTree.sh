@@ -1,7 +1,7 @@
 #!/bin/zsh
 # 脚本自述：
 # - 脚本名称：【MacOS@SourceTree】🌍打开远程仓库地址.command
-# - 核心用途：解析目标 Git 仓库，收集全部远程 URL，唯一地址直接复制，多个地址在终端用 fzf 选择；配对入口支持打开网页。
+# - 核心用途：解析目标 Git 仓库，收集全部远程 URL，唯一地址直接打开网页，多个地址在终端用 fzf 选择；配对入口支持复制原始地址。
 # - 影响范围：不修改 Git 状态或业务文件；仅写日志、剪贴板或打开浏览器；缺少 fzf 时确认后安装依赖。
 # - 运行提示：Sourcetree 自定义动作请把参数设置为 $REPO；Sourcetree 模式无交互连续执行，终端模式确认后继续。
 
@@ -30,23 +30,29 @@ jobs_intro_style() {
 }
 # shell: zsh
 
+# 在文件作用域记录来源，避免 zsh 函数中的 $0 变成函数名。
+SCRIPT_SOURCE_PATH="${(%):-%x}"
+SCRIPT_INVOKED_PATH="$0"
 # 解析脚本真实路径，兼容 Sourcetree 只传脚本名的运行环境。
 resolve_script_path() {
-  local script_source="${BASH_SOURCE[0]:-${(%):-%x}}"
-  local script_name="$(basename -- "$0")"
+  local script_source="$SCRIPT_SOURCE_PATH"
+  local script_name="${SCRIPT_INVOKED_PATH:t}"
   local candidate=""
 
   for candidate in \
     "$script_source" \
+    "$SCRIPT_INVOKED_PATH" \
     "${PWD}/${script_source}" \
+    "${PWD}/${SCRIPT_INVOKED_PATH}" \
     "${HOME}/SourceTree.command/MacOS/${script_name}/${script_name}" \
     "${HOME}/Documents/Github/JobsGenesis/SourceTree.command/MacOS/${script_name}/${script_name}"; do
-    [[ -n "$candidate" && -f "$candidate" ]] || continue
-    (cd "$(dirname "$candidate")" 2>/dev/null && printf "%s/%s\n" "$(pwd -P)" "$(basename "$candidate")")
-    return 0
+    [[ -n "$candidate" && "${candidate:t}" == "$script_name" && -f "$candidate" ]] || continue
+    if (cd "${candidate:h}" 2>/dev/null && printf "%s/%s\n" "$(pwd -P)" "${candidate:t}"); then
+      return 0
+    fi
   done
 
-  printf "%s/%s\n" "$PWD" "$script_name"
+  return 1
 }
 
 SCRIPT_PATH=""
@@ -135,7 +141,10 @@ exit_with_error() {
 # 自述前只计算路径和展示模式，不写入日志或项目文件。
 prepare_intro_output() {
   [[ "${1:-}" != --terminal-select ]] || TERMINAL_SELECT=1
-  SCRIPT_PATH="$(resolve_script_path)"
+  if ! SCRIPT_PATH="$(resolve_script_path)"; then
+    print -u2 -r -- "无法定位真实脚本：${SCRIPT_INVOKED_PATH}（源文件：${SCRIPT_SOURCE_PATH}）；请从完整脚本路径重新运行。"
+    exit 1
+  fi
   SCRIPT_DIR="${SCRIPT_PATH:h}"
   SCRIPT_BASENAME="${${SCRIPT_PATH:t}:r}"
   LOG_FILE="${LOG_DIR}/${SCRIPT_BASENAME}.log"
@@ -459,10 +468,6 @@ parse_remote_arguments() {
   REQUESTED_REMOTE="${2:-${REMOTE_NAME_OVERRIDE:-}}"
   resolve_repository_root "$@"
 }
-# 对菜单和日志隐藏用户信息、查询参数、片段和控制字符，原始地址仅用于业务。
-protect_remote_text() {
-  print -rn -- "$1" | /usr/bin/perl -pe 's/[\x00-\x1f\x7f]//g; s{(://)[^/]*\@}{$1***\@}g; s{^[^/:]+\@}{***\@}; s/[?#].*$/[参数已隐藏]/'
-}
 # 按完整地址去重，同时保留 remote 与 fetch / push 来源。
 add_remote_candidate() {
   local remote="$1" direction="$2" url="$3" index=0
@@ -502,6 +507,7 @@ collect_remote_candidates() {
 }
 # 多地址时将仓库和远程筛选安全传入 Terminal，后台动作不发起任何交互。
 open_terminal_for_selection() {
+  [[ -f "$SCRIPT_PATH" ]] || exit_with_error "终端转交前发现脚本不存在：${SCRIPT_PATH}"
   if ! /usr/bin/osascript - "$SCRIPT_PATH" "$REPOSITORY_ROOT" "$REQUESTED_REMOTE" <<'APPLESCRIPT'
 on run argv
   set shellCommand to "/bin/zsh " & quoted form of (item 1 of argv) & " --terminal-select " & quoted form of (item 2 of argv) & " " & quoted form of (item 3 of argv) & "; jobs_remote_result=$?; printf '\\n远程地址动作结束，退出码：%s\\n' \"$jobs_remote_result\""
@@ -559,7 +565,7 @@ ensure_fzf_dependency() {
   rehash
   find_healthy_fzf || exit_with_error "fzf 安装后复检失败，已停止；请检查 Homebrew 前缀和 fzf --version。"
 }
-# 唯一地址直接选定，多地址在真实 TTY 使用带隐藏序号的脱敏列表。
+# 唯一地址直接选定，多地址在真实 TTY 使用带隐藏序号的完整地址列表。
 select_remote_candidate() {
   local selected="" rc=0 index=0 row=""
   local -a rows=()
@@ -572,7 +578,7 @@ select_remote_candidate() {
   [[ -t 0 && -t 1 ]] || exit_with_error "多地址必须在可交互终端选择，当前没有 TTY。"
   ensure_fzf_dependency
   for (( index=1; index<=${#REMOTE_URLS[@]}; index++ )); do
-    rows+=("${index}"$'\t'"$(protect_remote_text "${REMOTE_LABELS[$index]}")  $(protect_remote_text "${REMOTE_URLS[$index]}")")
+    rows+=("${index}"$'\t'"${REMOTE_LABELS[$index]}  ${REMOTE_URLS[$index]}")
   done
   selected="$(print -rl -- "${rows[@]}" | /usr/bin/env -u FZF_DEFAULT_OPTS -u FZF_DEFAULT_OPTS_FILE -u FZF_DEFAULT_COMMAND "$FZF_BIN" --no-multi --delimiter=$'\t' --with-nth=2.. --layout=reverse --border --header='选择远程仓库地址：↑↓ 选择，回车确认；Esc / Ctrl+C 取消' --prompt='远程地址 > ')" || rc=$?
   case "$rc" in
@@ -612,11 +618,11 @@ open_remote_web_url() {
 }
 # 获取动作保留原地址；打开动作调用系统浏览器，结果真实反映命令退出状态。
 perform_remote_action() {
-  REMOTE_URL_DISPLAY="$(protect_remote_text "$REMOTE_URL")"
+  REMOTE_URL_DISPLAY="$REMOTE_URL"
   if [[ "$REMOTE_ACTION" == open ]]; then
     local web_url=""
     web_url="$(remote_url_to_web_url "$REMOTE_URL")" || exit_with_error "该地址无法安全转换为网页；可使用获取动作复制原地址。"
-    note_echo "网页地址：$(protect_remote_text "$web_url")"
+    note_echo "网页地址：${web_url}"
     open_remote_web_url "$web_url" || exit_with_error "系统浏览器打开失败。"
     success_echo "已请求系统浏览器打开远程仓库。"
   else
@@ -625,7 +631,7 @@ perform_remote_action() {
     success_echo "已复制选定的原始 Git 地址到剪贴板。"
   fi
 }
-# 输出脱敏后的地址、来源和本次日志位置。
+# 输出完整地址、来源和本次日志位置。
 print_remote_summary() {
   note_echo "仓库根目录：${REPOSITORY_ROOT}"
   note_echo "远程来源：${REMOTE_NAME}"
@@ -641,7 +647,7 @@ main() {
   collect_remote_candidates # 收集所有生效的 fetch / push URL 并去重。
   select_remote_candidate # 单地址直用，多地址转交独立终端 fzf 选择。
   perform_remote_action # 按脚本入口复制原始 URL 或打开网页 URL。
-  print_remote_summary # 输出实际执行目标的脱敏摘要。
+  print_remote_summary # 输出实际执行目标的完整地址摘要。
 }
 
 main "$@"

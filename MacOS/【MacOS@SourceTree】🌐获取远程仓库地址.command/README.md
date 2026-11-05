@@ -92,9 +92,10 @@
 | 去重后有多个 | Sourcetree 打开独立 Terminal；终端展示自述、回车继续，再用 fzf 单选 |
 
 - 同一原始 URL 出现在多个 remote 或同时用于 fetch / push 时合并来源；协议或值不同的地址保留为不同候选。
-- fzf 面板显示编号、remote / fetch / push 来源和脱敏 URL。回车选择，`Esc` / `Ctrl+C` 取消；没有匹配、空选、输入结束或选择器失败均不复制。
+- fzf 面板显示编号、remote / fetch / push 来源和完整原始 URL。回车选择，`Esc` / `Ctrl+C` 取消；没有匹配、空选、输入结束或选择器失败均不复制。
 - SSH、HTTPS 等原始地址复制时保持原值，未做网页转换。
 - 非 Sourcetree 且没有交互输入时停止。独立 Terminal 转交失败也停止，不在 Sourcetree 输出进程等待输入。
+- 脚本从启动源文件定位自身，支持从仓库目录或其它工作目录调用；自述中的脚本名、路径和日志名对应真实入口。转交 Terminal 前核验脚本存在，并保留仓库参数与远程筛选；无法定位真实文件时明确报错停止。
 
 ### 3.1、<span id="selector-dependencies">选择器依赖链</span> <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
@@ -110,10 +111,10 @@ fzf 采用一次 `brew install` 或 `brew reinstall`，随后刷新当前 PATH �
 
 - 地址收集只读取本地 Git 配置，不执行 `fetch`、`pull`、`push`；已生效的 Git URL 重写由 Git 自身解析，不改配置。只有用户确认的依赖安装会联网。
 - 脚本不会执行 `git add`、`git commit`、`git config`、`rm` 或 `sudo`。
-- 选择列表、终端输出和日志对地址中的用户信息、查询参数和片段脱敏，业务仍使用未经展示替换的原始地址；日志不记录 fzf 原始敏感 URL。
-- 剪贴板始终保留 Git 配置中的原始远程地址；粘贴到聊天、工单或公开文档前应确认其中不含凭据。
+- 选择列表、终端输出和日志完整显示原始远程地址，保留用户名、查询参数和片段；复制内容与 Git 生效地址一致。
+- 剪贴板始终保留 Git 配置中的原始远程地址。
 - `pbcopy` 缺失或写入失败时明确报错，不把仅显示地址当作复制成功。
-- 验证采用临时 Git 仓库与受控剪贴板 / 浏览器命令，覆盖 URL 候选、去重、选择取消和失败传播；真实剪贴板、业务仓 Git 配置和远程内容不作为测试目标。运行入口见 [测试说明](../Tests/README.md)。
+- 验证采用临时 Git 仓库与受控剪贴板 / 浏览器命令，覆盖 URL 候选、去重、选择取消、失败传播、真实脚本寻址与终端转交路径；真实剪贴板、业务仓 Git 配置和远程内容不作为测试目标。运行入口见 [测试说明](../Tests/README.md)。
 
 ## <span id="jobs-toc-heading-9" data-jobs-toc="v2">五、流程图 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
@@ -131,7 +132,7 @@ flowchart TD
   G --> H[检查依赖后 fzf 单选]
   H -->|已选择| I
   H -->|取消或失败| Y[不复制并结束]
-  I --> J[输出脱敏结果与日志]
+  I --> J[输出完整结果与日志]
 ```
 
 <a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>

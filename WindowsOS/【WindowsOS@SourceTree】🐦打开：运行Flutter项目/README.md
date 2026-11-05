@@ -43,7 +43,7 @@
 
 ## <span id="jobs-toc-heading-4" data-jobs-toc="v2">三、功能、选项与边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-- 按目标 FVM 绑定或可用本机 SDK 执行 `flutter devices --machine`。
+- 按目标 FVM 绑定或可用本机 SDK 先准备 `flutter precache --universal` 通用缓存，再执行 `flutter devices --machine`；缺失时实时显示进度、失败持续重试至成功或 Ctrl+C，健康缓存直接复用，不下载全部平台。
 - 只列工程已有平台对应的 Android / Web / Windows 设备，排除 iOS 和 darwin。fzf 上下键选择、输入筛选，Enter 确认、Esc 取消；子层 `←` 返回。缺少 fzf 时停止并给出安装提示。
 - 当前窗口执行 `flutter run -d <id>`，保留 Flutter 原生命令与热重载交互，Ctrl+C 结束。
 - 没有设备时仍可重新加载或选择“Android 模拟器（启动已有 / 缺失时初始化）”。已有 AVD 可选并启动；缺失时确认后补齐官方工具、选择设备型号与稳定系统镜像，最终确认后下载 / 创建。SDK 许可证由本人确认，现有 AVD 不覆盖，取消不创建；工具准备结果保留。按所选 AVD 的 serial 等待 Flutter 识别，再继续当前窗口运行。不会替换项目 Flutter SDK、修改全局环境 / 代理或自动启用系统虚拟化。

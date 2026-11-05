@@ -91,15 +91,55 @@ function Find-JobsExecutable {
     return $null
 }
 
+function Test-JobsExtractorNativeExecutable {
+    param([string]$Path)
+    if (-not [IO.File]::Exists($Path) -or [IO.Path]::GetExtension($Path) -ine '.exe') { return $false }
+    $stream = $null
+    $reader = $null
+    try {
+        # 仅读 PE 签名后才体检，避免把伪装 .exe 的批处理或脚本交给系统关联执行。
+        $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+        if ($stream.Length -lt 64) { return $false }
+        $reader = New-Object IO.BinaryReader ($stream)
+        if ($reader.ReadUInt16() -ne 0x5A4D) { return $false }
+        $stream.Position = 0x3C
+        $header = $reader.ReadInt32()
+        if ($header -lt 64 -or $header -gt $stream.Length - 24) { return $false }
+        $stream.Position = $header
+        if ($reader.ReadUInt32() -ne 0x00004550) { return $false }
+        return $reader.ReadUInt16() -in @(0x014C, 0x8664, 0xAA64)
+    } catch { return $false }
+    finally {
+        if ($null -ne $reader) { $reader.Dispose() }
+        elseif ($null -ne $stream) { $stream.Dispose() }
+    }
+}
+
 function Invoke-JobsProcess {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
         [string[]]$Arguments = @(),
         [string]$WorkingDirectory,
-        [ValidateRange(1, 86400)][int]$TimeoutSeconds = 30
+        [ValidateRange(1, 86400)][int]$TimeoutSeconds = 30,
+        [switch]$ExtractorNativeDartOnly
     )
 
+    if ($ExtractorNativeDartOnly -and ([IO.Path]::GetFileName($FilePath) -ine 'dart.exe' -or -not (Test-JobsExtractorNativeExecutable $FilePath))) {
+        throw 'native-only只接受本提取器已验证的PE原生dart.exe。'
+    }
+    if (-not $ExtractorNativeDartOnly -and [IO.Path]::GetFileName($FilePath) -match '^(flutter|dart|fvm)(\.(bat|cmd|exe))?$') {
+        . (Join-Path $PSScriptRoot 'SdkDownloadOutput.ps1')
+        Import-JobsSdkDownloadRoute
+        $directory = if ($WorkingDirectory) { $WorkingDirectory } else { (Get-Location).ProviderPath }
+        return Invoke-JobsSdkRoutedCommand $FilePath $Arguments $directory $TimeoutSeconds
+    }
+
+    return Invoke-JobsProcessOnce -FilePath $FilePath -Arguments $Arguments -WorkingDirectory $WorkingDirectory -TimeoutSeconds $TimeoutSeconds
+}
+
+function Invoke-JobsProcessOnce {
+    param([string]$FilePath, [string[]]$Arguments = @(), [string]$WorkingDirectory, [int]$TimeoutSeconds = 30)
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
     $startInfo.FileName = $FilePath
     $quotedArguments = @($Arguments | ForEach-Object { Quote-JobsArgument -Value $_ })
@@ -214,4 +254,4 @@ function Write-JobsLog {
     [IO.File]::AppendAllText($logFile, $line, (New-Object System.Text.UTF8Encoding($true)))
 }
 
-Export-ModuleMember -Function Quote-JobsArgument, Resolve-JobsTarget, Get-JobsDirectory, Find-JobsExecutable, Invoke-JobsProcess, Get-JobsInstallRoot, Write-JobsLog
+Export-ModuleMember -Function Test-JobsExtractorNativeExecutable, Quote-JobsArgument, Resolve-JobsTarget, Get-JobsDirectory, Find-JobsExecutable, Invoke-JobsProcess, Get-JobsInstallRoot, Write-JobsLog

@@ -24,7 +24,7 @@ class InstallerMenuCompatibilityTests < Minitest::Test
     @current = File.join(@root, 'current.plist')
     File.write(@library, File.read(SCRIPT).sub(/^main "\$@"\s*\z/, ''))
     @items = read_archive(TEMPLATE)
-    assert_equal 32, @items.length, '模板应只包含现行的 32 项仓库动作'
+    assert_equal 33, @items.length, '模板应只包含现行的 33 项仓库动作'
     @items.each do |item|
       name = File.basename(item.fetch('target'))
       item['target'] = File.join('/Users/jobs/SourceTree.command/MacOS', name, name)
@@ -220,7 +220,7 @@ class InstallerMenuCompatibilityTests < Minitest::Test
     out, err, result, output = run_merge
     assert result.success?, out + err
     items = read_archive(output)
-    assert_equal 32, items.length
+    assert_equal 33, items.length
     assert_equal 1, items.count { |item| item.fetch('target') == action_path(@deployed, FLUTTER_SCRIPT) }
     refute items.any? { |item| item.fetch('target').include?('打开:运行Flutter项目') }
   end
@@ -240,7 +240,7 @@ class InstallerMenuCompatibilityTests < Minitest::Test
     out, err, result, output = run_merge
     assert result.success?, out + err
     items = read_archive(output)
-    assert_equal 33, items.length
+    assert_equal 34, items.length
     actual = items.find { |item| File.basename(item.fetch('target')) == File.basename(customized.fetch('target')) }
     expected = customized.merge('target' => action_path(@deployed, File.basename(customized.fetch('target'))))
     assert_equal expected, actual

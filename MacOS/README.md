@@ -36,16 +36,17 @@
   - [【MacOS@SourceTree】📘用Typora打开蓝皮书.command](#jobs-toc-heading-27)
   - [【MacOS@SourceTree】📥修复Git无法Commit.command](#jobs-toc-heading-28)
   - [【MacOS@SourceTree】📥修复Git无法Fetch.command](#jobs-toc-heading-29)
-  - [【MacOS@SourceTree】📦双击打包Flutter.android.command](#jobs-toc-heading-30)
-  - [【MacOS@SourceTree】📦双击打包Flutter.iOS.command](#jobs-toc-heading-31)
-  - [【MacOS@SourceTree】📦双击打包Flutter.ohos.command](#jobs-toc-heading-32)
-  - [【MacOS@SourceTree】📦双击自动生成ipa文件.command](#jobs-toc-heading-33)
-  - [【MacOS@SourceTree】🚀逐层空白提交并Push.command](#jobs-toc-heading-34)
-  - [【MacOS@SourceTree】🪄配置并运行Magic Resume.command](#jobs-toc-heading-35)
-  - [【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.command](#jobs-toc-heading-36)
-  - [【MacOS@SourceTree】🫘打开终端运行Pod Install.command](#jobs-toc-heading-37)
-  - [【MacOS】安装SourceTree自定义菜单.command](#jobs-toc-heading-38)
-- [三、验证边界](#jobs-toc-heading-39)
+  - [【MacOS@SourceTree】📥修复Git无法Push.command](#jobs-toc-heading-30)
+  - [【MacOS@SourceTree】📦双击打包Flutter.android.command](#jobs-toc-heading-31)
+  - [【MacOS@SourceTree】📦双击打包Flutter.iOS.command](#jobs-toc-heading-32)
+  - [【MacOS@SourceTree】📦双击打包Flutter.ohos.command](#jobs-toc-heading-33)
+  - [【MacOS@SourceTree】📦双击自动生成ipa文件.command](#jobs-toc-heading-34)
+  - [【MacOS@SourceTree】🚀逐层空白提交并Push.command](#jobs-toc-heading-35)
+  - [【MacOS@SourceTree】🪄配置并运行Magic Resume.command](#jobs-toc-heading-36)
+  - [【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.command](#jobs-toc-heading-37)
+  - [【MacOS@SourceTree】🫘打开终端运行Pod Install.command](#jobs-toc-heading-38)
+  - [【MacOS】安装SourceTree自定义菜单.command](#jobs-toc-heading-39)
+- [三、验证边界](#jobs-toc-heading-40)
 
 </details>
 <!-- jobs-toc:end -->
@@ -54,7 +55,7 @@
 
 ## 🔥 <span id="前言">前言</span>
 
-本目录提供 35 个原生 `/bin/zsh` 用户入口：32 个仓库动作，以及菜单安装、下载配置、运行授权三个独立终端入口（按当前动作包主入口与菜单模板计数，2026-10-29）。各包保留同名主脚本、README 与随包资源，能力以当前工作树源码为准。
+本目录提供 36 个原生 `/bin/zsh` 用户入口：33 个仓库动作，以及菜单安装、下载配置、运行授权三个独立终端入口（按当前动作包主入口与菜单模板计数，2026-11-05）。各包保留同名主脚本、README 与随包资源，能力以当前工作树源码为准。
 
 ## <span id="jobs-toc-heading-2" data-jobs-toc="v2">一、运行与目录 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
@@ -75,12 +76,12 @@
 > **目的：** 从独立终端同步只能拉取的仓库，并向下检出父仓锁定的子模块版本，不提交、不推送。
 
 - SourceTree 只负责打开 Terminal，终端显示自述并等待回车。
-- 确认当前分支的明确远程上游，显示来源，成功 fetch 后固定目标提交。
+- 先抓取当前分支的明确远程上游并显示来源；失败可空回车反复重试、非空输入或 Ctrl+C 取消，成功后固定目标提交再进入同步预检。重试不代替危险操作的 `YES`，期间分支、HEAD、上游或来源变化则停止。
 - 检查工作区、暂存内容、未跟踪文件及本地独有提交；有风险时红字列明，精确输入 `YES` 才舍弃并同步。
 - 逐层预取父仓 gitlink 指定的子提交；纯子仓 HEAD 漂移自动对齐，不追踪各子仓分支最新。
 - 忽略文件保留；子仓源码、暂存指针、未完成操作、独有游离提交或有损路径变更停止，父仓 `YES` 不授权丢弃子仓内容。
 - 子提交在所选来源缺失时，显示具体仓库、来源和 SHA，要求发布端补齐；不退回旧版本，不生成待 push 的本地提交。
-- 逐仓核验最终提交与工作区，输出来源、日志和退出码；不向更高父仓同步。
+- 逐仓核验最终提交与工作区，输出来源、日志、退出码及 Git 真实待拉取数；成功后向运行中的 SourceTree 当前仓库发送清缓存刷新（`Cmd+R`），无权限则提示手动刷新，不删除账号 / 书签 / 设置；不向更高父仓同步。
 
 ### <span id="jobs-toc-heading-5" data-jobs-toc="v2">[【MacOS@SourceTree】⏬双击下载SourceTree效率脚本.command](<./【MacOS@SourceTree】⏬双击下载SourceTree效率脚本.command/【MacOS@SourceTree】⏬双击下载SourceTree效率脚本.command>)</span><!-- jobs-toc:heading-end -->
 
@@ -233,7 +234,7 @@
 
 - 解析目标仓库，读取全部 remote 的所有 fetch / push URL，按原始地址去重。
 - 唯一地址直接复制；多个地址在独立 Terminal 中使用 [**fzf**](https://github.com/junegunn/fzf) 单选，回车选择、Esc 取消，空选或失败不复制。
-- 仅多地址时检查并按确认修复选择器依赖；选择列表和日志脱敏，剪贴板保留原始地址。
+- 仅多地址时检查并按确认修复选择器依赖；选择列表、终端和日志完整显示原始地址，剪贴板保留原始地址。
 - 输出远端来源、选中地址与日志；不读取远端网络内容、不修改仓库。
 
 ### <span id="jobs-toc-heading-22" data-jobs-toc="v2">[【MacOS@SourceTree】🌍打开远程仓库地址.command](<./【MacOS@SourceTree】🌍打开远程仓库地址.command/【MacOS@SourceTree】🌍打开远程仓库地址.command>)</span><!-- jobs-toc:heading-end -->
@@ -294,6 +295,7 @@
 > **目的：** 按故障场景修复阻止本地 Commit 的元数据问题。
 
 - 定位仓库，按 7 个场景检查工作树绑定、索引锁、`.gitmodules`、路径迁移与子模块等阻塞。
+- 原文件变同名目录时自动精确修复旧路径删除，保留新目录和部分暂存；`--repair-paths` 显式启用，`--stage-all` 使用原全量暂存流程。
 - 备份后修复允许处理的配置或阻塞项，刷新 / 暂存索引并复验。
   - 子模块缺失时可能联网初始化；已有子仓的真实修改保留，归属或安全前提不明时停止。
 - 输出修复和复验结果，不替用户创建提交或推送。
@@ -306,7 +308,16 @@
 - 根据错误定位实际阻塞引用，先备份再处理允许修复的项。
 - 每处理一项立即重新 Fetch；成功即停止，仍失败则保留日志；工作区、索引及本地分支指向保留。
 
-### <span id="jobs-toc-heading-30" data-jobs-toc="v2">[【MacOS@SourceTree】📦双击打包Flutter.android.command](<./【MacOS@SourceTree】📦双击打包Flutter.android.command/【MacOS@SourceTree】📦双击打包Flutter.android.command>)</span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-30" data-jobs-toc="v2">[【MacOS@SourceTree】📥修复Git无法Push.command](<./【MacOS@SourceTree】📥修复Git无法Push.command/【MacOS@SourceTree】📥修复Git无法Push.command>)</span><!-- jobs-toc:heading-end -->
+
+> **目的：** 为当前仓库提供通用 Push 故障诊断、安全整合与普通推送核验。
+
+- Sourcetree 打开独立终端，展示当前仓库及单条远端映射，终端确认后执行；支持 `--diagnose` 只读和显式 `--yes`。
+- 先保护已有改动、操作和锁，再精确获取真正推送端；落后快进、分叉合并，保留双方历史。
+- 普通推送后读取服务端 OID；只有与本地 HEAD 完全一致才完成。网络／远端并发有限重试；鉴权、权限、保护、LFS、配额、hook、冲突分类停止并指向处理方式。
+- 完整参数、P01–P25／P99 场景与恢复见[同名 README](<./【MacOS@SourceTree】📥修复Git无法Push.command/README.md>)；不递归父子仓、不自动暂存、不强推、不改代理。
+
+### <span id="jobs-toc-heading-31" data-jobs-toc="v2">[【MacOS@SourceTree】📦双击打包Flutter.android.command](<./【MacOS@SourceTree】📦双击打包Flutter.android.command/【MacOS@SourceTree】📦双击打包Flutter.android.command>)</span><!-- jobs-toc:heading-end -->
 
 > **目的：** 构建选定 Flutter 工程的 APK 或 AAB。
 
@@ -314,7 +325,7 @@
 - 按所选模式处理依赖并执行 APK、AAB 或两种构建。
 - 核验输出，显示产物与实时日志；构建失败返回非零状态。
 
-### <span id="jobs-toc-heading-31" data-jobs-toc="v2">[【MacOS@SourceTree】📦双击打包Flutter.iOS.command](<./【MacOS@SourceTree】📦双击打包Flutter.iOS.command/【MacOS@SourceTree】📦双击打包Flutter.iOS.command>)</span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-32" data-jobs-toc="v2">[【MacOS@SourceTree】📦双击打包Flutter.iOS.command](<./【MacOS@SourceTree】📦双击打包Flutter.iOS.command/【MacOS@SourceTree】📦双击打包Flutter.iOS.command>)</span><!-- jobs-toc:heading-end -->
 
 > **目的：** 执行 Flutter iOS 归档并导出 IPA。
 
@@ -322,7 +333,7 @@
 - 按所选配置执行 flutter build ipa。
 - 核验 IPA；仅产生 xcarchive 时明确提示后续导出要求。
 
-### <span id="jobs-toc-heading-32" data-jobs-toc="v2">[【MacOS@SourceTree】📦双击打包Flutter.ohos.command](./【MacOS@SourceTree】📦双击打包Flutter.ohos.command/【MacOS@SourceTree】📦双击打包Flutter.ohos.command)</span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-33" data-jobs-toc="v2">[【MacOS@SourceTree】📦双击打包Flutter.ohos.command](./【MacOS@SourceTree】📦双击打包Flutter.ohos.command/【MacOS@SourceTree】📦双击打包Flutter.ohos.command)</span><!-- jobs-toc:heading-end -->
 
 > **目的：** 为已适配鸿蒙的 Flutter 工程一次生成 HAP 安装模块和 APP 发布包。
 
@@ -330,7 +341,7 @@
 - 默认依次执行 release HAP、APP 构建；Sourcetree 参数固定 `$REPO --target all --mode release`，CLI 兼容显式单包和 debug / profile 模式。任一步失败或缺少对应非空产物返回非零状态，保留已经生成的包。
 - 核对非空产物并显示路径与日志；允许增量复用已有产物，签名与上架配置按工程实际设置，详见 [打包 README](./【MacOS@SourceTree】📦双击打包Flutter.ohos.command/README.md)。
 
-### <span id="jobs-toc-heading-33" data-jobs-toc="v2">[【MacOS@SourceTree】📦双击自动生成ipa文件.command](<./【MacOS@SourceTree】📦双击自动生成ipa文件.command/【MacOS@SourceTree】📦双击自动生成ipa文件.command>)</span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-34" data-jobs-toc="v2">[【MacOS@SourceTree】📦双击自动生成ipa文件.command](<./【MacOS@SourceTree】📦双击自动生成ipa文件.command/【MacOS@SourceTree】📦双击自动生成ipa文件.command>)</span><!-- jobs-toc:heading-end -->
 
 > **目的：** 把明确选定的现有真机 App 重新封装成 IPA。
 
@@ -338,7 +349,7 @@
 - 在独立临时 Payload 中复制 App 并压缩。
 - 验证输出并移动到指定目录，不执行构建、重签名或 App Store 导出。
 
-### <span id="jobs-toc-heading-34" data-jobs-toc="v2">[【MacOS@SourceTree】🚀逐层空白提交并Push.command](<./【MacOS@SourceTree】🚀逐层空白提交并Push.command/【MacOS@SourceTree】🚀逐层空白提交并Push.command>)</span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-35" data-jobs-toc="v2">[【MacOS@SourceTree】🚀逐层空白提交并Push.command](<./【MacOS@SourceTree】🚀逐层空白提交并Push.command/【MacOS@SourceTree】🚀逐层空白提交并Push.command>)</span><!-- jobs-toc:heading-end -->
 
 > **目的：** 按子仓到父仓顺序提交并同步已配置远端。
 
@@ -351,7 +362,7 @@
   - 只复用已有本地分支；整合冲突或目标线路失败时停止，保留现场，不强推。
 - 整合全部目标线路，再将同一最终 HEAD 逐条推送并核验，随后处理父仓指针。
 
-### <span id="jobs-toc-heading-35" data-jobs-toc="v2">[【MacOS@SourceTree】🪄配置并运行Magic Resume.command](<./【MacOS@SourceTree】🪄配置并运行Magic Resume.command/【MacOS@SourceTree】🪄配置并运行Magic Resume.command>)</span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-36" data-jobs-toc="v2">[【MacOS@SourceTree】🪄配置并运行Magic Resume.command](<./【MacOS@SourceTree】🪄配置并运行Magic Resume.command/【MacOS@SourceTree】🪄配置并运行Magic Resume.command>)</span><!-- jobs-toc:heading-end -->
 
 > **目的：** 准备并后台运行匹配的 Magic Resume 项目。
 
@@ -359,7 +370,7 @@
 - 检查项目工具并执行 pnpm install。
 - 核对端口后后台启动 pnpm dev，服务就绪再打开网页，日志与 PID 留存。
 
-### <span id="jobs-toc-heading-36" data-jobs-toc="v2">[【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.command](<./【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.command/【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.command>)</span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-37" data-jobs-toc="v2">[【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.command](<./【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.command/【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.command>)</span><!-- jobs-toc:heading-end -->
 
 > **目的：** 在指定 Podfile 目录执行受控的 Pod 安装。
 
@@ -367,7 +378,7 @@
 - 检查参数、单目录边界与 Podfile。
 - 默认执行纯净模式 pod install --no-repo-update，输出实时日志，不升级全局工具链。
 
-### <span id="jobs-toc-heading-37" data-jobs-toc="v2">[【MacOS@SourceTree】🫘打开终端运行Pod Install.command](<./【MacOS@SourceTree】🫘打开终端运行Pod Install.command/【MacOS@SourceTree】🫘打开终端运行Pod Install.command>)</span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-38" data-jobs-toc="v2">[【MacOS@SourceTree】🫘打开终端运行Pod Install.command](<./【MacOS@SourceTree】🫘打开终端运行Pod Install.command/【MacOS@SourceTree】🫘打开终端运行Pod Install.command>)</span><!-- jobs-toc:heading-end -->
 
 > **目的：** 把 Pod Install 交给独立 Terminal 执行。
 
@@ -375,7 +386,7 @@
 - 通过 AppleScript 打开终端并传入明确目录。
 - 子入口展示自述、确认后安装；启动器成功仅代表已转交。
 
-### <span id="jobs-toc-heading-38" data-jobs-toc="v2">[【MacOS】安装SourceTree自定义菜单.command](<./【MacOS】安装SourceTree自定义菜单.command/【MacOS】安装SourceTree自定义菜单.command>)</span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-39" data-jobs-toc="v2">[【MacOS】安装SourceTree自定义菜单.command](<./【MacOS】安装SourceTree自定义菜单.command/【MacOS】安装SourceTree自定义菜单.command>)</span><!-- jobs-toc:heading-end -->
 
 > **目的：** 发送脚本库并合并安装 Sourcetree 自定义动作。
 
@@ -385,7 +396,7 @@
 - 选择安装或回收配置，备份当前动作配置。
 - 合并动作并保留自定义标题与快捷键，重新打开 Sourcetree 后核验路径和参数。
 
-## <span id="jobs-toc-heading-39" data-jobs-toc="v2">三、验证边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+## <span id="jobs-toc-heading-40" data-jobs-toc="v2">三、验证边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 按主脚本和现有配套说明核对用途、输入、默认、条件、结果及副作用。文档维护未执行真实 Git 写操作、推送、工具安装、构建、部署或菜单注册；各入口的日志与具体确认方式以包内 README 为准。
 

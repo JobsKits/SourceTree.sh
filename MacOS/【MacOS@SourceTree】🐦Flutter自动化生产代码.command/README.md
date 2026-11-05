@@ -15,6 +15,7 @@
 - [五、日志与产物](#jobs-toc-heading-6)
 - [六、验证边界](#jobs-toc-heading-7)
 - [七、流程图](#jobs-toc-heading-8)
+  - [SDK获取前网络检测](#jobs-toc-heading-9)
 
 </details>
 <!-- jobs-toc:end -->
@@ -121,3 +122,8 @@ flowchart TD
 ```
 
 <a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>
+
+
+### <span id="jobs-toc-heading-9" data-jobs-toc="v2">SDK获取前网络检测</span><!-- jobs-toc:heading-end -->
+
+Flutter SDK源码、Dart首次补齐及平台制品获取前，先以目标版本/engine/架构的小Range正文核对来源与现有网络路线；显式源和代理（包含空值）保留。AUTO只在获准的官方/CFUG等价公开对象及当前已配置网络中选择，配置仅传当前SDK子进程，不持久修改Shell、Git或系统代理。健康本地Dart缓存可直接复用；获取失败自动使路线缓存失效并持续退避重测，Ctrl+C结束。构建、运行及项目依赖业务不因SDK网络错误被整段重放。

@@ -10,6 +10,10 @@ TEST_ROOT=""
 TEST_REPOSITORY=""
 TEST_SUBJECT=""
 TEST_LIBRARY=""
+TEST_PATH_ROOT=""
+TEST_PATH_SUBJECT=""
+TEST_PATH_TRACE=""
+TEST_PATH_EXPECT_MODE=""
 TEST_PASSED=0
 TEST_FAILED=0
 # 清理本次专用临时目录，不触碰仓库或用户数据。
@@ -42,6 +46,7 @@ prepare_test_workspace() {
 [[ -z "${FZF_DEFAULT_OPTS:-}${FZF_DEFAULT_OPTS_FILE:-}${FZF_DEFAULT_COMMAND:-}" ]] || exit 42
 typeset -a rows=()
 while IFS= read -r row; do rows+=("$row"); done
+[[ -z "${TEST_FZF_INPUT:-}" ]] || print -rl -- "${rows[@]}" > "$TEST_FZF_INPUT"
 case "${TEST_FZF_MODE:-second}" in
   cancel) exit 130 ;;
   nomatch) exit 1 ;;
@@ -182,13 +187,36 @@ case_git_environment() {
   initialize_script_runtime
   [[ -z "${GIT_DIR+x}${GIT_WORK_TREE+x}${GIT_INDEX_FILE+x}${GIT_COMMON_DIR+x}" ]]
 }
-# 日志和选择器隐藏凭据及查询内容，保留原始业务地址。
-case_redaction() {
-  local input='https://name:secret@example.com/g/r.git?token=hidden#fragment' output=""
-  output="$(protect_remote_text "$input")"
-  [[ "$output" == *example.com/g/r.git* && "$output" != *secret* && "$output" != *hidden* && "$output" != *fragment* ]] || return 1
-  output="$(protect_remote_text $'git@example.com:g/r.git\033[31m')"
-  [[ "$output" != *$'\033'* && "$output" != *git@* ]]
+# 菜单、终端和日志完整显示原始地址，保留 git@、用户信息、查询参数及片段。
+case_full_display() {
+  new_repository || return 1
+  REMOTE_URLS=('git@example.com:g/r.git' 'https://name:secret@example.com/g/r.git?token=visible#fragment')
+  REMOTE_LABELS=('origin/fetch，origin/push' 'mirror/fetch')
+  export TEST_FZF_INPUT="$TEST_ROOT/full-display-menu" TEST_FZF_MODE=second
+  export TEST_CLIPBOARD="$TEST_ROOT/full-display-clipboard" TEST_CLIPBOARD_RC=0 PATH="$TEST_ROOT/bin:$PATH"
+  ensure_fzf_dependency() { FZF_BIN="$TEST_ROOT/bin/fzf"; }
+  select_remote_candidate || return 1
+  assert_equal "$REMOTE_URL" "${REMOTE_URLS[2]}" || return 1
+  assert_equal "$(/bin/cat "$TEST_FZF_INPUT")" $'1\t'"${REMOTE_LABELS[1]}  ${REMOTE_URLS[1]}"$'\n2\t'"${REMOTE_LABELS[2]}  ${REMOTE_URLS[2]}" || return 1
+
+  local index=0 output="$TEST_ROOT/full-display-output"
+  REMOTE_ACTION=copy
+  LOG_FILE="$TEST_ROOT/full-display.log"
+  LOG_READY=1
+  : > "$LOG_FILE"
+  for (( index=1; index<=${#REMOTE_URLS[@]}; index++ )); do
+    REMOTE_URL="${REMOTE_URLS[$index]}"
+    REMOTE_NAME="${REMOTE_LABELS[$index]}"
+    perform_remote_action > "$output" || return 1
+    print_remote_summary >> "$output" || return 1
+    assert_equal "$REMOTE_URL_DISPLAY" "$REMOTE_URL" || return 1
+    assert_equal "$(/bin/cat "$TEST_CLIPBOARD")" "$REMOTE_URL" || return 1
+    /usr/bin/grep -Fq -- "远程仓库地址：${REMOTE_URL}" "$output" || return 1
+    /usr/bin/grep -Fq -- "远程来源：${REMOTE_NAME}" "$output" || return 1
+    /usr/bin/grep -Fq -- "远程仓库地址：${REMOTE_URL}" "$LOG_FILE" || return 1
+  done
+  (add_remote_candidate origin fetch $'git@example.com:g/r.git\033[31m')
+  (( $? != 0 ))
 }
 # 多类网络克隆 URL 转换时保留明确的 HTTP 端口并去掉 .git。
 case_web_urls() {
@@ -353,6 +381,178 @@ case_terminal_handoff_flow() {
   [[ $? == 0 && ! -e "$TEST_ROOT/handoff-business" ]] || return 1
   assert_equal "$(/bin/cat "$TEST_ROOT/handoff")" "${TEST_REPOSITORY:A}"
 }
+# 复制完整入口到改名目录，只替换 Terminal 外部命令，保留文件作用域和真实寻址。
+create_path_fixture() {
+  local kind="$1" name="" subject=""
+  case "$kind" in
+    copy) name='【MacOS@SourceTree】🌐获取远程仓库地址.command' ;;
+    open) name='【MacOS@SourceTree】🌍打开远程仓库地址.command' ;;
+    *) return 1 ;;
+  esac
+  TEST_PATH_ROOT="$(/usr/bin/mktemp -d "$TEST_ROOT/入口寻址.XXXXXX")" || return 1
+  TEST_PATH_SUBJECT="$TEST_PATH_ROOT/搬迁后 中文 '空格/$name"
+  TEST_PATH_TRACE="$TEST_PATH_ROOT/trace"
+  TEST_PATH_EXPECT_MODE="$kind"
+  subject="${TEST_SOURCE_PATH:h:h}/$name/$name"
+  /bin/mkdir -p "${TEST_PATH_SUBJECT:h}" "$TEST_PATH_ROOT/无关工作目录" "$TEST_PATH_ROOT/logs" "$TEST_PATH_ROOT/home" || return 1
+  /usr/bin/grep -Fq '/usr/bin/osascript - "$SCRIPT_PATH"' "$subject" || return 1
+  /usr/bin/sed -e '$d' -e 's@/usr/bin/osascript -@test_terminal_command -@' "$subject" > "$TEST_PATH_SUBJECT" || return 1
+  if /usr/bin/grep -Fq '/usr/bin/osascript' "$TEST_PATH_SUBJECT"; then
+    print -u2 -r -- 'Terminal 命令替身未覆盖生产入口，停止夹具执行。'
+    return 1
+  fi
+  cat >> "$TEST_PATH_SUBJECT" <<'FIXTURE'
+# 拦截外部 Terminal 命令，保留生产函数的参数和失败处理。
+test_terminal_command() {
+  print -rl -- "$@" > "$TEST_PATH_TRACE.terminal"
+  /bin/cat > "$TEST_PATH_TRACE.applescript"
+  return "${TEST_TERMINAL_RC:-0}"
+}
+# 捕获网页目标，不启动真实浏览器。
+open_remote_web_url() {
+  print -r -- "$1" > "$TEST_PATH_TRACE.browser"
+}
+# 寻址与终端承接场景不应进入选择器依赖安装。
+ensure_fzf_dependency() {
+  print -r -- unexpected > "$TEST_PATH_TRACE.dependency"
+  return 97
+}
+# 记录真实解析的脚本身份和入口模式。
+record_path_fixture_identity() {
+  print -r -- "$SCRIPT_PATH" > "$TEST_PATH_TRACE.path"
+  print -r -- "$SCRIPT_DIR" > "$TEST_PATH_TRACE.dir"
+  print -r -- "$SCRIPT_BASENAME" > "$TEST_PATH_TRACE.basename"
+  print -r -- "$REMOTE_ACTION" > "$TEST_PATH_TRACE.mode"
+}
+# 在新 zsh 进程保留函数内 $0 语义，分别核对解析、业务和不存在的转交文件。
+run_path_fixture() {
+  setopt FUNCTION_ARGZERO
+  LOG_DIR="$TEST_PATH_ROOT/logs"
+  case "${TEST_PATH_MODE:-inspect}" in
+    inspect)
+      prepare_intro_output
+      record_path_fixture_identity
+      ;;
+    single)
+      main "$@"
+      record_path_fixture_identity
+      ;;
+    handoff)
+      main "$@"
+      print -r -- unexpected > "$TEST_PATH_TRACE.after-handoff"
+      ;;
+    missing-handoff)
+      prepare_intro_output
+      SCRIPT_PATH="$TEST_PATH_ROOT/不存在.command"
+      open_terminal_for_selection
+      print -r -- unexpected > "$TEST_PATH_TRACE.after-handoff"
+      ;;
+  esac
+}
+run_path_fixture "$@"
+FIXTURE
+}
+# 核对文件来源、目录、日志基名与复制 / 打开模式，不接受函数名充当脚本名。
+assert_path_fixture_identity() {
+  assert_equal "$(/bin/cat "$TEST_PATH_TRACE.path")" "${TEST_PATH_SUBJECT:A}" || return 1
+  assert_equal "$(/bin/cat "$TEST_PATH_TRACE.dir")" "${TEST_PATH_SUBJECT:A:h}" || return 1
+  assert_equal "$(/bin/cat "$TEST_PATH_TRACE.basename")" "${TEST_PATH_SUBJECT:t:r}" || return 1
+  assert_equal "$(/bin/cat "$TEST_PATH_TRACE.mode")" "$TEST_PATH_EXPECT_MODE"
+}
+# 两个入口在中文空格改名目录和无关工作目录下仍识别自己的完整路径。
+case_real_source_paths() {
+  local kind=""
+  for kind in copy open; do
+    create_path_fixture "$kind" || return 1
+    (cd "$TEST_PATH_ROOT/无关工作目录" && /usr/bin/env SOURCETREE_TEST_CONTEXT=1 TEST_PATH_ROOT="$TEST_PATH_ROOT" TEST_PATH_TRACE="$TEST_PATH_TRACE" /bin/zsh "$TEST_PATH_SUBJECT") || return 1
+    assert_path_fixture_identity || return 1
+  done
+}
+# 相对路径与只有文件名的执行方式均使用真实脚本文件，不依赖函数内 $0。
+case_relative_source_paths() {
+  local kind=""
+  for kind in copy open; do
+    create_path_fixture "$kind" || return 1
+    (cd "$TEST_PATH_ROOT" && /usr/bin/env SOURCETREE_TEST_CONTEXT=1 TEST_PATH_ROOT="$TEST_PATH_ROOT" TEST_PATH_TRACE="$TEST_PATH_TRACE" /bin/zsh "${TEST_PATH_SUBJECT#$TEST_PATH_ROOT/}") || return 1
+    assert_path_fixture_identity || return 1
+    (cd "${TEST_PATH_SUBJECT:h}" && /usr/bin/env SOURCETREE_TEST_CONTEXT=1 TEST_PATH_ROOT="$TEST_PATH_ROOT" TEST_PATH_TRACE="$TEST_PATH_TRACE" /bin/zsh "${TEST_PATH_SUBJECT:t}") || return 1
+    assert_path_fixture_identity || return 1
+  done
+}
+# zsh -c 文本启动用文件层 $0 找回假 HOME 的运行副本，并忽略仓库内同名 zsh 干扰。
+case_command_text_fallback() {
+  local kind="" command_text="" name="" fallback=""
+  for kind in copy open; do
+    create_path_fixture "$kind" || return 1
+    new_repository || return 1
+    name="${TEST_PATH_SUBJECT:t}"
+    command_text="$(/bin/cat "$TEST_PATH_SUBJECT")"
+    fallback="$TEST_PATH_ROOT/home/SourceTree.command/MacOS/$name/$name"
+    /bin/mkdir -p "${fallback:h}" || return 1
+    /bin/cp "$TEST_PATH_SUBJECT" "$fallback" || return 1
+    print -r -- decoy > "$TEST_REPOSITORY/zsh"
+    TEST_PATH_SUBJECT="$fallback"
+    (cd "$TEST_REPOSITORY" && /usr/bin/env HOME="$TEST_PATH_ROOT/home" SOURCETREE_TEST_CONTEXT=1 TEST_PATH_ROOT="$TEST_PATH_ROOT" TEST_PATH_TRACE="$TEST_PATH_TRACE" /bin/zsh -c "$command_text" "$name") || return 1
+    assert_path_fixture_identity || return 1
+  done
+}
+# 真正文件入口从仓库参数走到复制或网页目标，路径解析和入口模式均不替身。
+case_real_single_entry_modes() {
+  local kind=""
+  for kind in copy open; do
+    create_path_fixture "$kind" || return 1
+    new_repository || return 1
+    git -C "$TEST_REPOSITORY" remote add origin 'git@example.com:group/repo.git' || return 1
+    (cd "$TEST_PATH_ROOT/无关工作目录" && /usr/bin/env PATH="$TEST_ROOT/bin:$PATH" SOURCETREE_TEST_CONTEXT=1 TEST_PATH_ROOT="$TEST_PATH_ROOT" TEST_PATH_TRACE="$TEST_PATH_TRACE" TEST_PATH_MODE=single TEST_CLIPBOARD="$TEST_PATH_TRACE.clipboard" TEST_CLIPBOARD_RC=0 /bin/zsh "$TEST_PATH_SUBJECT" "$TEST_REPOSITORY" > "$TEST_PATH_TRACE.output" 2>&1) || return 1
+    assert_path_fixture_identity || return 1
+    [[ ! -e "$TEST_PATH_TRACE.terminal" && ! -e "$TEST_PATH_TRACE.dependency" ]] || return 1
+    if [[ "$kind" == copy ]]; then
+      assert_equal "$(/bin/cat "$TEST_PATH_TRACE.clipboard")" 'git@example.com:group/repo.git' || return 1
+      [[ ! -e "$TEST_PATH_TRACE.browser" ]] || return 1
+    else
+      assert_equal "$(/bin/cat "$TEST_PATH_TRACE.browser")" 'https://example.com/group/repo' || return 1
+      [[ ! -e "$TEST_PATH_TRACE.clipboard" ]] || return 1
+    fi
+  done
+}
+# 多地址转交捕获生产 Terminal 调用的脚本、仓库和远程参数，不启动真实应用。
+case_real_terminal_arguments() {
+  local kind=""
+  for kind in copy open; do
+    create_path_fixture "$kind" || return 1
+    new_repository || return 1
+    git -C "$TEST_REPOSITORY" remote add origin 'https://a.example/g/r.git' || return 1
+    git -C "$TEST_REPOSITORY" config --add remote.origin.url 'https://b.example/g/r.git' || return 1
+    (cd "$TEST_PATH_ROOT/无关工作目录" && /usr/bin/env SOURCETREE_TEST_CONTEXT=1 TEST_PATH_ROOT="$TEST_PATH_ROOT" TEST_PATH_TRACE="$TEST_PATH_TRACE" TEST_PATH_MODE=handoff /bin/zsh "$TEST_PATH_SUBJECT" "$TEST_REPOSITORY" origin > "$TEST_PATH_TRACE.output" 2>&1) || return 1
+    assert_equal "$(/bin/cat "$TEST_PATH_TRACE.terminal")" "-"$'\n'"${TEST_PATH_SUBJECT:A}"$'\n'"${TEST_REPOSITORY:A}"$'\norigin' || return 1
+    [[ ! -e "$TEST_PATH_TRACE.after-handoff" && ! -e "$TEST_PATH_TRACE.dependency" && ! -e "$TEST_PATH_TRACE.browser" ]] || return 1
+  done
+}
+# 找不到任何脚本副本时必须失败，不能把仓库内虚构路径交给 Terminal。
+case_missing_command_text_path() {
+  local kind="" command_text="" result=0
+  for kind in copy open; do
+    create_path_fixture "$kind" || return 1
+    new_repository || return 1
+    command_text="$(/bin/cat "$TEST_PATH_SUBJECT")"
+    (cd "$TEST_REPOSITORY" && /usr/bin/env HOME="$TEST_PATH_ROOT/home" SOURCETREE_TEST_CONTEXT=1 TEST_PATH_ROOT="$TEST_PATH_ROOT" TEST_PATH_TRACE="$TEST_PATH_TRACE" TEST_PATH_MODE=handoff /bin/zsh -c "$command_text" "${TEST_PATH_SUBJECT:t}" "$TEST_REPOSITORY" > "$TEST_PATH_TRACE.output" 2>&1)
+    result=$?
+    (( result != 0 )) || return 1
+    [[ ! -e "$TEST_PATH_TRACE.terminal" && ! -e "$TEST_PATH_TRACE.after-handoff" ]] || return 1
+    [[ "$(/bin/cat "$TEST_PATH_TRACE.output")" == *无法定位真实脚本* ]] || return 1
+  done
+}
+# 解析后文件再缺失时也必须在 Terminal 外部调用前停止。
+case_missing_handoff_file() {
+  local kind="" result=0
+  for kind in copy open; do
+    create_path_fixture "$kind" || return 1
+    (cd "$TEST_PATH_ROOT/无关工作目录" && /usr/bin/env SOURCETREE_TEST_CONTEXT=1 TEST_PATH_ROOT="$TEST_PATH_ROOT" TEST_PATH_TRACE="$TEST_PATH_TRACE" TEST_PATH_MODE=missing-handoff /bin/zsh "$TEST_PATH_SUBJECT" > "$TEST_PATH_TRACE.output" 2>&1)
+    result=$?
+    (( result != 0 )) || return 1
+    [[ ! -e "$TEST_PATH_TRACE.terminal" && ! -e "$TEST_PATH_TRACE.after-handoff" ]] || return 1
+  done
+}
 # 顺序运行所有隔离场景，并以失败数量决定最终状态。
 run_regressions() {
   run_case '无远程停止' case_no_remote
@@ -365,7 +565,7 @@ run_regressions() {
   run_case '中文空格文件和最近嵌套仓库' case_repository_paths
   run_case '.git 文件 worktree' case_worktree
   run_case 'Git 定位变量隔离' case_git_environment
-  run_case '菜单日志凭据脱敏' case_redaction
+  run_case '菜单终端日志完整原始地址' case_full_display
   run_case '网络 URL 网页转换' case_web_urls
   run_case '不安全和不明确地址拒绝' case_rejected_web_urls
   run_case '原始 URL 剪贴板与失败传播' case_copy_action
@@ -383,6 +583,13 @@ run_regressions() {
   run_case '获取入口完整单地址流程' case_copy_entry_flow
   run_case '打开入口完整单地址流程' case_open_entry_flow
   run_case 'Sourcetree 多地址终端承接' case_terminal_handoff_flow
+  run_case '两入口真实文件寻址及搬迁' case_real_source_paths
+  run_case '两入口相对路径与文件名启动' case_relative_source_paths
+  run_case 'zsh -c 文本启动与运行副本兜底' case_command_text_fallback
+  run_case '两入口真实路径单地址业务' case_real_single_entry_modes
+  run_case 'Terminal 转交真实脚本及仓库参数' case_real_terminal_arguments
+  run_case 'zsh -c 缺少脚本副本停止' case_missing_command_text_path
+  run_case 'Terminal 转交前脚本缺失停止' case_missing_handoff_file
   print -r -- "结果：$TEST_PASSED 通过，$TEST_FAILED 失败。"
   (( TEST_FAILED == 0 ))
 }
