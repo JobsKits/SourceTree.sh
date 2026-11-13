@@ -79,5 +79,6 @@
 "/WindowsOS/430020WindowsOS@SourceTree43002160372345447756454415Git462740466325Push/README.md" filter=jobs-markdown-toc
 "/WindowsOS/Scripts/Features/JobsGitPushRepair/Scripts/README.md" filter=jobs-markdown-toc
 "/WindowsOS/Tests/PushRepair.Tests.ps1/README.md" filter=jobs-markdown-toc
+"/MacOS/Tests/CommitReset.Tests.zsh/README.md" filter=jobs-markdown-toc
 # jobs-markdown-toc:end
 "/WindowsOS/Scripts/Features/JobsFlutterRunner/Scripts/README.md" filter=jobs-markdown-toc

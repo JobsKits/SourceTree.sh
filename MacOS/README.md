@@ -107,7 +107,7 @@
 
 - 定位仓库，检查冲突、锁与未完成 Git 操作。
 - 选择回退目标与模式。
-  - Sourcetree 各远端快照不同时转交终端，明确选择线路或历史提交后 soft 回退；hard 只在直接终端运行并输入 YES 后允许。
+  - 优先 upstream；未配置时兼容任意远端名，唯一或提交号一致的同名快照可自动采用。Sourcetree 各远端快照不同时转交终端，明确选择线路或历史提交后 soft 回退；hard 只在直接终端运行并输入 YES 后允许。
 - 按实际净差异报告待提交内容；空提交可能没有文件变化。不 Fetch、不提交、不推送，也不向上回退父仓或递归重置子仓。
 
 ### <span id="jobs-toc-heading-8" data-jobs-toc="v2">[【MacOS@SourceTree】⚙️收集当前Flutter工程的依赖.command](<./【MacOS@SourceTree】⚙️收集当前Flutter工程的依赖.command/【MacOS@SourceTree】⚙️收集当前Flutter工程的依赖.command>)</span><!-- jobs-toc:heading-end -->

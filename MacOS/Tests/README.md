@@ -64,4 +64,10 @@
 /bin/zsh './CommitPathRepair.Tests.zsh/CommitPathRepair.Tests.zsh'
 ```
 
+[CommitReset.Tests.zsh](./CommitReset.Tests.zsh/README.md) 在临时仓库验证回退脚本的远端别名、无 upstream 候选、显式引用、失败停止及索引／工作区／父仓保护；不回退真实业务仓库。在本目录运行：
+
+```shell
+/bin/zsh './CommitReset.Tests.zsh/CommitReset.Tests.zsh' --run
+```
+
 <a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>

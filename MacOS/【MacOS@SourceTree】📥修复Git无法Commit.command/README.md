@@ -366,4 +366,6 @@ Git 索引由外部脚本修改后，Sourcetree 界面可能仍缓存旧文件�
 
 脚本使用 `zsh -n` 检查语法；完整流程的既有隔离验证覆盖 C01–C07、父仓暂存而脏子模块内容保留、绝对 gitdir 解析、linked worktree 共用 `modules/` 路径、已存在 alias gitdir 的保护、活锁保留、残留锁归档，以及非交互确认门禁。[路径修复回归](../Tests/CommitPathRepair.Tests.zsh/README.md)的 18 项完整入口测试通过，覆盖文件变目录、普通删除、旧路径与重复执行、部分暂存与 flags、特殊路径、符号链接、索引备份、冲突和锁停止、linked worktree 及 `--stage-all` 兼容。隔离索引验证不代替真实 Sourcetree 提交；Hook、签名与生产远端初始化仍按实际错误另行处理。
 
+**终端配色保护：** 独立运行时，在支持完整保存与恢复配色的交互终端中临时使用黑底白字及统一强调色；正常结束、失败或可捕获中断后恢复进入前的配色，不修改终端全局偏好或 Shell 启动配置。不支持完整保护、无交互终端、`NO_COLOR`、既有纯文本模式和 Sourcetree 场景不切换配色，并沿用纯文本输出约定。强制终止（如 `kill -9`）无法由脚本自身保证恢复，请使用运行时显示的独立恢复入口。
+
 <a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>

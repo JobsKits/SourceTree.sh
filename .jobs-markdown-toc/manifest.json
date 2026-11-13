@@ -80,6 +80,7 @@
     "MacOS/【MacOS@SourceTree】📥修复Git无法Push.command/README.md",
     "WindowsOS/【WindowsOS@SourceTree】📥修复Git无法Push/README.md",
     "WindowsOS/Scripts/Features/JobsGitPushRepair/Scripts/README.md",
-    "WindowsOS/Tests/PushRepair.Tests.ps1/README.md"
+    "WindowsOS/Tests/PushRepair.Tests.ps1/README.md",
+    "MacOS/Tests/CommitReset.Tests.zsh/README.md"
   ]
 }
