@@ -1,6 +1,6 @@
 ﻿# 📥修复Git无法Commit | Jobs Windows Sourcetree
 # Created by Jobs on 2026年10月23日，星期五.
-# 用途：检查 Git 元数据与锁，确认后归档残留锁；终端确认后运行，Ctrl+C 取消。
+# 用途：检查 Git 元数据、锁及目录过滤器，修复失效 Node 路径；终端确认后运行，Ctrl+C 取消。
 [CmdletBinding()]
 param([Parameter(Position=0)][string]$Target, [string]$Option, [string]$Value,
       [switch]$SourceTree, [switch]$Terminal)
@@ -332,7 +332,7 @@ try {
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw '此入口仅支持 Windows，请使用 MacOS 目录。' }
     if (-not $Target) { $Target = (Get-Location).Path }
     if ($SourceTree -and -not $Terminal) {
-        Write-Host 'Jobs：检查 Git 元数据与锁，确认后归档残留锁；正在转交独立终端进行确认，Sourcetree 窗口不等待输入。'
+        Write-Host 'Jobs：检查 Git 元数据、锁及目录过滤器，修复失效 Node 路径；正在转交独立终端进行确认，Sourcetree 窗口不等待输入。'
         $payload = @{ Script=$PSCommandPath; Target=$Target; Option=$Option; Value=$Value } | ConvertTo-Json -Compress
         $data = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payload))
         $code = '$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("'+$data+'"))|ConvertFrom-Json; & $p.Script -Target $p.Target -Option $p.Option -Value $p.Value -Terminal'
@@ -341,8 +341,9 @@ try {
         exit 0
     }
     Write-Host 'Jobs | 📥修复Git无法Commit' -ForegroundColor Red
-    Write-Host '用途：检查 Git 元数据与锁，确认后归档残留锁。'
-    Write-Host '影响：仅所选项目及入口声明的目标；危险写操作另需 YES。日志：%TEMP%\JobsSourceTree*。'
+    Write-Host '用途：检查 Git 元数据、锁及目录过滤器，修复失效 Node 路径。'
+    Write-Host '影响：仅所选仓库；失效过滤器先备份再更新本仓配置及安装记录，不禁用过滤器、不改全局配置。'
+    Write-Host '边界：不真实暂存、提交或推送；无目录过滤器直接跳过，Node 缺失时停止。残留锁归档仍需 YES。日志：%TEMP%\JobsSourceTree*。'
     Write-Host 'Ctrl+C 取消；缺少 SDK/工具时停止，不自动更换项目版本。'
     if ([Console]::IsInputRedirected) { throw '需要独立交互终端；没有确认不能继续。' }
     [void](Read-JobsEnterChoiceHost '按回车继续')

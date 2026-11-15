@@ -411,6 +411,200 @@ function Push-JobsRepositoryTree {
     try { Invoke-JobsPushCore $Repository }
     finally { $lease.Dispose() }
 }
+# 重新发现可直接执行的 Node，保留稳定入口而非解析到具体安装版本。
+function Find-JobsCommitNode {
+    param([string]$Repository)
+    $candidates = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($name in @('node.exe', 'node')) {
+        foreach ($command in @(Get-Command $name -CommandType Application -ErrorAction SilentlyContinue)) {
+            if ($command.Source) { $candidates.Add($command.Source) }
+        }
+    }
+    foreach ($base in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+        if ($base) { $candidates.Add((Join-Path $base 'nodejs/node.exe')) }
+    }
+    if ($env:LOCALAPPDATA) { $candidates.Add((Join-Path $env:LOCALAPPDATA 'Programs/nodejs/node.exe')) }
+    if ($env:NVM_SYMLINK) { $candidates.Add((Join-Path $env:NVM_SYMLINK 'node.exe')) }
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
+        if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
+        $result = Invoke-JobsTool $candidate @('--version') $Repository -Quiet -AllowFailure
+        if ($result.Code -eq 0 -and $result.Text.Trim() -match '^v\d+\.') { return $candidate }
+    }
+    throw '没有可用 Node.js；请安装或修复 Node 后重试，未禁用过滤器或修改配置。'
+}
+# 仅修复有自有安装记录的本仓驱动；嵌入与 MacOS 相同的受控检查和真实 Git 探针。
+function Repair-JobsCommitMarkdownFilter {
+    param([string]$Repository)
+    $configured = Invoke-JobsGit $Repository @('config', '--get-regexp', '^filter\.jobs-markdown-toc\.') -Quiet -AllowFailure
+    if ($configured.Code -eq 1) {
+        Write-JobsStatus '本仓未配置 jobs-markdown-toc，跳过；不自动安装。'
+        return
+    }
+    if ($configured.Code -ne 0) { throw ('读取目录过滤器配置失败：' + $configured.Text) }
+    $node = Find-JobsCommitNode $Repository
+    $source = @'
+// Repair only a recorded repository-local Jobs driver; probe Git without touching its index.
+import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
+
+const [root, node] = process.argv.slice(2);
+const driver = 'filter.jobs-markdown-toc';
+const script = '.jobs-markdown-toc/MarkdownToc.mjs';
+const keys = ['clean', 'smudge', 'required'].map(key => `${driver}.${key}`);
+const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
+// Execute Git with binary input/output and explicit accepted exit codes.
+function git(args, input, env = process.env, allowed = [0]) {
+  const result = spawnSync('git', ['-C', root, ...args], { input, env, maxBuffer: 64 * 1024 * 1024 });
+  if (result.error || !allowed.includes(result.status)) {
+    throw new Error(result.error?.message || result.stderr?.toString() || `Git 失败：${args[0]} (${result.status})`);
+  }
+  return result;
+}
+// Read all values so ownership checks can distinguish local records from overrides.
+function values(key, local = false) {
+  const result = git(['config', ...(local ? ['--local'] : []), '--null', '--get-all', key], undefined, process.env, [0, 1]);
+  return result.status === 1 ? [] : result.stdout.toString().split('\0').slice(0, -1);
+}
+// Compare recorded configuration arrays without normalizing user values.
+function same(left, right) { return JSON.stringify(left) === JSON.stringify(right); }
+// Snapshot only this driver's repository-local fields.
+function current() { return Object.fromEntries(keys.map(key => [key, values(key, true)])); }
+// Reject symlinks and non-files before reading managed tools or documents.
+function regular(file) {
+  let cursor = path.parse(file).root;
+  for (const piece of file.slice(cursor.length).split(path.sep)) {
+    cursor = path.join(cursor, piece);
+    if (fs.lstatSync(cursor).isSymbolicLink()) throw new Error(`保留符号链接，停止修复：${cursor}`);
+  }
+  if (!fs.statSync(file).isFile()) throw new Error(`不是普通文件：${file}`);
+}
+// Recognize only the quoted command format emitted by the Jobs installer.
+function executable(command, mode) {
+  const suffix = ` ${quote(script)} ${mode}`;
+  if (!command?.endsWith(suffix)) throw new Error('驱动不是本仓标准命令，保留配置。');
+  const prefix = command.slice(0, -suffix.length);
+  const candidate = prefix.slice(1, -1).replaceAll("'\\''", "'");
+  if (prefix !== quote(candidate) || !/^(?:.*[/\\])?node(?:\.exe)?$/i.test(candidate)) {
+    throw new Error('驱动不是可识别的 Node 命令，保留配置。');
+  }
+  return candidate;
+}
+// Replace a single owned value in one atomic Git configuration write.
+function replace(key, entries) {
+  if (entries.length !== 1) throw new Error('拒绝写入非单值驱动。');
+  git(['config', '--local', '--replace-all', key, entries[0]]);
+}
+// Compare real filters against the same Git EOL/encoding pipeline with identity filters.
+function probe(files, converter) {
+  const directory = fs.mkdtempSync(path.join(path.resolve(root, git(['rev-parse', '--git-path', 'jobs-filter-probe']).stdout.toString().trim()) + '-'));
+  fs.chmodSync(directory, 0o700);
+  const objects = path.join(directory, 'objects');
+  fs.mkdirSync(objects);
+  const env = { ...process.env, GIT_OBJECT_DIRECTORY: objects };
+  try {
+    for (const file of files) {
+      const source = fs.readFileSync(path.join(root, file));
+      const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(source);
+      const cleaned = Buffer.from(converter.cleanMarkdown(text));
+      const expected = git(['-c', `${driver}.clean=cat`, 'hash-object', '-w', `--path=${file}`, '--stdin'], cleaned, env).stdout.toString().trim();
+      const actual = git(['hash-object', `--path=${file}`, '--stdin'], source, env).stdout.toString().trim();
+      if (actual !== expected) throw new Error(`Git clean 转换不符：${file}`);
+      const checkout = git(['-c', `${driver}.smudge=cat`, 'cat-file', '--filters', `--path=${file}`, expected], undefined, env).stdout;
+      const checkoutText = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(checkout);
+      const smudged = git(['cat-file', '--filters', `--path=${file}`, expected], undefined, env).stdout;
+      if (!smudged.equals(Buffer.from(converter.smudgeMarkdown(checkoutText)))) {
+        throw new Error(`Git smudge 转换不符：${file}`);
+      }
+      if (converter.smudgeMarkdown(text) !== text) throw new Error(`本地目录尚未恢复为 [toc]，请先审查并运行仓内 restore：${file}`);
+    }
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+  console.log(`真实 Git clean / smudge 验证通过：${files.length} 份文档；业务索引与正文未修改。`);
+}
+// Validate ownership, repair stale runtime paths, and roll back this run on probe failure.
+async function main() {
+  for (const name of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES']) {
+    if (process.env[name] !== undefined) throw new Error(`不接受 ${name} 覆盖，请在目标仓库正常环境运行。`);
+  }
+  if (values(`${driver}.process`).length) throw new Error('存在同名 process 过滤器，保留配置并停止。');
+  const stateFile = path.resolve(root, git(['rev-parse', '--git-path', 'jobs-markdown-toc.json']).stdout.toString().trim());
+  for (const file of [path.join(root, script), path.join(root, '.jobs-markdown-toc/manifest.json'), stateFile]) regular(file);
+  const beforeState = fs.readFileSync(stateFile);
+  const state = JSON.parse(beforeState);
+  const before = current();
+  if (state.version !== 1 || !same(before, state.installed)) throw new Error('安装记录与本仓配置不符，保留现场。');
+  for (const key of keys) {
+    if (before[key].length !== 1 || !same(values(key).slice(-1), before[key])) throw new Error(`配置有高优先级覆盖或重复本仓值，保留现场：${key}`);
+  }
+  if (before[keys[2]][0] !== 'true') throw new Error('required 不是标准 true，保留现场。');
+  const oldNode = executable(before[keys[0]][0], 'clean');
+  if (executable(before[keys[1]][0], 'smudge') !== oldNode) throw new Error('clean / smudge 的 Node 路径不一致。');
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, '.jobs-markdown-toc/manifest.json')));
+  const files = manifest.files;
+  if (manifest.version !== 1 || !Array.isArray(files) || !files.length || new Set(files).size !== files.length) throw new Error('目录清单无效。');
+  for (const file of files) {
+    if (typeof file !== 'string' || path.isAbsolute(file) || file.includes('\\') || file.split('/').some(part => !part || part === '.' || part === '..') || !/\.md$/i.test(file)) throw new Error('目录清单路径不安全。');
+    const absolute = path.join(root, file);
+    regular(absolute);
+    const nearest = git(['-C', path.dirname(absolute), 'rev-parse', '--show-toplevel']).stdout.toString().trim();
+    if (fs.realpathSync(nearest) !== fs.realpathSync(root)) throw new Error(`清单越过独立 Git 边界：${file}`);
+    const attributes = git(['check-attr', '-z', 'filter', '--', file]).stdout.toString().split('\0');
+    if (attributes[2] !== 'jobs-markdown-toc') throw new Error(`属性未登记本过滤器：${file}`);
+  }
+  const converter = await import(pathToFileURL(path.join(root, script)));
+  const health = spawnSync(oldNode, ['--version'], { cwd: root, timeout: 10000 });
+  // Replace version-specific paths even while they still work, using the discovered stable entry.
+  const obsolete = /[/\\]Cellar[/\\]node[/\\]/.test(oldNode);
+  if (!health.error && health.status === 0 && !obsolete) { probe(files, converter); return; }
+  const after = { ...before, [keys[0]]: [`${quote(node.replaceAll('\\', '/'))} ${quote(script)} clean`], [keys[1]]: [`${quote(node.replaceAll('\\', '/'))} ${quote(script)} smudge`] };
+  const backup = fs.mkdtempSync(path.resolve(root, git(['rev-parse', '--git-path', 'jobs-filter-backup']).stdout.toString().trim()) + '-');
+  fs.chmodSync(backup, 0o700);
+  fs.writeFileSync(path.join(backup, 'before.json'), JSON.stringify({ version: 1, before, after, state: beforeState.toString() }, null, 2) + '\n', { mode: 0o600 });
+  console.log(`过滤器精确备份：${backup}`);
+  console.log(`Node 入口：${oldNode} → ${node}`);
+  if (!same(current(), before) || !fs.readFileSync(stateFile).equals(beforeState)) throw new Error('配置被并发修改，未写入。');
+  const changed = [];
+  const afterState = Buffer.from(JSON.stringify({ ...state, installed: after }, null, 2) + '\n');
+  try {
+    for (const key of keys.slice(0, 2)) { changed.push(key); replace(key, after[key]); }
+    fs.writeFileSync(stateFile, afterState);
+    for (const key of keys) if (!same(values(key).slice(-1), after[key])) throw new Error('修复后有效配置不符。');
+    probe(files, converter);
+  } catch (error) {
+    for (const key of changed) {
+      if (same(values(key, true), after[key])) replace(key, before[key]);
+      else if (!same(values(key, true), before[key])) console.error(`配置已变化，未覆盖并发修改：${key}；恢复依据：${backup}`);
+    }
+    if (fs.readFileSync(stateFile).equals(afterState)) fs.writeFileSync(stateFile, beforeState);
+    throw error;
+  }
+  console.log('已修复本仓过滤器及安装记录；未修改全局配置、未禁用过滤器。');
+}
+try { await main(); } catch (error) { console.error(error.message); process.exitCode = 1; }
+'@
+    $previousPreference = $ErrorActionPreference
+    $previousOutputEncoding = $OutputEncoding
+    $previousConsoleEncoding = [Console]::OutputEncoding
+    try {
+        # Windows PowerShell 5.1 的默认管道编码会损坏内嵌中文和仓库路径。
+        $OutputEncoding = New-Object Text.UTF8Encoding($false)
+        [Console]::OutputEncoding = $OutputEncoding
+        $ErrorActionPreference = 'Continue'
+        $global:LASTEXITCODE = 0
+        $lines = @($source | & $node --input-type=module - $Repository $node 2>&1 | ForEach-Object { $_.ToString() })
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousPreference
+        $OutputEncoding = $previousOutputEncoding
+        [Console]::OutputEncoding = $previousConsoleEncoding
+    }
+    if ($lines.Count) { Write-JobsStatus ($lines -join "`n") }
+    if ($code -ne 0) { throw ('目录过滤器检查/修复失败，退出码 ' + $code + '；保留索引与工作区，请按日志处理。') }
+}
+
 # 检查并备份残留锁；不删除正在使用的 Git 元数据。
 function Repair-JobsCommit {
     param([string]$Repository)
@@ -423,10 +617,11 @@ function Repair-JobsCommit {
         Confirm-JobsDanger "确认已排除在途任务，归档锁文件：$lock"
         Move-Item -LiteralPath $lock -Destination ($lock+'.backup.'+(Get-Date -Format 'yyyyMMddHHmmss'))
     }
+    Repair-JobsCommitMarkdownFilter $Repository
     [void](Invoke-JobsGit $Repository @('status','--porcelain=v1'))
     [void](Invoke-JobsGit $Repository @('submodule','status','--recursive'))
     [void](Invoke-JobsGit $Repository @('add','--dry-run','--all'))
-    Write-JobsStatus '提交入口已检查；未自动覆盖 gitlink 或重建索引。路径错位/缺失子仓请按诊断修复。'
+    Write-JobsStatus '提交入口与目录过滤器已检查；未真实暂存、提交、覆盖 gitlink 或重建索引。路径错位/缺失子仓请按诊断修复。'
 }
 # 先 fetch/prune，失败仅整理 Git 自身引用，不处理网络与凭据。
 function Repair-JobsFetch {

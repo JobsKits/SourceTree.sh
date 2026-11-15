@@ -56,7 +56,7 @@
 | 🐦Flutter项目体检 | [Run.ps1](<./【WindowsOS@SourceTree】🐦Flutter项目体检/Run.ps1>) | 检查工程同源 Flutter/Dart SDK 并执行 doctor |
 | 🐦打开：运行Flutter项目 | [Run.ps1](<./【WindowsOS@SourceTree】🐦打开：运行Flutter项目/Run.ps1>) | 选择 Android、Web 或 Windows 设备；Android 启动已有 / 缺失时初始化 |
 | 📘用Typora打开蓝皮书 | [Run.ps1](<./【WindowsOS@SourceTree】📘用Typora打开蓝皮书/Run.ps1>) | 使用 Windows Typora 打开项目 README |
-| 📥修复Git无法Commit | [Run.ps1](<./【WindowsOS@SourceTree】📥修复Git无法Commit/Run.ps1>) | 检查 Git 元数据与锁，确认后归档残留锁 |
+| 📥修复Git无法Commit | [Run.ps1](<./【WindowsOS@SourceTree】📥修复Git无法Commit/Run.ps1>) | 检查 Git 元数据与锁，修复有自有记录的失效目录过滤器，并真实验证双向转换 |
 | 📥修复Git无法Fetch | [Run.ps1](<./【WindowsOS@SourceTree】📥修复Git无法Fetch/Run.ps1>) | 分阶段 fetch、prune、pack-refs 并传播错误 |
 | 📥修复Git无法Push | [Run.ps1](<./【WindowsOS@SourceTree】📥修复Git无法Push/Run.ps1>) | 当前仓库单线路诊断、安全整合、普通推送与服务端 OID 核验；平台限制分类停止 |
 | 📦双击打包Flutter.android | [Run.ps1](<./【WindowsOS@SourceTree】📦双击打包Flutter.android/Run.ps1>) | 使用工程 SDK 构建 Android APK 和 AAB |

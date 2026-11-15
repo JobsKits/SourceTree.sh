@@ -1,7 +1,7 @@
 #!/bin/zsh
 # 脚本自述：
 # - 脚本名称：【MacOS@SourceTree】📥修复Git无法Commit.command
-# - 核心用途：自动识别 Sourcetree 旧路径/文件变目录故障，精确暂存旧文件删除；其它故障沿用 7 场景修复。
+# - 核心用途：自动识别 Sourcetree 旧路径/文件变目录故障，精确暂存旧文件删除；其它故障沿用 8 场景修复，先检查目录过滤器。
 # - 关键场景：工作树绑定错位、残留索引锁、gitlink 顺序错误、嵌套路径迁移、子模块异常，以及文件/目录形态互换。
 # - 影响范围：修改 Git 索引；可归档确认无进程占用的残留锁并初始化缺失子模块，但不清理已有子模块的真实修改。
 # - 运行提示：Sourcetree 模式无交互连续执行；终端独立运行需先按回车确认。
@@ -69,46 +69,169 @@ jobs_terminal_style_run() {
     jobs_style_exit_status=0
     jobs_style_esc=$(printf '\033')
     jobs_style_bel=$(printf '\007')
-    # 只接受本次请求对应的 RGB 响应；非协议输入使本次探测失败。
+    # 完整颜色帧有界重发；仅退出恢复容忍帧外回车和明确方向键。
     jobs_terminal_style_query() {
         jobs_style_query_key=$1
-        printf '\033]%s;?\007' "$jobs_style_query_key" > /dev/tty || return 1
         jobs_style_reply=''
-        for jobs_style_attempt in 1 2 3; do
-            jobs_style_piece=$(dd bs=256 count=1 2>/dev/null < /dev/tty)
-            jobs_style_reply=$jobs_style_reply$jobs_style_piece
-            case $jobs_style_reply in
-                *"$jobs_style_bel"|*"$jobs_style_esc\\") break ;;
-                '') ;;
-                "$jobs_style_esc"*) ;;
-                *) break ;;
-            esac
-        done
-        case $jobs_style_reply in
-            "$jobs_style_esc]$jobs_style_query_key;rgb:"*"$jobs_style_bel")
-                jobs_style_rgb=${jobs_style_reply#"$jobs_style_esc]$jobs_style_query_key;rgb:"}
-                jobs_style_rgb=${jobs_style_rgb%"$jobs_style_bel"}
-                ;;
-            "$jobs_style_esc]$jobs_style_query_key;rgb:"*"$jobs_style_esc\\")
-                jobs_style_rgb=${jobs_style_reply#"$jobs_style_esc]$jobs_style_query_key;rgb:"}
-                jobs_style_rgb=${jobs_style_rgb%"$jobs_style_esc\\"}
-                ;;
-            *) return 1 ;;
-        esac
-        jobs_style_normalized=$(printf '%s\n' "$jobs_style_rgb" | LC_ALL=C awk -F/ '
-            NF != 3 { exit 1 }
-            {
-                for (i = 1; i <= 3; i++) {
-                    h = tolower($i)
-                    if (length(h) < 1 || length(h) > 4 || h ~ /[^0-9a-f]/) exit 1
-                    n = 0
-                    for (j = 1; j <= length(h); j++) n = n * 16 + index("0123456789abcdef", substr(h, j, 1)) - 1
-                    value[i] = int(n * 65535 / (16 ^ length(h) - 1) + 0.5)
-                }
-                printf "%d/%d/%d", value[1], value[2], value[3]
+        jobs_style_query_buffer=''
+        jobs_style_query_target_reply=''
+        jobs_style_query_target_normalized=''
+        jobs_style_query_target_rgb=''
+        jobs_style_query_st="${jobs_style_esc}\\"
+        jobs_style_query_stale_count=0
+        jobs_style_query_phase=${2:-strict}
+        jobs_style_query_cr=$(printf '\r')
+        jobs_style_query_lf=$(printf '\n.')
+        jobs_style_query_lf=${jobs_style_query_lf%.}
+        jobs_style_query_failure='未收到目标颜色的完整答复（最多 3 次查询，每次约 2 秒）'
+        for jobs_style_query_round in 1 2 3; do
+            printf '\033]%s;?\007' "$jobs_style_query_key" > /dev/tty || {
+                jobs_style_query_failure='无法向原终端发送配色查询'
+                return 1
             }
-        ') || return 1
-        [ -n "$jobs_style_normalized" ]
+            for jobs_style_attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+                # 哨兵保留末尾换行，不能把只有回车的键盘输入误当成无答复。
+                jobs_style_piece=$(dd bs=256 count=1 2>/dev/null < /dev/tty; printf '.')
+                jobs_style_piece=${jobs_style_piece%.}
+                jobs_style_query_buffer=$jobs_style_query_buffer$jobs_style_piece
+                while [ -n "$jobs_style_query_buffer" ]; do
+                    # 仅退出恢复阶段允许帧外的明确控制键，普通文字仍然失败。
+                    if [ "$jobs_style_query_phase" = cleanup ]; then
+                        jobs_style_query_control_sequence=''
+                        jobs_style_query_control_partial=0
+                        case $jobs_style_query_buffer in
+                            "$jobs_style_query_cr"*) jobs_style_query_control_sequence=$jobs_style_query_cr ;;
+                            "$jobs_style_query_lf"*) jobs_style_query_control_sequence=$jobs_style_query_lf ;;
+                        esac
+                        if [ -z "$jobs_style_query_control_sequence" ]; then
+                            for jobs_style_query_direction in A B C D; do
+                                for jobs_style_query_control_candidate in \
+                                    "${jobs_style_esc}[${jobs_style_query_direction}" \
+                                    "${jobs_style_esc}O${jobs_style_query_direction}" \
+                                    "${jobs_style_esc}[1;2${jobs_style_query_direction}" \
+                                    "${jobs_style_esc}[1;3${jobs_style_query_direction}" \
+                                    "${jobs_style_esc}[1;4${jobs_style_query_direction}" \
+                                    "${jobs_style_esc}[1;5${jobs_style_query_direction}" \
+                                    "${jobs_style_esc}[1;6${jobs_style_query_direction}" \
+                                    "${jobs_style_esc}[1;7${jobs_style_query_direction}" \
+                                    "${jobs_style_esc}[1;8${jobs_style_query_direction}"; do
+                                    case $jobs_style_query_buffer in
+                                        "$jobs_style_query_control_candidate"*)
+                                            jobs_style_query_control_sequence=$jobs_style_query_control_candidate
+                                            break 2
+                                            ;;
+                                    esac
+                                    case $jobs_style_query_control_candidate in
+                                        "$jobs_style_query_buffer"*) jobs_style_query_control_partial=1 ;;
+                                    esac
+                                done
+                            done
+                        fi
+                        if [ -n "$jobs_style_query_control_sequence" ]; then
+                            jobs_style_cleanup_control_keys=$(( ${jobs_style_cleanup_control_keys:-0} + 1 ))
+                            if [ "$jobs_style_cleanup_control_keys" -gt 64 ]; then
+                                jobs_style_query_failure='退出恢复期间已识别控制键超过 64 个，已停止自动恢复'
+                                return 1
+                            fi
+                            jobs_style_query_buffer=${jobs_style_query_buffer#"$jobs_style_query_control_sequence"}
+                            continue
+                        fi
+                        if [ "$jobs_style_query_control_partial" = 1 ]; then
+                            break
+                        fi
+                    fi
+                    case $jobs_style_query_buffer in
+                        "$jobs_style_esc"|"$jobs_style_esc]") break ;;
+                        "$jobs_style_esc]"*) ;;
+                        *) jobs_style_query_failure='收到非配色查询输入，已停止读取'; return 1 ;;
+                    esac
+                    jobs_style_query_head=''
+                    jobs_style_query_terminator=''
+                    case $jobs_style_query_buffer in
+                        *"$jobs_style_bel"*)
+                            jobs_style_query_head=${jobs_style_query_buffer%%"$jobs_style_bel"*}
+                            jobs_style_query_terminator=$jobs_style_bel
+                            ;;
+                    esac
+                    case $jobs_style_query_buffer in
+                        *"$jobs_style_query_st"*)
+                            jobs_style_query_st_head=${jobs_style_query_buffer%%"$jobs_style_query_st"*}
+                            if [ -z "$jobs_style_query_terminator" ] ||
+                               [ "${#jobs_style_query_st_head}" -lt "${#jobs_style_query_head}" ]; then
+                                jobs_style_query_head=$jobs_style_query_st_head
+                                jobs_style_query_terminator=$jobs_style_query_st
+                            fi
+                            ;;
+                    esac
+                    [ -n "$jobs_style_query_terminator" ] || break
+                    jobs_style_query_frame=$jobs_style_query_head$jobs_style_query_terminator
+                    jobs_style_query_buffer=${jobs_style_query_buffer#"$jobs_style_query_frame"}
+                    jobs_style_query_body=${jobs_style_query_head#"$jobs_style_esc]"}
+                    case $jobs_style_query_body in
+                        *';rgb:'*) ;;
+                        *) jobs_style_query_failure='配色答复格式或 RGB 数据无效'; return 1 ;;
+                    esac
+                    jobs_style_query_frame_key=${jobs_style_query_body%%';rgb:'*}
+                    case $jobs_style_query_frame_key in
+                        10|11|12|'4;'[0-9]|'4;1'[0-5]) ;;
+                        *) jobs_style_query_failure='收到不属于本次颜色协议的答复'; return 1 ;;
+                    esac
+                    jobs_style_query_frame_rgb=${jobs_style_query_body#"$jobs_style_query_frame_key;rgb:"}
+                    jobs_style_query_frame_normalized=$(printf '%s\n' "$jobs_style_query_frame_rgb" | LC_ALL=C awk -F/ '
+                        BEGIN { valid = 1 }
+                        NR != 1 || NF != 3 { valid = 0; exit }
+                        {
+                            for (i = 1; i <= 3; i++) {
+                                h = tolower($i)
+                                if (length(h) < 1 || length(h) > 4 || h ~ /[^0-9a-f]/) {
+                                    valid = 0
+                                    exit
+                                }
+                                n = 0
+                                for (j = 1; j <= length(h); j++) n = n * 16 + index("0123456789abcdef", substr(h, j, 1)) - 1
+                                value[i] = int(n * 65535 / (16 ^ length(h) - 1) + 0.5)
+                            }
+                        }
+                        END {
+                            if (!valid || NR != 1) exit 1
+                            printf "%d/%d/%d", value[1], value[2], value[3]
+                        }
+                    ')
+                    if [ -z "$jobs_style_query_frame_normalized" ]; then
+                        jobs_style_query_failure='配色答复格式或 RGB 数据无效'
+                        return 1
+                    fi
+                    if [ "$jobs_style_query_frame_key" = "$jobs_style_query_key" ]; then
+                        if [ -n "$jobs_style_query_target_reply" ] &&
+                           [ "$jobs_style_query_target_normalized" != "$jobs_style_query_frame_normalized" ]; then
+                            jobs_style_query_failure='同一颜色的重复答复不一致，已停止自动恢复'
+                            return 1
+                        fi
+                        jobs_style_query_target_reply=$jobs_style_query_frame
+                        jobs_style_query_target_normalized=$jobs_style_query_frame_normalized
+                        jobs_style_query_target_rgb=$jobs_style_query_frame_rgb
+                    else
+                        jobs_style_query_stale_count=$((jobs_style_query_stale_count + 1))
+                        if [ "$jobs_style_query_stale_count" -gt 128 ]; then
+                            jobs_style_query_failure='收到过多旧颜色答复，已停止读取'
+                            return 1
+                        fi
+                    fi
+                done
+                if [ -n "$jobs_style_query_target_reply" ] && [ -z "$jobs_style_query_buffer" ]; then
+                    jobs_style_reply=$jobs_style_query_target_reply
+                    jobs_style_normalized=$jobs_style_query_target_normalized
+                    jobs_style_rgb=$jobs_style_query_target_rgb
+                    return 0
+                fi
+            done
+            # 残缺帧不能通过重发拼成另一个答复，更不能被当成键盘空输入。
+            if [ -n "$jobs_style_query_buffer" ]; then
+                jobs_style_query_failure='配色答复帧不完整，已停止自动恢复'
+                return 1
+            fi
+        done
+        return 1
     }
     # 查询可用不代表终端允许改色，按目标值核对实际生效结果。
     jobs_terminal_style_accepts_target() {
@@ -151,8 +274,10 @@ jobs_terminal_style_run() {
         fi
         if [ "$jobs_style_changed" = 1 ]; then
             jobs_style_cleanup_ok=0
+            jobs_style_cleanup_issue='无法读取或设置原终端输入模式，或临时配色未完成核验'
             jobs_style_conflicts=''
             jobs_style_restore_safe=''
+            jobs_style_cleanup_control_keys=0
             if [ "$jobs_style_applied_complete" = 1 ]; then
                 jobs_style_stty=$(stty -g 2>/dev/null < /dev/tty) || jobs_style_stty=''
                 if [ -n "$jobs_style_stty" ] && stty -echo -icanon min 0 time 1 2>/dev/null < /dev/tty; then
@@ -160,8 +285,9 @@ jobs_terminal_style_run() {
                     jobs_style_cleanup_ok=1
                     while IFS='|' read -r jobs_style_key jobs_style_expected jobs_style_original; do
                         [ -n "$jobs_style_key" ] || continue
-                        if ! jobs_terminal_style_query "$jobs_style_key"; then
+                        if ! jobs_terminal_style_query "$jobs_style_key" cleanup; then
                             jobs_style_cleanup_ok=0
+                            jobs_style_cleanup_issue="颜色项 $jobs_style_key：$jobs_style_query_failure"
                             break
                         fi
                         if [ "$jobs_style_normalized" = "$jobs_style_expected" ]; then
@@ -172,7 +298,7 @@ jobs_terminal_style_run() {
                     done <<JOBS_STYLE_APPLIED
 $jobs_style_applied_rows
 JOBS_STYLE_APPLIED
-                    stty "$jobs_style_stty" 2>/dev/null < /dev/tty || jobs_style_cleanup_ok=0
+                    stty "$jobs_style_stty" 2>/dev/null < /dev/tty || { jobs_style_cleanup_ok=0; jobs_style_cleanup_issue='无法恢复原终端输入模式'; }
                     jobs_style_query_active=0
                 fi
             fi
@@ -186,7 +312,7 @@ JOBS_STYLE_APPLIED
                     [ "$jobs_style_result" -ne 0 ] || jobs_style_result=1
                 fi
             else
-                printf '终端配色未能安全自动恢复；确认覆盖当前配色后可运行：sh "%s"\n' "$jobs_style_recovery" >&2
+                printf '终端配色未能安全自动恢复（%s）；确认覆盖当前配色后可运行：sh "%s"\n' "$jobs_style_cleanup_issue" "$jobs_style_recovery" >&2
                 [ "$jobs_style_result" -ne 0 ] || jobs_style_result=1
             fi
         fi
@@ -197,9 +323,9 @@ JOBS_STYLE_APPLIED
         exit "$jobs_style_result"
     }
     trap 'jobs_terminal_style_cleanup "$jobs_style_exit_status"' 0
-    trap 'jobs_style_exit_status=129; exit 129' HUP
-    trap 'jobs_style_exit_status=130; exit 130' INT
-    trap 'jobs_style_exit_status=143; exit 143' TERM
+    trap 'jobs_style_exit_status=129; jobs_terminal_style_cleanup 129 continue; jobs_style_changed=0; exit 129' HUP
+    trap 'jobs_style_exit_status=130; jobs_terminal_style_cleanup 130 continue; jobs_style_changed=0; exit 130' INT
+    trap 'jobs_style_exit_status=143; jobs_terminal_style_cleanup 143 continue; jobs_style_changed=0; exit 143' TERM
     if ! stty -echo -icanon min 0 time 1 2>/dev/null < /dev/tty; then
         jobs_terminal_style_plain "$@"
     fi
@@ -275,9 +401,9 @@ JOBS_STYLE_ORIGINAL
             jobs_style_exit_status=1
             exit 1
         fi
-        trap 'jobs_style_exit_status=129; exit 129' HUP
-        trap 'jobs_style_exit_status=130; exit 130' INT
-        trap 'jobs_style_exit_status=143; exit 143' TERM
+        trap 'jobs_style_exit_status=129; jobs_terminal_style_cleanup 129 continue; jobs_style_changed=0; exit 129' HUP
+        trap 'jobs_style_exit_status=130; jobs_terminal_style_cleanup 130 continue; jobs_style_changed=0; exit 130' INT
+        trap 'jobs_style_exit_status=143; jobs_terminal_style_cleanup 143 continue; jobs_style_changed=0; exit 143' TERM
         printf '%s\n' '终端未接受本次配色，已恢复原配色并使用纯文本。' >&2
         jobs_terminal_style_plain "$@"
     fi
@@ -565,7 +691,7 @@ TARGET_PATH=""
 REPO_ROOT=""
 INDEX_LOCK_PATH=""
 COMMIT_SCENARIO_STEP=0
-COMMIT_SCENARIO_TOTAL=7
+COMMIT_SCENARIO_TOTAL=8
 COMMIT_REPAIR_MODE="auto"
 PATH_REPAIR_ACTIVE=0
 PATH_REPAIR_TEMP=""
@@ -690,9 +816,10 @@ show_script_intro_and_wait() {
 
   highlight_echo "============================== 脚本内置自述 ==============================" | jobs_intro_style title
   note_echo "脚本名称：${SCRIPT_BASENAME}.command" | jobs_intro_style title
-  note_echo "核心行为：把 Commit 阻塞拆成 7 个独立场景，逐项检测/修复，最后验证索引入口已经解锁。" | jobs_intro_style body
+  note_echo "核心行为：把 Commit 阻塞拆成 8 个独立场景，逐项检测/修复，最后验证索引入口已经解锁。" | jobs_intro_style body
   note_echo "路径修复：检测到原文件已变目录时，只暂存旧文件删除，保留目录新文件、无关修改和部分暂存；--repair-paths 可显式启用，--stage-all 沿用完整暂存。" | jobs_intro_style body
   note_echo "适用场景：Git 异常退出遗留索引锁、普通变更、文件与同名目录转换、缺失子模块工作树、旧 gitlink 删除，以及 .git/core.worktree 路径错位。" | jobs_intro_style body
+  note_echo "过滤器修复：先检查 jobs-markdown-toc 的 Node 入口；仅凭本仓一致的安装记录更新失效配置，使用稳定入口并备份。--repair-filters 仅修过滤器，不暂存文件。" | jobs_intro_style body
   note_echo "锁处理策略：锁仍被进程持有时立即停止；只有确认无人占用时才移动到 Git 元数据备份目录。" | jobs_intro_style body
   note_echo "路径迁移：旧 gitlink 已登记但目录已改名时，会同步修复 .gitmodules、core.worktree 和父仓索引。" | jobs_intro_style body
   note_echo "副本修复：已登记到 .gitmodules 的同源子模块副本，会尝试创建独立 gitdir 后继续。" | jobs_intro_style body
@@ -721,10 +848,11 @@ parse_commit_repair_mode() {
     "") COMMIT_REPAIR_MODE="auto" ;;
     --repair-paths) COMMIT_REPAIR_MODE="paths"; PATH_REPAIR_ACTIVE=1 ;;
     --stage-all) COMMIT_REPAIR_MODE="all" ;;
+    --repair-filters) COMMIT_REPAIR_MODE="filters"; PATH_REPAIR_ACTIVE=1; COMMIT_SCENARIO_TOTAL=3 ;;
     *) error_echo "未知修复选项：${2}"; return 1 ;;
   esac
   if (( $# > 2 )); then
-    error_echo "用法：脚本 [仓库路径] [--repair-paths|--stage-all]"
+    error_echo "用法：脚本 [仓库路径] [--repair-paths|--stage-all|--repair-filters]"
     return 1
   fi
 }
@@ -738,6 +866,10 @@ ensure_no_unmerged_entries() {
 }
 # 自动识别 HEAD 中的普通文件已变同名目录，包括旧条目已经暂存删除的 GUI 旧路径。
 select_commit_repair_scope() {
+  if [[ "$COMMIT_REPAIR_MODE" == filters ]]; then
+    info_echo "已选择仅修过滤器：保留业务索引、正文与子模块状态。"
+    return 0
+  fi
   ensure_no_unmerged_entries || return 1
   local record="" metadata="" relative_path=""
   if [[ "$COMMIT_REPAIR_MODE" == auto ]] && git -C "$REPO_ROOT" rev-parse --verify HEAD >/dev/null 2>&1; then
@@ -1683,8 +1815,195 @@ run_commit_scenario_c07_verify_unlock() {
   warn_echo "Hook、签名、身份、未解决冲突及磁盘/权限错误不属于本脚本覆盖范围，实际 Commit 仍以 Sourcetree 返回结果为准。"
   complete_commit_scenario "C07"
 }
+# 场景 C08：先修复有自有记录的本仓目录过滤器，避免 status/add 再触发失效运行时。
+run_commit_scenario_c08_markdown_filter() {
+  begin_commit_scenario "C08" "Markdown 目录过滤器" "Node 升级移除了旧版本路径，Git clean / smudge 仍引用旧路径，导致 add 或 commit -a 失败。"
+  if [[ "$COMMIT_REPAIR_MODE" == paths ]]; then
+    info_echo "显式旧路径模式不改过滤器；若报 clean 失败，请另用 --repair-filters。"
+    complete_commit_scenario "C08"
+    return 0
+  fi
+  local configured="" config_result=0 node_candidate="" node_path=""
+  configured="$(git -C "$REPO_ROOT" config --get-regexp '^filter\.jobs-markdown-toc\.' 2>&1)" || config_result=$?
+  if [[ "$config_result" == 1 ]]; then
+    info_echo "本仓未配置 jobs-markdown-toc，跳过；不自动安装。"
+    complete_commit_scenario "C08"
+    return 0
+  fi
+  if [[ "$config_result" != 0 ]]; then
+    error_echo "读取过滤器配置失败：${configured}"
+    return 1
+  fi
+  for node_candidate in "$(command -v node 2>/dev/null || true)" /opt/homebrew/bin/node /usr/local/bin/node; do
+    [[ -n "$node_candidate" && -x "$node_candidate" ]] || continue
+    if "$node_candidate" --version >/dev/null 2>&1; then
+      node_path="$node_candidate"
+      break
+    fi
+  done
+  if [[ -z "$node_path" ]]; then
+    error_echo "没有可用 Node.js；请安装或修复 Node 后重试，未禁用过滤器或修改配置。"
+    return 1
+  fi
+  "$node_path" --input-type=module - "$REPO_ROOT" "$node_path" <<'JOBS_MARKDOWN_FILTER_REPAIR' 2>&1 | strip_ansi_text | tee -a "$LOG_FILE"
+// Repair only a recorded repository-local Jobs driver; probe Git without touching its index.
+import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
+
+const [root, node] = process.argv.slice(2);
+const driver = 'filter.jobs-markdown-toc';
+const script = '.jobs-markdown-toc/MarkdownToc.mjs';
+const keys = ['clean', 'smudge', 'required'].map(key => `${driver}.${key}`);
+const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
+// Execute Git with binary input/output and explicit accepted exit codes.
+function git(args, input, env = process.env, allowed = [0]) {
+  const result = spawnSync('git', ['-C', root, ...args], { input, env, maxBuffer: 64 * 1024 * 1024 });
+  if (result.error || !allowed.includes(result.status)) {
+    throw new Error(result.error?.message || result.stderr?.toString() || `Git 失败：${args[0]} (${result.status})`);
+  }
+  return result;
+}
+// Read all values so ownership checks can distinguish local records from overrides.
+function values(key, local = false) {
+  const result = git(['config', ...(local ? ['--local'] : []), '--null', '--get-all', key], undefined, process.env, [0, 1]);
+  return result.status === 1 ? [] : result.stdout.toString().split('\0').slice(0, -1);
+}
+// Compare recorded configuration arrays without normalizing user values.
+function same(left, right) { return JSON.stringify(left) === JSON.stringify(right); }
+// Snapshot only this driver's repository-local fields.
+function current() { return Object.fromEntries(keys.map(key => [key, values(key, true)])); }
+// Reject symlinks and non-files before reading managed tools or documents.
+function regular(file) {
+  let cursor = path.parse(file).root;
+  for (const piece of file.slice(cursor.length).split(path.sep)) {
+    cursor = path.join(cursor, piece);
+    if (fs.lstatSync(cursor).isSymbolicLink()) throw new Error(`保留符号链接，停止修复：${cursor}`);
+  }
+  if (!fs.statSync(file).isFile()) throw new Error(`不是普通文件：${file}`);
+}
+// Recognize only the quoted command format emitted by the Jobs installer.
+function executable(command, mode) {
+  const suffix = ` ${quote(script)} ${mode}`;
+  if (!command?.endsWith(suffix)) throw new Error('驱动不是本仓标准命令，保留配置。');
+  const prefix = command.slice(0, -suffix.length);
+  const candidate = prefix.slice(1, -1).replaceAll("'\\''", "'");
+  if (prefix !== quote(candidate) || !/^(?:.*[/\\])?node(?:\.exe)?$/i.test(candidate)) {
+    throw new Error('驱动不是可识别的 Node 命令，保留配置。');
+  }
+  return candidate;
+}
+// Replace a single owned value in one atomic Git configuration write.
+function replace(key, entries) {
+  if (entries.length !== 1) throw new Error('拒绝写入非单值驱动。');
+  git(['config', '--local', '--replace-all', key, entries[0]]);
+}
+// Compare real filters against the same Git EOL/encoding pipeline with identity filters.
+function probe(files, converter) {
+  const directory = fs.mkdtempSync(path.join(path.resolve(root, git(['rev-parse', '--git-path', 'jobs-filter-probe']).stdout.toString().trim()) + '-'));
+  fs.chmodSync(directory, 0o700);
+  const objects = path.join(directory, 'objects');
+  fs.mkdirSync(objects);
+  const env = { ...process.env, GIT_OBJECT_DIRECTORY: objects };
+  try {
+    for (const file of files) {
+      const source = fs.readFileSync(path.join(root, file));
+      const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(source);
+      const cleaned = Buffer.from(converter.cleanMarkdown(text));
+      const expected = git(['-c', `${driver}.clean=cat`, 'hash-object', '-w', `--path=${file}`, '--stdin'], cleaned, env).stdout.toString().trim();
+      const actual = git(['hash-object', `--path=${file}`, '--stdin'], source, env).stdout.toString().trim();
+      if (actual !== expected) throw new Error(`Git clean 转换不符：${file}`);
+      const checkout = git(['-c', `${driver}.smudge=cat`, 'cat-file', '--filters', `--path=${file}`, expected], undefined, env).stdout;
+      const checkoutText = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(checkout);
+      const smudged = git(['cat-file', '--filters', `--path=${file}`, expected], undefined, env).stdout;
+      if (!smudged.equals(Buffer.from(converter.smudgeMarkdown(checkoutText)))) {
+        throw new Error(`Git smudge 转换不符：${file}`);
+      }
+      if (converter.smudgeMarkdown(text) !== text) throw new Error(`本地目录尚未恢复为 [toc]，请先审查并运行仓内 restore：${file}`);
+    }
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+  console.log(`真实 Git clean / smudge 验证通过：${files.length} 份文档；业务索引与正文未修改。`);
+}
+// Validate ownership, repair stale runtime paths, and roll back this run on probe failure.
+async function main() {
+  for (const name of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES']) {
+    if (process.env[name] !== undefined) throw new Error(`不接受 ${name} 覆盖，请在目标仓库正常环境运行。`);
+  }
+  if (values(`${driver}.process`).length) throw new Error('存在同名 process 过滤器，保留配置并停止。');
+  const stateFile = path.resolve(root, git(['rev-parse', '--git-path', 'jobs-markdown-toc.json']).stdout.toString().trim());
+  for (const file of [path.join(root, script), path.join(root, '.jobs-markdown-toc/manifest.json'), stateFile]) regular(file);
+  const beforeState = fs.readFileSync(stateFile);
+  const state = JSON.parse(beforeState);
+  const before = current();
+  if (state.version !== 1 || !same(before, state.installed)) throw new Error('安装记录与本仓配置不符，保留现场。');
+  for (const key of keys) {
+    if (before[key].length !== 1 || !same(values(key).slice(-1), before[key])) throw new Error(`配置有高优先级覆盖或重复本仓值，保留现场：${key}`);
+  }
+  if (before[keys[2]][0] !== 'true') throw new Error('required 不是标准 true，保留现场。');
+  const oldNode = executable(before[keys[0]][0], 'clean');
+  if (executable(before[keys[1]][0], 'smudge') !== oldNode) throw new Error('clean / smudge 的 Node 路径不一致。');
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, '.jobs-markdown-toc/manifest.json')));
+  const files = manifest.files;
+  if (manifest.version !== 1 || !Array.isArray(files) || !files.length || new Set(files).size !== files.length) throw new Error('目录清单无效。');
+  for (const file of files) {
+    if (typeof file !== 'string' || path.isAbsolute(file) || file.includes('\\') || file.split('/').some(part => !part || part === '.' || part === '..') || !/\.md$/i.test(file)) throw new Error('目录清单路径不安全。');
+    const absolute = path.join(root, file);
+    regular(absolute);
+    const nearest = git(['-C', path.dirname(absolute), 'rev-parse', '--show-toplevel']).stdout.toString().trim();
+    if (fs.realpathSync(nearest) !== fs.realpathSync(root)) throw new Error(`清单越过独立 Git 边界：${file}`);
+    const attributes = git(['check-attr', '-z', 'filter', '--', file]).stdout.toString().split('\0');
+    if (attributes[2] !== 'jobs-markdown-toc') throw new Error(`属性未登记本过滤器：${file}`);
+  }
+  const converter = await import(pathToFileURL(path.join(root, script)));
+  const health = spawnSync(oldNode, ['--version'], { cwd: root, timeout: 10000 });
+  // Replace version-specific paths even while they still work, using the discovered stable entry.
+  const obsolete = /[/\\]Cellar[/\\]node[/\\]/.test(oldNode);
+  if (!health.error && health.status === 0 && !obsolete) { probe(files, converter); return; }
+  const after = { ...before, [keys[0]]: [`${quote(node.replaceAll('\\', '/'))} ${quote(script)} clean`], [keys[1]]: [`${quote(node.replaceAll('\\', '/'))} ${quote(script)} smudge`] };
+  const backup = fs.mkdtempSync(path.resolve(root, git(['rev-parse', '--git-path', 'jobs-filter-backup']).stdout.toString().trim()) + '-');
+  fs.chmodSync(backup, 0o700);
+  fs.writeFileSync(path.join(backup, 'before.json'), JSON.stringify({ version: 1, before, after, state: beforeState.toString() }, null, 2) + '\n', { mode: 0o600 });
+  console.log(`过滤器精确备份：${backup}`);
+  console.log(`Node 入口：${oldNode} → ${node}`);
+  if (!same(current(), before) || !fs.readFileSync(stateFile).equals(beforeState)) throw new Error('配置被并发修改，未写入。');
+  const changed = [];
+  const afterState = Buffer.from(JSON.stringify({ ...state, installed: after }, null, 2) + '\n');
+  try {
+    for (const key of keys.slice(0, 2)) { changed.push(key); replace(key, after[key]); }
+    fs.writeFileSync(stateFile, afterState);
+    for (const key of keys) if (!same(values(key).slice(-1), after[key])) throw new Error('修复后有效配置不符。');
+    probe(files, converter);
+  } catch (error) {
+    for (const key of changed) {
+      if (same(values(key, true), after[key])) replace(key, before[key]);
+      else if (!same(values(key, true), before[key])) console.error(`配置已变化，未覆盖并发修改：${key}；恢复依据：${backup}`);
+    }
+    if (fs.readFileSync(stateFile).equals(afterState)) fs.writeFileSync(stateFile, beforeState);
+    throw error;
+  }
+  console.log('已修复本仓过滤器及安装记录；未修改全局配置、未禁用过滤器。');
+}
+try { await main(); } catch (error) { console.error(error.message); process.exitCode = 1; }
+JOBS_MARKDOWN_FILTER_REPAIR
+  complete_commit_scenario "C08"
+}
+# 仅过滤器模式保留其它状态，常规模式继续原来的索引修复流程。
+run_remaining_commit_scenarios() {
+  if [[ "$COMMIT_REPAIR_MODE" == filters ]]; then
+    return 0
+  fi
+  run_commit_scenario_c03_gitmodules_order # 先暂存子模块登记，再处理 gitlink。
+  run_commit_scenario_c04_nested_worktrees # 检查嵌套工作树与路径迁移。
+  run_commit_scenario_c05_submodules # 检查已登记子模块的一致性。
+  run_commit_scenario_c06_full_index_refresh # 按所选范围修复索引。
+  run_commit_scenario_c07_verify_unlock # 复验索引入口与锁状态。
+}
 # 输出暂存结果，便于在 Sourcetree 日志窗口中直接核对。
 print_staged_summary() {
+  [[ "$COMMIT_REPAIR_MODE" != filters ]] || return 0
   local summary=""
   summary="$(git -C "$REPO_ROOT" diff --cached --name-status)"
 
@@ -1701,7 +2020,7 @@ print_completion_message() {
   success_echo "处理完成。请回到 Sourcetree 刷新后检查并提交。"
   gray_echo "日志文件：${LOG_FILE}"
 }
-# 编排脚本自述、七个独立故障场景、解锁复验与结果输出。
+# 编排脚本自述、八个独立故障场景、解锁复验与结果输出。
 main() {
   show_script_intro_and_wait # 首先打印内置自述，并按真实运行入口决定是否等待确认。
   initialize_script_runtime # 用户确认后初始化 zsh、命令路径、日志和纯文本输出策略。
@@ -1709,11 +2028,8 @@ main() {
   resolve_target_path "${1:-$PWD}" # 规范化 Sourcetree 参数或当前目录，不提前修改 Git 状态。
   run_commit_scenario_c01_worktree_binding # C01：修复当前工作树自身的 gitdir/core.worktree 错位并识别仓库。
   run_commit_scenario_c02_index_lock # C02：区分活锁与残留锁，只归档可安全处理的 index.lock。
-  run_commit_scenario_c03_gitmodules_order # C03：优先暂存 .gitmodules，解除 gitlink 删除/迁移顺序阻塞。
-  run_commit_scenario_c04_nested_worktrees # C04：检查嵌套工作树、副本和未完成的子模块路径迁移。
-  run_commit_scenario_c05_submodules # C05：验证缺失、退役、迁移及脏子模块的安全边界。
-  run_commit_scenario_c06_full_index_refresh # C06：用一次 git add -A 统一刷新新增、修改、删除和形态互换。
-  run_commit_scenario_c07_verify_unlock # C07：复验索引可读、dry-run 可用且没有遗留锁。
+  run_commit_scenario_c08_markdown_filter # C08：在读取状态或暂存前检查本仓过滤器与实际 Git 转换。
+  run_remaining_commit_scenarios # 按模式继续 C03–C07，或仅修过滤器后返回。
   print_staged_summary # 输出已进入暂存区的文件，便于回到 Sourcetree 核对。
   print_completion_message # 汇总处理结果与日志位置。
 }

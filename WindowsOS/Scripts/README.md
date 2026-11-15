@@ -25,6 +25,8 @@
 
 鸿蒙动作 `ohos` 固定转交打包模块 `Invoke-JobsPackagerHarmonyBuild -Type all`，一次同时构建并检查 HAP + APP，不受 `OHOS_BUILD_TARGET` 缩减；模式沿用 `BUILD_MODE`，默认 release。公共调度把会话日志路径传给构建模块，包含工具链与两类构建输出，失败停止且恢复临时环境。
 
+Commit 修复在锁处理之后、读取状态之前检查本仓 `jobs-markdown-toc`：凭一致的自有安装记录备份并修复失效 Node 路径，真实验证 clean / smudge，兼容 Git 正常换行转换；保留业务索引、正文、全局配置与 `required=true`。没有过滤器则跳过，缺 Node 或存在配置冲突时停止，不自动安装。入口和恢复边界见[Commit 修复说明](../【WindowsOS@SourceTree】📥修复Git无法Commit/README.md)。
+
 ## <span id="jobs-toc-heading-2" data-jobs-toc="v2">一、入口 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 见 [Windows 总览](../README.md) 的功能对照与运行命令。业务日志在系统临时目录；不直接运行内部模块作为用户入口。

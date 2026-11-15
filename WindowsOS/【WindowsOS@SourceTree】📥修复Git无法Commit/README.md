@@ -19,7 +19,7 @@
 
 ## 🔥 <span id="前言">前言</span>
 
-> 检查 Git 元数据与锁，确认后归档残留锁。适用于 [**Windows**](https://www.microsoft.com/windows/) [**PowerShell**](https://learn.microsoft.com/powershell/) 5.1 或更高版本。
+> 检查 Git 元数据、锁及 Markdown 目录过滤器，修复升级或迁移后失效的 Node 路径。适用于 [**Windows**](https://www.microsoft.com/windows/) [**PowerShell**](https://learn.microsoft.com/powershell/) 5.1 或更高版本。
 
 ## <span id="jobs-toc-heading-2" data-jobs-toc="v2">一、运行 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
@@ -36,7 +36,7 @@
 ## <span id="jobs-toc-heading-3" data-jobs-toc="v2">二、用途与结果 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 - 校验明确的目标目录与所需工具，缺失时停止；目标及祖先目录为链接时拒绝。
-- 检查 Git 元数据与锁，确认后归档残留锁。
+- 检查 Git 元数据与锁，确认后归档残留锁；在读取状态或执行暂存预检前，先检查本仓目录过滤器。
 - 失败返回非零退出码；日志位于 `%TEMP%/JobsSourceTree*`，复用功能日志在 `%TEMP%/JobsSourceTree/logs`。
 
 具体兼容差异、排除项与验证范围见 [Windows 总览](../README.md)。
@@ -45,10 +45,14 @@
 
 - 解析真实 Git 目录，先执行 `git fsck --no-reflogs --connectivity-only` 检查对象连通性。
 - 存在 index.lock 时，要求无 Git / SourceTree 进程且可排他打开锁；随后精确 `YES` 才移动为带时间戳的 backup。
-- 检查 status、递归 submodule status 和 `git add --dry-run --all`，传播诊断错误。
+- 锁处理后、读取状态前检查 `filter.jobs-markdown-toc`。无配置直接跳过，不自动接入或安装依赖；从 PATH、Program Files 等位置重新发现健康 Node，保留稳定入口路径。
+- 仅处理 `.jobs-markdown-toc/MarkdownToc.mjs` 标准驱动，并要求本仓 `jobs-markdown-toc.json` 安装记录、local 配置与有效配置一致。`process` 冲突、外部改动、未知命令、链接或跨仓清单均停止，保留现场。
+- 旧 Node 不可用或固化在 Homebrew Cellar 时，在真实 Git 元数据目录创建唯一 `jobs-filter-backup-*` 精确备份；只更新 `clean`、`smudge` 和安装记录，保留 `required=true`。不修改全局配置，不通过禁用过滤器绕过故障。
+- 对清单全部文档执行真实 Git clean / smudge 双向探针，使用独立临时对象目录并在结束后清理；校验结果必须与本仓转换器及当前 `[toc]` 正文一致。失败回滚本轮字段，遇并发修改保留并提示备份位置；不自动 restore 文档。
+- 检查 status、递归 submodule status 和 `git add --dry-run --all`，传播诊断错误。此次修复只解除过滤器及入口阻塞，不验证实际提交 hook 或签名。
 - 不自动执行 commit、真实 add、不重建索引，不覆盖 gitlink；子仓路径错误仍需按诊断处理。
 - `-Target` 未给出时使用启动时当前目录；`-Option`、`-Value` 只在回退动作中有业务含义。需要完整携带 [公共模块](../Scripts/README.md)，不依赖已安装的 Finder 扩展。
-- 本文按当前源码核对；没有在文档维护中运行真实部署、构建、Git 写入或桌面动作。
+- 验证：PowerShell AST 与真实 Git 隔离回归覆盖失效路径修复、双向转换、幂等及失败保护；Windows 原生控制台与 Windows PowerShell 5.1 实机仍需另验。
 
 
 
