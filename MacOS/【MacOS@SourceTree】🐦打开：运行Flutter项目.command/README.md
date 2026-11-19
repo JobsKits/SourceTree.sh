@@ -46,7 +46,7 @@ zsh "./【MacOS@SourceTree】🐦打开：运行Flutter项目.command" "<工程�
 
 ## <span id="jobs-toc-heading-4" data-jobs-toc="v2">三、实际执行流程 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-显式无效路径不会回退到其它当前工程。先查找工程根目录、`tool/setup/`，再检查递归唯一的 `setup.command`；多个候选停止。找到时仍由工程脚本负责运行。没有时验证 Flutter 根目录，再转交同包 `Scripts/RunFlutterProject.zsh`，在 Terminal 中先展示运行器自述并回车确认，然后准备设备发现所需的公共组件，再选择设备。
+显式无效路径不会回退到其它当前工程。先查找工程根目录、`tool/setup/`，再检查递归唯一的 `setup.command`；多个候选停止。找到时仍由工程脚本负责运行。没有时验证 Flutter 根目录，再转交同包 `Scripts/【MacOS】RunFlutterProject.zsh/【MacOS】RunFlutterProject.zsh`，在 Terminal 中先展示运行器自述并回车确认，然后准备设备发现所需的公共组件，再选择设备。
 
 设备枚举前先检查所选 SDK 的公共缓存；完整本地 stamp、组件目录及工具依赖均就绪时直接复用，不新增联网前提。否则先执行 `flutter precache --universal`，沿用本次网络选路、真实进度和持续重试，单次窗口为 1800 秒，直到就绪或 `Ctrl+C` 结束；这一步不下载所有目标平台。输出保存到 `<操作日志>.discovery-sdk`；每次尝试结束后，将输出和退出码追加到 `<操作日志>.discovery-sdk.attempts.log`，中断时保留当次日志。公共组件完成后才运行短时 `flutter devices --machine`，避免机器模式下的隐式下载被设备查询超时反复中止。
 
@@ -57,11 +57,11 @@ zsh "./【MacOS@SourceTree】🐦打开：运行Flutter项目.command" "<工程�
 | Android 模拟器 | 选择已有 AVD；缺失时选择型号、兼容系统镜像，确认所需下载与创建后启动。已有 AVD 不覆盖。 |
 | 重新加载 | 重新读取 Flutter 设备列表。 |
 
-Android 启动后按 AVD 名定位对应 `adb` 设备，等待系统完成启动及 Flutter 识别；失败或超时停止，不误用另一台模拟器。设备列表优先用 [**fzf**](https://github.com/junegunn/fzf) 上下键和关键字筛选；各层取消不会创建或下载。创建流程的子层可按 `←` 返回上一层，面板显示实际按键提示。
+Android 启动后按 AVD 名定位对应 `adb` 设备，等待系统完成启动及 Flutter 识别；失败或超时停止，不误用另一台模拟器。设备列表使用 [**fzf**](https://github.com/junegunn/fzf) 上下键、Tab 和关键字筛选；唯一真实候选自动复用，操作行仍须明确选择，不退回编号输入。必要选择器缺失或损坏时，沿已声明的 Homebrew 链补齐并复检；新装 Homebrew 选择系统/用户目录，保存自身 shellenv 配置块；各层取消不会创建或下载。创建流程的子层可按 `←` 返回上一层，面板显示实际按键提示。
 
 ```shell
 # 标准回退：入口按自身位置构造同包运行器路径，传入完整工程路径
-/bin/zsh ./Scripts/RunFlutterProject.zsh --project "<Flutter 工程目录>"
+/bin/zsh Scripts/【MacOS】RunFlutterProject.zsh/【MacOS】RunFlutterProject.zsh --project "<Flutter 工程目录>"
 ```
 
 Flutter 由当前登录会话的 `launchd` 托管；终端中输入 `r` 热重载、`R` 热重启、`d` 离开日志、`s` 停止并回车。关闭终端或 `Ctrl+C` 只离开日志，后台任务继续；再次运行并选择同一设备可重看日志。
@@ -78,7 +78,7 @@ Sourcetree 动作窗口不发起输入等待；型号、镜像和执行确认在
 
 ## <span id="jobs-toc-heading-7" data-jobs-toc="v2">六、验证边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-[隔离测试](../Tests/FlutterRunDispatch.Tests.rb) 验证 dry-run、同包资源缺失时停止、`setup.command` 优先、工程与动作目录包含空格 / 引号 / Shell 字面量、完整目录复制改名及从无关工作目录调用。运行器的模拟器查询、选择、创建与就绪等待通过命令替身验证；未真实下载 Android SDK、创建或启动模拟器。
+[隔离测试](../Tests/FlutterRunDispatch.Tests.rb/FlutterRunDispatch.Tests.rb) 验证 dry-run、同包资源缺失时停止、`setup.command` 优先、工程与动作目录包含空格 / 引号 / Shell 字面量、完整目录复制改名及从无关工作目录调用。运行器的模拟器查询、选择、创建与就绪等待通过命令替身验证；未真实下载 Android SDK、创建或启动模拟器。
 
 已通过 `zsh -n` 静态语法检查。 入口已隔离验证非交互拒绝、确认前不创建日志、`NO_COLOR` 空值降级与业务失败退出码传播。隔离夹具验证没有运行真实 Flutter / Xcode 构建、安装、依赖清理或模拟器操作；真实工程的签名、网络和工具版本仍需按运行日志确认。
 
@@ -107,3 +107,5 @@ flowchart TD
 ### <span id="jobs-toc-heading-9" data-jobs-toc="v2">SDK获取前网络检测</span><!-- jobs-toc:heading-end -->
 
 运行器在 SDK 自举、设备发现公共组件补齐与选定平台预缓存前检测真实制品与当前网络路线，失败持续自动重试，Ctrl+C终止。显式源和代理包含空值优先，AUTO选路仅当前SDK进程生效；版本/引擎资源完成后，原run业务只启动一次。内部模块已嵌入运行脚本，整体迁移不依赖开发机仓库路径。
+
+项目明确声明 FVM 时，管理器先准备其实际 Dart 宿主并核验版本；健康候选复用，缺失或损坏才按已确认范围从 [Homebrew 的 FVM formula](https://formulae.brew.sh/formula/fvm) 补齐、刷新当前进程再复检。显式 `JOBS_FVM_BIN` 无效时作为来源参数错误停止，不悄悄替换。项目锁定的 Flutter 版本与全局 Flutter / Xcode 保持原约束。

@@ -34,13 +34,13 @@
 zsh "./【MacOS@SourceTree】⚙️收集当前Flutter工程的依赖.command" "<工程目录>"
 ```
 
-`[工程路径] [-s|--select] [--pub-get|--no-pub-get]`。默认所有入口都不执行 pub get；显式 `--pub-get` 在 Sourcetree 按参数执行，在终端按“回车跳过、任意字符执行”询问。Sourcetree 的 --select 自动降为全量收集。
+`[工程路径] [-s|--select] [--pub-get|--no-pub-get]`。默认所有入口都不执行 pub get；显式 `--pub-get` 在真实终端以默认取消的键盘菜单确认刷新；跳过只取消该可选刷新并继续读取现有解析文件。Sourcetree 的 `--select`／`--pub-get` 保留原参数转交独立 Terminal，不扩大为全量收集。
 
 自述与确认阶段只输出到屏幕；确认后才初始化日志。非 Sourcetree 且没有交互输入时直接退出，不执行工程业务。
 
 ## <span id="jobs-toc-heading-3" data-jobs-toc="v2">二、执行前检查 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-需要 macOS `ruby`、`rsync`、`ditto` 以及可调用 Flutter SDK；使用 `--select` 还需要 [**fzf**](https://formulae.brew.sh/formula/fzf)。不自动安装工具。
+需要 macOS `ruby`、`rsync`、`ditto`；默认收集已有解析文件不检查或安装 Flutter SDK；两份 SDK 环境清单明确记录未执行核验，以随包声明和 package_config 为准，只有明确刷新成功才记录实际 Flutter 版本及 pub deps。使用 `--select` 或确认刷新时需要 [**fzf**](https://formulae.brew.sh/formula/fzf)，健康版本复用，缺失时在终端准备必要依赖并复检。只有明确执行 pub get 才准备工程 SDK；FVM 保留声明版本、来源和缓存，用影子项目安装，不改真实 `.fvmrc`／旧配置，不回退其它版本。
 
 路径支持中文、空格和拖拽外层引号。需要递归定位的工程动作会排除依赖、缓存和构建目录；多个工程候选时应直接指定目标。
 
@@ -60,7 +60,7 @@ ditto -c -k --sequesterRsrc --keepParent "<临时集合目录>" "<桌面Zip>"
 
 默认只读工程；`--pub-get` 会写入依赖解析和锁文件。Zip 可能较大，且包含本地路径 / 锁文件 / Gradle 属性等工程信息，分享前核对内容。不会自动 pod install，也不复制整个 Gradle 缓存。
 
-Sourcetree 不发起输入等待；无法安全确定目标或缺少必要条件时直接报错。外部命令失败返回非零状态，后续业务停止。脚本及外部输出在受限输出窗口使用纯文本。
+多选面板按 ↑／↓／Tab 导航，回车勾选／取消，空格仅确认已勾选对象；取消、空选、EOF 和错误不会隐式全选或生成归档。全选和清空是操作行，不写入包清单。Sourcetree 不发起输入等待；需交互或必要修复时转交独立 Terminal，无法安全确定目标时直接报错。外部命令失败返回非零状态，后续业务停止。脚本及外部输出在受限输出窗口使用纯文本。
 
 ## <span id="jobs-toc-heading-6" data-jobs-toc="v2">五、日志与产物 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 

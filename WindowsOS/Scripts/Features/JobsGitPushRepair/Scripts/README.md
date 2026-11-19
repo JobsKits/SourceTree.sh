@@ -32,7 +32,7 @@ Import-Module './Action.psm1' -Force -DisableNameChecking
 Repair-JobsPush -Repository 'D:\Projects\My Project' -Remote Github -Branch main -Diagnose
 ```
 
-- 模块不单独弹菜单或展示初始确认；用户应通过 [公开动作入口](../../../../【WindowsOS@SourceTree】📥修复Git无法Push/README.md) 确认后调用，自动化调用方必须自行保证同等授权。
+- 模块不单独弹菜单或展示初始确认；用户应通过 [公开动作入口](../../../../【WindowsOS@SourceTree】📥修复Git无法Push.ps1/README.md) 确认后调用，自动化调用方必须自行保证同等授权。
 - 仅依赖 PowerShell 5.1+ 与可用 [**Git**](https://git-scm.com/)。多个远端且缺少参数时需要 [**fzf**](https://github.com/junegunn/fzf) 和可交互终端；不安装任何工具。
 - `-Diagnose` 只本地检查和查询远端，不写仓库。真实修复只更新明确目标；原 HEAD 审计位于 Git 管理目录 `jobs-push-repair/`，完整行为和故障表以公开入口 README 为准。
 

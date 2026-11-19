@@ -40,7 +40,7 @@ zsh "./【MacOS@SourceTree】📦双击打包Flutter.android.command" "<工程�
 
 ## <span id="jobs-toc-heading-3" data-jobs-toc="v2">二、执行前检查 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-需要 Flutter SDK、可调用的 [**Java**](https://www.java.com/) 17、工程 `android/gradlew` 和有效 Android SDK。沿用 JDK 17 基线；其他主版本必须先按工程 Gradle / AGP 兼容性单独确认。
+需要 Flutter SDK、可调用的 [**Java**](https://www.java.com/) 17、工程 `android/gradlew` 和有效 Android SDK。同时核验java和javac均为17；健康用户前缀或已注册版本直接复用，仅缺失时准备openjdk@17，当前进程激活，不安装jenv或改Shell配置。其他主版本必须先按工程Gradle／AGP兼容性单独确认。
 
 路径支持中文、空格和拖拽外层引号。需要递归定位的工程动作会排除依赖、缓存和构建目录；多个工程候选时应直接指定目标。
 
@@ -59,7 +59,7 @@ flutter build apk --release
 
 会联网解析依赖、调用工程 Gradle 并写入构建目录。签名与发布配置由工程负责；不自动升级 SDK、JDK、Gradle、AGP 或依赖版本。
 
-Sourcetree 不发起输入等待；无法安全确定目标或缺少必要条件时直接报错。外部命令失败返回非零状态，后续业务停止。脚本及外部输出在受限输出窗口使用纯文本。
+健康SDK与工具直接复用；明确流程所需组件缺失或损坏时在终端内准备并复检，SourceTree动作本身不等待输入，必要准备转交独立Terminal并停止原进程。取消及失败保留原退出码，不继续工程业务。外部命令失败返回非零状态，后续业务停止。脚本及外部输出在受限输出窗口使用纯文本。
 
 ## <span id="jobs-toc-heading-6" data-jobs-toc="v2">五、日志与产物 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
@@ -90,7 +90,7 @@ flowchart TD
 
 [**Homebrew**](https://brew.sh/) 安装路径由用户选择：已有可运行安装时复用；确实需要安装时先强提示，只有精确输入大写 `YES` 才选择系统标准目录，其它输入或直接回车选择当前用户的 `.local/homebrew`。`YES` 只表示选择路径，权限与密码由官方安装器实际处理；有管理员权限也可以选用户目录。选定路径失败立即停止，不自动切换；`Ctrl+C` / 输入结束取消整个任务。
 
-Sourcetree 动作不能交互时，缺少 Homebrew 会停止并提示先在终端完成安装路径选择；已有 Homebrew 时保留原有运行方式。
+Sourcetree 缺少必要SDK或安装工具时转交独立Terminal，保留目标及原参数；只有该终端处理安装路径和后续确认。健康环境维持原动作模式。
 
 **终端配色保护：** 独立运行时，在支持完整保存与恢复配色的交互终端中临时使用黑底白字及统一强调色；正常结束、失败或可捕获中断后恢复进入前的配色，不修改终端全局偏好或 Shell 启动配置。不支持完整保护、无交互终端、`NO_COLOR`、既有纯文本模式和 Sourcetree 场景不切换配色，并沿用纯文本输出约定。强制终止（如 `kill -9`）无法由脚本自身保证恢复，请使用运行时显示的独立恢复入口。
 

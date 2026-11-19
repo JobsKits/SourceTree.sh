@@ -60,7 +60,7 @@ zsh "./【MacOS@SourceTree】📦双击打包Flutter.ohos.command" \
 | `JAVA_HOME` / `NODE_HOME` | 可选，显式设置时必须指向有效工具根目录。 |
 | `OPEN_AFTER_BUILD` | `1`，成功后在 Finder 定位产物；设置 `0` 关闭。 |
 
-命令行覆盖同名环境变量。SDK 选择依次为显式指定、工程 `.fvm/flutter_sdk`、当前 PATH；工程声明 FVM 而固定 SDK 不可用时停止，不改用全局版本，也不调用可能自动下载 SDK 的 FVM 转发。固定 SDK 不支持鸿蒙时同样停止。首次使用或 GUI 环境不能找到 SDK 时，可在 Sourcetree 该动作的 `$REPO` 后增加 `--flutter-sdk "<SDK 根目录>"`。
+命令行覆盖同名环境变量。SDK 选择依次为显式指定、工程 `.fvm/flutter_sdk`、当前 PATH；工程声明 FVM 而固定 SDK 不可用时，只为明确版本与鸿蒙 fork 来源沿原协议准备；私有影子工程核对实际来源、缓存及版本，不写真实绑定、不回退全局 SDK。没有可验证 fork、实际来源不一致或默认普通 Flutter 来源时停止，不猜 SDK。固定 SDK 不支持鸿蒙时同样停止。首次使用或 GUI 环境不能找到 SDK 时，可在 Sourcetree 该动作的 `$REPO` 后增加 `--flutter-sdk "<SDK 根目录>"`。
 
 入口只使用工程默认 product / target，不提供 `--flavor`：部分适配 SDK 遇到未知 flavor 会退回 default，应先在工程中核对产品配置。
 
@@ -68,11 +68,17 @@ zsh "./【MacOS@SourceTree】📦双击打包Flutter.ohos.command" \
 
 工程必须包含 `pubspec.yaml`、`lib/`、`ohos/build-profile.json5` 和 `ohos/oh-package.json5`，插件也必须支持鸿蒙。可向上定位工程，或在传入目录下查找唯一工程；多工程目录必须明确指定。扫描排除 `.git`、`node_modules`、`Pods`、`.dart_tool`、`.fvm`、`build`、`DerivedData` 等依赖和产物目录。
 
-依赖链为：鸿蒙 Flutter / Dart → HarmonyOS SDK → Node.js / npm、ohpm、Hvigor、Java。脚本实际执行版本检查，再检查每种所选包型的 `flutter build <包型> --help`；任一步失败均停止。没有 DevEco、SDK 或命令时给出诊断，不自动安装、升级或下载工具链。
+依赖链为：鸿蒙 Flutter / Dart → HarmonyOS SDK → Node.js / npm、ohpm、Hvigor、Java。脚本实际执行版本检查，再检查每种所选包型的 `flutter build <包型> --help`；任一步失败均停止。健康 DevEco、旧工具缓存和 PATH 直接复用；只有实际所选构建缺少隐式工具链时，才进入固定镜像准备。显式 DevEco／SDK／Node／Java 配置错误或原生取消立即停止，保留选择，不安装其它版本覆盖。
 
 只有一个已安装的 `DevEco*.app` 且未指定 SDK 时，自动复用其工具目录；多个版本要求显式选择。DevEco 常见工具路径为 `Contents/tools/{node,ohpm,hvigor}/bin`，独立命令行工具为 `tool/node/bin`、`ohpm/bin`、`hvigor/bin`；实际版本以[官方环境指导](https://gitcode.com/CPF-Flutter/flutter_samples/blob/master/ohos/docs/03_environment/OpenHarmony-flutter环境搭建指导.md)及工程要求为准。
 
-`OHOS_SDK_HOME` 与 `DEVECO_SDK_HOME` 对应的 SDK 结构和探测分支不同，脚本不将二者无条件互设。适配 SDK 已保存的 `flutter config --ohos-sdk` 设置可能优先于环境变量，异常时应同时核对现有 Flutter 配置与构建日志。Java 沿用现有配置或 DevEco 自带 JBR，不固定升级主版本。profile 模式需要工程已有对应 `buildModeSet`，脚本不自动改工程配置。
+`OHOS_SDK_HOME` 与 `DEVECO_SDK_HOME` 对应的 SDK 结构和探测分支不同，脚本不将二者无条件互设。适配 SDK 已保存的 `flutter config --ohos-sdk` 设置可能优先于环境变量，异常时应同时核对现有 Flutter 配置与构建日志。Java 先复用健康现有配置或同包 JBR；刚准备的固定 CLT 没有 Java 时，才获取既有构建流程的 `openjdk@17` 并复检 java／javac，不升级健康 Java。profile 模式需要工程已有对应 `buildModeSet`，脚本不自动改工程配置。
+
+Sourcetree 必要修复只交接一次 Terminal，保留已解析项目、原 cwd／argv 及显式鸿蒙 SDK、DevEco、FVM 来源／缓存白名单；原进程不继续构建。Terminal 回车继续，非空输入取消。健康路径不新增确认或安装。
+
+华为工具制品使用既有 libsdl.org 固定 Mac ARM64 CLT 6.1.1.280：2025336267 字节，镜像快照 SHA-256 为 47d0e558b8285e1452f4d3611863027ec0d1135642761bef23402434e22382d4。沿用 Harmony tools-only 的安全归档、符号链接、原子发布及许可协议；此摘要未冒称华为官方摘要。健康旧缓存保留，只清理本轮暂存，不下载系统镜像或启动设备。临时网络故障持续重试；取消、404／认证／证书、权限或校验错误停止。当前固定制品只核实 ARM64，其它架构不猜地址、不转官网。可通过 HARMONY_CLT_ARCHIVE 提供同一快照本地归档。
+
+包内完整许可先展示，本人明确同意后才运行原生接受命令，非空输入或 EOF 取消。Flutter fork Git 来源与华为工具制品分开保护。Homebrew 用户安装仅在 Git 真缺失时单次打开 Apple CLT 并持续复检，不修改全局开发目录或绕过许可。
 
 ## 四、<span id="flow">执行流程、日志与产物</span> <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
@@ -118,11 +124,13 @@ flowchart TD
 
 执行会联网解析依赖、运行工程及其依赖的构建代码，并写入锁文件、缓存、平台构建配置和产物。仅在当前脚本进程及子进程配置工具路径，不修改 Shell 启动文件或系统代理，不清理旧产物、不提交、不推送、不上传市场。
 
-脚本与安装器的运行、备灾两副本均通过 `zsh -n` 与逐字节一致性核验。[隔离回归](../Tests/FlutterHarmonyBuild.Tests.rb) 使用临时工程和假工具验证默认双包、CLI 单包兼容、菜单参数覆盖遗留环境、APP 能力缺失时不拉依赖、第二步失败、缺少 APP 产物，以及 APP 构建清掉 HAP 后最终复核失败。当前用户菜单写入前已备份，保留其它动作和用户标题；正常重启 Sourcetree 后已在“自定义操作”页面实际核对原显示标题、运行副本路径及 `$REPO --target all --mode release` 参数，未点击执行打包。
+脚本与安装器的运行、备灾两副本均通过 `zsh -n` 与逐字节一致性核验。[隔离回归](../Tests/FlutterHarmonyBuild.Tests.rb/FlutterHarmonyBuild.Tests.rb) 使用临时工程和假工具验证默认双包、CLI 单包兼容、菜单参数覆盖遗留环境、APP 能力缺失时不拉依赖、第二步失败、缺少 APP 产物，以及 APP 构建清掉 HAP 后最终复核失败。当前用户菜单写入前已备份，保留其它动作和用户标题；正常重启 Sourcetree 后已在“自定义操作”页面实际核对原显示标题、运行副本路径及 `$REPO --target all --mode release` 参数，未点击执行打包。
 
 这些检查独立于真实打包。真实鸿蒙 SDK、工程插件适配、签名、设备安装和上架仍须使用目标工程验证；本仓维护过程未执行真实鸿蒙构建。
 
 **终端配色保护：** 独立运行时，在支持完整保存与恢复配色的交互终端中临时使用黑底白字及统一强调色；正常结束、失败或可捕获中断后恢复进入前的配色，不修改终端全局偏好或 Shell 启动配置。不支持完整保护、无交互终端、`NO_COLOR`、既有纯文本模式和 Sourcetree 场景不切换配色，并沿用纯文本输出约定。强制终止（如 `kill -9`）无法由脚本自身保证恢复，请使用运行时显示的独立恢复入口。
+
+本轮源码验证：43 个新增函数在真实 zsh 加载后全部存在，61 个其它原生函数体相等；原有双包流程 8 项／41 断言通过。另有 21 个来源／caller／取消／许可／镜像场景、6 个 Java／完整准备复检场景、5 个私有小归档安全与旧缓存保全场景，以及实际临时 worker 的 11 个环境值、argv／cwd／目标／退出23／清理／防重入验证。私有归档用测试大小与摘要，不把它当成真实 2GB 制品已下载。未真实安装／下载 SDK、CLT、JDK、构建、签名、部署或修改已安装菜单；Intel 制品和目标工程发布未实机验收。
 
 <a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>
 

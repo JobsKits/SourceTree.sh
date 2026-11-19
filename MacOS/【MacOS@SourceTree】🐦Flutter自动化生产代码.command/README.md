@@ -48,9 +48,9 @@ zsh "./【MacOS@SourceTree】🐦Flutter自动化生产代码.command" \
 
 ## <span id="jobs-toc-heading-3" data-jobs-toc="v2">二、执行前检查 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-需要工程 Flutter / [**Dart**](https://dart.dev) SDK。使用 Protobuf 时还需要 `protoc` 与 `protoc-gen-dart`；不自动安装工具或增加项目依赖。
+需要工程 Flutter / [**Dart**](https://dart.dev) SDK。使用 Protobuf 时还需要 `protoc` 与 `protoc-gen-dart`；真实生成按已检测生成器准备必要工具，不自动增加项目依赖；`--check` 继续不调用SDK或安装工具。
 
-优先使用工程 `.fvm/flutter_sdk/bin/flutter`；声明 [**fvm**](https://fvm.app) 但本地固定 SDK 缺失时停止，人工完成 `fvm install / fvm use` 后重试。无固定 SDK 时使用当前 `PATH` 的真实 Flutter 路径，Dart 必须来自同一 SDK，不跨版本兜底。
+优先使用工程 `.fvm/flutter_sdk/bin/flutter`；声明 [**fvm**](https://fvm.app) 时，真实生成保留明确版本、来源及实际缓存，用影子工程获取并核验；不写真实FVM配置，不执行 fvm use。未知版本或来源冲突停止。无固定 SDK 时使用当前 `PATH` 的真实 Flutter 路径，Dart 必须来自同一 SDK，不跨版本兜底。
 
 路径支持中文、空格、字面引号、反斜杠和拖拽外层引号。工程必须声明 `dependencies.flutter.sdk: flutter`；支持常见块 / 单行 flow YAML、BOM / CRLF 和注释。递归定位排除依赖、缓存、构建及供应商目录；多个候选时直接指定目标。复杂或锚点依赖声明不猜测解析、不自动改写。
 
@@ -68,7 +68,7 @@ zsh "./【MacOS@SourceTree】🐦Flutter自动化生产代码.command" \
 | Pigeon | 依赖 + `pigeons/messages.dart` 中非注释 `@ConfigurePigeon` | 沿项目注解里的 Dart / 原生输出配置，不猜输出路径 |
 | Protobuf | protobuf 依赖 + `protos/*.proto` + 两个可用工具 | 输出 `lib/generated`；声明 grpc 依赖才使用 gRPC 选项 |
 
-缺少明确配置的生成器显示原因并跳过；启用 Protobuf 但缺少工具时在拉取依赖前停止。命令方式依据 [Dart build_runner 官方说明](https://dart.dev/tools/build_runner)、[flutter_launcher_icons](https://pub.dev/packages/flutter_launcher_icons)、[flutter_native_splash](https://pub.dev/packages/flutter_native_splash) 和 [Flutter 国际化说明](https://docs.flutter.dev/ui/internationalization)。
+缺少明确配置的生成器显示原因并跳过；只有实际Protobuf分支准备protoc；缺插件时先确认当前lock的hosted protoc_plugin版本与URL，再在独立版本缓存准备，显式传绝对插件路径，不覆盖用户原全局激活。未知版本、非hosted来源或显式源冲突停止，不猜latest。命令方式依据 [Dart build_runner 官方说明](https://dart.dev/tools/build_runner)、[flutter_launcher_icons](https://pub.dev/packages/flutter_launcher_icons)、[flutter_native_splash](https://pub.dev/packages/flutter_native_splash) 和 [Flutter 国际化说明](https://docs.flutter.dev/ui/internationalization)。
 
 ```shell
 flutter pub get
@@ -87,7 +87,7 @@ protoc --dart_out=lib/generated -Iprotos protos/*.proto
 
 图标直接交给生成器维护，本脚本不提前删除图标。危险参数 `CLEAN_FIRST=1` / `DELETE_CONFLICTING_OUTPUTS=1` 需要终端精确 `YES`；Sourcetree 无交互模式直接停止。
 
-Sourcetree 不发起输入等待；无法安全确定目标或缺少必要条件时直接报错。外部命令失败返回非零状态，后续业务停止。脚本及外部输出在受限输出窗口使用纯文本。
+健康SDK与工具直接复用；明确流程所需组件缺失或损坏时在终端内准备并复检，SourceTree动作本身不等待输入，必要准备转交独立Terminal并停止原进程。取消及失败保留原退出码，不继续工程业务。外部命令失败返回非零状态，后续业务停止。脚本及外部输出在受限输出窗口使用纯文本。
 
 ## <span id="jobs-toc-heading-6" data-jobs-toc="v2">五、日志与产物 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
@@ -95,7 +95,7 @@ Sourcetree 不发起输入等待；无法安全确定目标或缺少必要条件
 
 ## <span id="jobs-toc-heading-7" data-jobs-toc="v2">六、验证边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-两脚本合计通过 98 项隔离断言与 5 个 YAML 引号 / 锚点边界案例；覆盖只读零 SDK 调用 / 零日志、FVM 缺失停止、同 SDK Dart、精确依赖检测、生成器顺序、Pigeon 注解与输出、gRPC 条件、失败码保留、危险选项无交互拒绝及特殊路径。
+两脚本合计通过 98 项隔离断言与 5 个 YAML 引号 / 锚点边界案例；原验证快照覆盖只读零 SDK 调用 / 零日志、当时的 FVM 缺失阻断、同 SDK Dart、精确依赖检测、生成器顺序、Pigeon 注解与输出、gRPC 条件、失败码保留、危险选项无交互拒绝及特殊路径。
 
 已通过 `zsh -n` 静态语法检查。 入口已隔离验证非交互拒绝、确认前不创建日志、`NO_COLOR` 空值降级与业务失败退出码传播。隔离夹具验证没有运行真实 Flutter / Xcode 构建、安装、依赖清理或模拟器操作；真实工程的签名、网络和工具版本仍需按运行日志确认。
 

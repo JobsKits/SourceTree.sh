@@ -1,0 +1,41 @@
+# 【MacOS】RunFlutterProject
+
+![Jobs出品，必属精品](https://picsum.photos/1500/400)
+
+<!-- jobs-toc:start -->
+<!-- jobs-toc:source {"v":2,"token":"[toc]"} -->
+<details>
+<summary>📚 目录（点击展开 / 收起）</summary>
+
+- [🔥 前言](#%E5%89%8D%E8%A8%80)
+- [一、调用与依赖](#jobs-toc-heading-2)
+- [二、输出与失败](#jobs-toc-heading-3)
+
+</details>
+<!-- jobs-toc:end -->
+
+---
+
+## 🔥 <span id="前言">前言</span>
+
+终端 Flutter 项目运行器；明确项目、准备环境和设备、建立独立 launchd 会话并查看日志。--worker 为受控后台协议，不重复读取终端确认。
+
+## <span id="jobs-toc-heading-2" data-jobs-toc="v2">一、调用与依赖 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+
+在本包目录执行，完整保留上级功能目录及源码：
+
+```shell
+/bin/zsh "./【MacOS】RunFlutterProject.zsh" --project "<Flutter 项目目录>"
+```
+
+使用目标平台已有的解释器和本文件声明的工具；无关工作目录不改变资源基准。源码、日志、取消和真实系统状态分别核对；不以语法通过代替真实安装、设备或菜单验收。
+
+## <span id="jobs-toc-heading-3" data-jobs-toc="v2">二、输出与失败 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+
+机器数据和日志展示分开；保留原错误与取消退出码，失败不得继续下游。终端模式保留自述确认，后台和模块调用不增加阻塞。
+
+[返回上级说明](../README.md)。
+
+用户目录安装Homebrew前先复用健康Git（含自定义来源）；系统Git只是占位器时先查实际CLT工具，缺失才打开一次Apple原生安装窗口并持续复检。许可与密码由本人处理；显式开发目录损坏、只读、非交互或取消时停止，不改全局xcode-select，也不在准备成功前写Homebrew目标。该公共函数的12项隔离场景含10项真实PTY，函数体一致性与每份源码语法分别核对，不代表真实安装已执行。
+
+<a id="🔚" href="#前言" style="font-size:17px; color:green; font-weight:bold;">我是有底线的➤点我回到首页</a>

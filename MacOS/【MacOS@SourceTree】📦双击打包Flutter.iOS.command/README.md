@@ -57,9 +57,9 @@ flutter build ipa --release
 
 ## <span id="jobs-toc-heading-5" data-jobs-toc="v2">四、风险与失败处理 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-会解析依赖并调用 Xcode 构建与签名。不会绕过签名、自动安装开发工具或更改全局环境。具体导出要求见 [Flutter 官方 iOS 发布说明](https://docs.flutter.dev/deployment/ios)。
+会解析依赖并调用 Xcode 构建与签名。完整Xcode缺失时只打开一次Apple官方安装页面，已有但许可／组件未就绪时只打开一次对应应用并持续复检；不以CLT替代完整Xcode，不改全局xcode-select。实际Podfile才需要CocoaPods，健康pod直接复用，缺失时仅准备用户Ruby／Gem，不使用sudo或改系统Ruby。签名授权仍由本人完成。具体导出要求见 [Flutter 官方 iOS 发布说明](https://docs.flutter.dev/deployment/ios)。
 
-Sourcetree 不发起输入等待；无法安全确定目标或缺少必要条件时直接报错。外部命令失败返回非零状态，后续业务停止。脚本及外部输出在受限输出窗口使用纯文本。
+健康SDK与工具直接复用；明确流程所需组件缺失或损坏时在终端内准备并复检，SourceTree动作本身不等待输入，必要准备转交独立Terminal并停止原进程。取消及失败保留原退出码，不继续工程业务。外部命令失败返回非零状态，后续业务停止。脚本及外部输出在受限输出窗口使用纯文本。
 
 ## <span id="jobs-toc-heading-6" data-jobs-toc="v2">五、日志与产物 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
@@ -90,7 +90,7 @@ flowchart TD
 
 [**Homebrew**](https://brew.sh/) 安装路径由用户选择：已有可运行安装时复用；确实需要安装时先强提示，只有精确输入大写 `YES` 才选择系统标准目录，其它输入或直接回车选择当前用户的 `.local/homebrew`。`YES` 只表示选择路径，权限与密码由官方安装器实际处理；有管理员权限也可以选用户目录。选定路径失败立即停止，不自动切换；`Ctrl+C` / 输入结束取消整个任务。
 
-Sourcetree 动作不能交互时，缺少 Homebrew 会停止并提示先在终端完成安装路径选择；已有 Homebrew 时保留原有运行方式。
+Sourcetree 缺少必要SDK或安装工具时转交独立Terminal，保留目标及原参数；只有该终端处理安装路径和后续确认。健康环境维持原动作模式。
 
 **终端配色保护：** 独立运行时，在支持完整保存与恢复配色的交互终端中临时使用黑底白字及统一强调色；正常结束、失败或可捕获中断后恢复进入前的配色，不修改终端全局偏好或 Shell 启动配置。不支持完整保护、无交互终端、`NO_COLOR`、既有纯文本模式和 Sourcetree 场景不切换配色，并沿用纯文本输出约定。强制终止（如 `kill -9`）无法由脚本自身保证恢复，请使用运行时显示的独立恢复入口。
 

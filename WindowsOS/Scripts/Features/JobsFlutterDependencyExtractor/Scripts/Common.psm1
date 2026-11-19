@@ -129,7 +129,7 @@ function Invoke-JobsProcess {
         throw 'native-only只接受本提取器已验证的PE原生dart.exe。'
     }
     if (-not $ExtractorNativeDartOnly -and [IO.Path]::GetFileName($FilePath) -match '^(flutter|dart|fvm)(\.(bat|cmd|exe))?$') {
-        . (Join-Path $PSScriptRoot 'SdkDownloadOutput.ps1')
+        . (Join-Path $PSScriptRoot 'SdkDownloadOutput.ps1/SdkDownloadOutput.ps1')
         Import-JobsSdkDownloadRoute
         $directory = if ($WorkingDirectory) { $WorkingDirectory } else { (Get-Location).ProviderPath }
         return Invoke-JobsSdkRoutedCommand $FilePath $Arguments $directory $TimeoutSeconds

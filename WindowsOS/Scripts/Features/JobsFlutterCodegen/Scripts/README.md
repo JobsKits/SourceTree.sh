@@ -30,7 +30,7 @@
 
 ## <span id="jobs-toc-heading-3" data-jobs-toc="v2">二、输入、输出与影响 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-调用使用明确的目标工程路径，先检查工程身份与已有项目 SDK；FVM 锁定但 SDK 不全时停止，不换全局工具。具体输入、默认、可选动作与产物见 [Windows 功能总览](../../../../README.md) 与各 Run.ps1 包说明。模块供调度导入，不作为双击入口，不从另一台电脑的绝对路径加载。
+调用使用明确的目标工程路径，先检查工程身份与已有项目 SDK；FVM 锁定但 SDK 不全时停止，不换全局工具。具体输入、默认、可选动作与产物见 [Windows 功能总览](../../../../README.md) 与各独立 PowerShell 脚本包说明。模块供调度导入，不作为双击入口，不从另一台电脑的绝对路径加载。
 
 ## <span id="jobs-toc-heading-4" data-jobs-toc="v2">三、运行和验证 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 

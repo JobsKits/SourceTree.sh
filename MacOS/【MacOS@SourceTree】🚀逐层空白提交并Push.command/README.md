@@ -244,7 +244,7 @@ Sourcetree 动作现在只负责打开 Terminal.app；实际 Git 流程在独立
 远端别名回归使用真实脚本函数和临时 bare 仓库，覆盖 `Github` / `码云`、旧名称、任意别名、候选歧义、无 URL 残留配置及映射冲突。传输仅允许本地 `file` 协议，不访问或推送业务仓库；日志位置在运行结束时打印。在本脚本目录执行：
 
 ```shell
-/bin/zsh '../Tests/LayeredPushRemoteAliases.Tests.zsh'
+/bin/zsh '../Tests/【MacOS】LayeredPushRemoteAliases.Tests.zsh/【MacOS】LayeredPushRemoteAliases.Tests.zsh'
 ```
 
 退出码验证覆盖源码在运行中被覆盖、正常完成、Git hook 拒绝和无效路径。父仓及两个子模块的隔离验证覆盖中断后续跑、从头执行、已完成仓库的文件 / 分支 / HEAD / 配置变化、损坏状态及旧日志迁移，并核对被跳过仓库没有重复 fetch / push、最终父仓 gitlink 和各远端提交一致。代理逻辑通过隔离优先级验证，并对故障仓库进行只读 `ls-remote` 验证；未执行该业务仓库的提交或推送。

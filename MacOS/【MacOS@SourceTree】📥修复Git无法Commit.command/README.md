@@ -13,31 +13,32 @@
   - [1.2、C02：为什么不能直接删除 index.lock](#jobs-toc-heading-4)
   - [1.3、C04 与 C05：脚本怎样保护子模块真实修改](#jobs-toc-heading-5)
   - [1.4、C06：旧路径精确修复的范围](#jobs-toc-heading-6)
+    - [1.4.1、先 add 成功，再 rm 报 without -r](#add-then-rm)
   - [1.5、C08：目录过滤器与 Node 入口](#filter-repair)
-- [二、先分清“无法暂存”与“无法创建提交”](#jobs-toc-heading-8)
-  - [2.1、Commit 界面背后有两段流程](#jobs-toc-heading-9)
-  - [2.2、错误分流表](#jobs-toc-heading-10)
-  - [2.3、运行脚本前的只读诊断](#jobs-toc-heading-11)
-  - [2.4、身份、Hook 与签名的诊断边界](#jobs-toc-heading-12)
-  - [2.5、脚本明确不处理的 Commit 故障](#jobs-toc-heading-13)
-- [三、逐项试验并解锁的执行流程](#jobs-toc-heading-14)
+- [二、先分清“无法暂存”与“无法创建提交”](#jobs-toc-heading-9)
+  - [2.1、Commit 界面背后有两段流程](#jobs-toc-heading-10)
+  - [2.2、错误分流表](#jobs-toc-heading-11)
+  - [2.3、运行脚本前的只读诊断](#jobs-toc-heading-12)
+  - [2.4、身份、Hook 与签名的诊断边界](#jobs-toc-heading-13)
+  - [2.5、脚本明确不处理的 Commit 故障](#jobs-toc-heading-14)
+- [三、逐项试验并解锁的执行流程](#jobs-toc-heading-15)
 - [四、运行方式](#run-modes)
-  - [4.1、Sourcetree 自定义动作](#jobs-toc-heading-16)
-  - [4.2、终端独立运行](#jobs-toc-heading-17)
-  - [4.3、参数与修复范围](#jobs-toc-heading-18)
-- [五、执行后核对与手工回退边界](#jobs-toc-heading-19)
-  - [5.1、精确路径修复的索引备份与恢复](#jobs-toc-heading-20)
-- [六、安全边界](#jobs-toc-heading-21)
-- [七、日志文件](#jobs-toc-heading-22)
-- [八、常见问题](#jobs-toc-heading-23)
-  - [8.1、脚本会直接 Commit 吗？](#jobs-toc-heading-24)
-  - [8.2、为什么不是发现一个错误就直接执行所有修复？](#jobs-toc-heading-25)
-  - [8.3、文件与同名目录互换会怎样处理？](#jobs-toc-heading-26)
-  - [8.4、为什么 C07 通过后 Sourcetree 仍可能 Commit 失败？](#jobs-toc-heading-27)
-  - [8.5、为什么还要刷新 Sourcetree？](#jobs-toc-heading-28)
-  - [8.6、为什么运行后新目录中的文件仍未暂存？](#jobs-toc-heading-29)
-  - [8.7、显示“保留已有暂存内容的旧路径”怎么办？](#jobs-toc-heading-30)
-  - [8.8、验证范围](#jobs-toc-heading-31)
+  - [4.1、Sourcetree 自定义动作](#jobs-toc-heading-17)
+  - [4.2、终端独立运行](#jobs-toc-heading-18)
+  - [4.3、参数与修复范围](#jobs-toc-heading-19)
+- [五、执行后核对与手工回退边界](#jobs-toc-heading-20)
+  - [5.1、精确路径修复的索引备份与恢复](#jobs-toc-heading-21)
+- [六、安全边界](#jobs-toc-heading-22)
+- [七、日志文件](#jobs-toc-heading-23)
+- [八、常见问题](#jobs-toc-heading-24)
+  - [8.1、脚本会直接 Commit 吗？](#jobs-toc-heading-25)
+  - [8.2、为什么不是发现一个错误就直接执行所有修复？](#jobs-toc-heading-26)
+  - [8.3、文件与同名目录互换会怎样处理？](#jobs-toc-heading-27)
+  - [8.4、为什么 C07 通过后 Sourcetree 仍可能 Commit 失败？](#jobs-toc-heading-28)
+  - [8.5、为什么还要刷新 Sourcetree？](#jobs-toc-heading-29)
+  - [8.6、为什么运行后新目录中的文件仍未暂存？](#jobs-toc-heading-30)
+  - [8.7、显示“保留已有暂存内容的旧路径”怎么办？](#jobs-toc-heading-31)
+  - [8.8、验证范围](#jobs-toc-heading-32)
 
 </details>
 <!-- jobs-toc:end -->
@@ -46,9 +47,9 @@
 
 ## <span id="jobs-toc-heading-1" data-jobs-toc="v2">🔥 <font id=前言>前言</font></span><!-- jobs-toc:heading-end -->
 
-> 这是一个挂载到 [**Sourcetree**](https://www.sourcetreeapp.com/) 的 [**Git**](https://git-scm.com/) Commit 修复动作。脚本把“无法 Commit”拆成 8 个独立场景；默认识别文件变同名目录的情况，只处理旧文件删除，保护已有暂存选择；其它情况沿用完整修复流程。任一安全前提不成立就停止。
+> 这是一个挂载到 [**Sourcetree**](https://www.sourcetreeapp.com/) 的 [**Git**](https://git-scm.com/) Commit 修复动作。脚本把“无法 Commit”拆成 8 个独立场景；默认识别文件变同名目录，以及缺失旧文件已暂存删除／迁移的情况，只处理旧文件删除，保护已有暂存选择；其它情况沿用完整修复流程。任一安全前提不成立就停止。
 
-- 默认自动判断：`HEAD` 中的普通文件已变成同名真实目录时，进入旧路径精确修复；即使旧条目已经暂存删除，也能识别这种迁移。
+- 默认自动判断：`HEAD` 中的普通文件已变成同名真实目录，或缺失旧文件已从索引中删除时，进入旧路径精确修复；已暂存的普通文档迁移同样可识别。已完成的删除不会重复暂存，保留原索引。
 - `--repair-paths`：显式限定为旧路径精确修复，不加入新目录内容，也不暂存无关修改；适合 `pathspec ... did not match any files` 或 `not removing ... recursively without -r`。
 - `--repair-filters`：仅检查并修复本仓目录过滤器；使用实际可用的稳定 Node 入口，保留索引、正文、子模块与全局配置。
 - `--stage-all`：显式使用完整修复流程，C06 会暂存当前仓库全部未忽略改动，包括原来未暂存的修改；运行前需确认该范围。参数与示例见[运行方式](#run-modes)。
@@ -104,6 +105,21 @@
 - 写回前核对其它条目的 mode、OID、stage 与 flags 不变，候选路径仍符合条件，真实索引仍与原备份逐字节一致；异常或并发变化时停止并保留真实索引。
 - 新目录中的脚本、README、未跟踪文件及忽略文件都不会被自动加入索引。运行后由用户刷新 Sourcetree，再选择本次真正要提交的文件。
 - 旧路径已经不在索引时，不重复执行 `git rm`；日志会提示“没有可安全移除的旧索引条目”。此时应刷新 GUI 缓存，不能把提示理解成又完成了一次路径删除。
+- 对“先 `git add -f` 新子项，再 `git rm -q -f` 旧路径”的顺序，按 `HEAD` 旧普通文件、精确旧索引条目缺失、同名真实目录及该目录下真实已暂存的新增子项联合确认，逐路径显示“已暂存文件变目录”和子项数；`git add -N` 的意图添加不计作内容已暂存。没有其它安全删除候选时保留真实索引字节；其它缺失旧普通文件仍按本节条件处理。新目录已有部分暂存或未跟踪子项时，不重新 `add`。
+
+#### 1.4.1、<span id="add-then-rm">先 add 成功，再 rm 报 without -r</span> <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
+
+例如把单文件 `【MacOS】⏬双击浏览器跳转第三方软件官网下载.command` 包成同名目录，内部增加 `README.md` 和同名脚本。Sourcetree 先添加两个子文件，再删除旧父路径，会出现以下状态：
+
+| 位置 | 实际内容 | 处理 |
+| --- | --- | --- |
+| `HEAD` | 同名旧脚本仍为普通文件 | 表示提交前的版本 |
+| 索引 | 旧文件精确条目已移除，两个新子项已暂存 | 替换已被前序 `add` 记录；核对 `D + A + A`，也可能显示重命名 |
+| 工作区 | 同名目录及内部文件 | 保留；未暂存内容仍由用户选择 |
+| 后续 `git rm` | 旧父路径现在匹配新子树 | 缺少 `-r` 因而拒绝；不代表旧文件仍待删除 |
+
+- 在仓库的 Sourcetree 自定义操作中运行“📥修复Git无法Commit”，核对确定诊断；刷新文件状态并取消旧选择，再检查已暂存内容。脚本不能改写 Sourcetree 原生暂存队列，旧窗口重复同一组命令仍可能报同样错误。
+- 不补 `git rm -r -f`；它可能删除新目录。也不补 `git rm --cached -r`：虽然保留磁盘文件，却会移除新子项的暂存选择。`:(literal)` 只禁止通配解释，目录路径仍能匹配子树，不能用它代替精确索引条目核对。[git-rm 官方说明](https://git-scm.com/docs/git-rm)列明目录匹配与递归移除语义。
 
 ### 1.5、<span id="filter-repair">C08：目录过滤器与 Node 入口</span> <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
@@ -114,9 +130,9 @@
 - 探针使用隔离临时对象目录，不替换业务索引或正文；通过 `--repair-filters` 可只执行 C01、C02 和 C08。显式 `--repair-paths` 保持原来的仅索引路径修复范围，不改过滤器。
 - 健康配置重复运行只验证，不重写。此动作只处理目标仓，不递归改写子仓；每个需要修复的子仓独立运行。
 
-## <span id="jobs-toc-heading-8" data-jobs-toc="v2">二、先分清“无法暂存”与“无法创建提交” <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+## <span id="jobs-toc-heading-9" data-jobs-toc="v2">二、先分清“无法暂存”与“无法创建提交” <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-### <span id="jobs-toc-heading-9" data-jobs-toc="v2">2.1、Commit 界面背后有两段流程 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-10" data-jobs-toc="v2">2.1、Commit 界面背后有两段流程 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 Git 的提交链路不是一个动作：
 
@@ -127,7 +143,7 @@ Sourcetree 的 Commit 界面会编排这两段流程，所以界面显示“Comm
 
 完整流程中的 `git add -A -- .` 会在当前仓库范围内统一记录新增、修改和删除；`--` 用于结束选项解析，避免以 `-` 开头的路径被当作命令参数。精确路径模式只暂存符合条件的旧文件删除，保留其它未暂存修改与新文件。
 
-### <span id="jobs-toc-heading-10" data-jobs-toc="v2">2.2、错误分流表 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-11" data-jobs-toc="v2">2.2、错误分流表 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 | 报错或现象 | 根因方向 | 本脚本是否处理 | 先做什么 |
 | --- | --- | --- | --- |
@@ -143,7 +159,7 @@ Sourcetree 的 Commit 界面会编排这两段流程，所以界面显示“Comm
 | `pathspec ... did not match any files` | 旧路径已不在索引，GUI 仍使用先前的删除列表 | 识别并提示，C06–C07 | 使用 `--repair-paths` 检查真实索引，刷新 Sourcetree；无候选时不伪造删除，也不全量暂存。 |
 | `No space left on device` / 只读错误 | 磁盘、配额、挂载或权限问题 | 否 | 先处理系统资源，不要反复重建索引。 |
 
-### <span id="jobs-toc-heading-11" data-jobs-toc="v2">2.3、运行脚本前的只读诊断 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-12" data-jobs-toc="v2">2.3、运行脚本前的只读诊断 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 先在目标仓库运行：
 
@@ -176,7 +192,7 @@ pgrep -alf git
 
 发现锁仍被持有，或存在可能写索引的 Git 进程时，应完成或退出对应操作后再试；不要杀进程，也不要手工删除锁。
 
-### <span id="jobs-toc-heading-12" data-jobs-toc="v2">2.4、身份、Hook 与签名的诊断边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-13" data-jobs-toc="v2">2.4、身份、Hook 与签名的诊断边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 ```shell
 git config --show-origin --get-regexp '^user\.(name|email)$'
@@ -191,7 +207,7 @@ find "$(git rev-parse --git-path hooks)" -maxdepth 1 -type f -perm -u+x -print
 - `git commit --no-verify` 可能绕过团队质量门禁，只能用于已获允许的定位过程，不是长期修复方案。
 - `git commit --no-gpg-sign` 可以辅助判断签名链路，但不能用于绕过仓库的强制签名规则。
 
-### <span id="jobs-toc-heading-13" data-jobs-toc="v2">2.5、脚本明确不处理的 Commit 故障 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-14" data-jobs-toc="v2">2.5、脚本明确不处理的 Commit 故障 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 以下问题会保留原始错误并返回失败：
 
@@ -204,7 +220,7 @@ find "$(git rev-parse --git-path hooks)" -maxdepth 1 -type f -perm -u+x -print
 
 C07 在精确路径模式中只证明索引可读且无遗留锁，在完整流程中还验证全量暂存 dry-run；不承诺上述提交对象创建阶段的问题已经消失。
 
-## <span id="jobs-toc-heading-14" data-jobs-toc="v2">三、逐项试验并解锁的执行流程 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+## <span id="jobs-toc-heading-15" data-jobs-toc="v2">三、逐项试验并解锁的执行流程 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 ```mermaid
 flowchart TD
@@ -234,16 +250,16 @@ flowchart TD
 
 ## 四、<span id="run-modes">运行方式</span> <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 
-### <span id="jobs-toc-heading-16" data-jobs-toc="v2">4.1、Sourcetree 自定义动作 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-17" data-jobs-toc="v2">4.1、Sourcetree 自定义动作 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 1、在 Sourcetree 中选中目标仓库。
 2、运行自定义动作 `📥修复Git无法Commit`。
 3、脚本接收 `$REPO` 后无交互连续执行；场景编号、原因、处理结果和停止点会显示在输出窗口。
 4、回到“文件状态”刷新，逐项核对暂存变更后再提交。
 
-现有动作只需传 `$REPO`，脚本会自动判断范围。输出“旧路径精确修复”时保留新目录内容和其它暂存选择；输出“原完整修复流程”时会暂存当前仓库全部改动。
+现有动作只需传 `$REPO`，脚本会自动判断范围。输出“旧路径精确修复”时保留新目录内容和其它暂存选择；输出“原完整修复流程”时会暂存当前仓库全部改动。普通文档已暂存迁移时，旧删除路径无需再次暂存；刷新文件状态、取消旧选择后直接核对已暂存内容。
 
-### <span id="jobs-toc-heading-17" data-jobs-toc="v2">4.2、终端独立运行 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-18" data-jobs-toc="v2">4.2、终端独立运行 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 在当前 README 所在目录执行：
 
@@ -253,13 +269,13 @@ flowchart TD
 
 终端模式会先打印内置自述；按回车确认后才初始化日志并修改 Git 状态，按 `Ctrl+C` 可取消。传入仓库参数或使用相对脚本路径均不绕过确认；非 Sourcetree 且无法交互或读取确认失败时直接停止。
 
-### <span id="jobs-toc-heading-18" data-jobs-toc="v2">4.3、参数与修复范围 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-19" data-jobs-toc="v2">4.3、参数与修复范围 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 > 在当前 README 所在目录执行，仓库路径为第一参数，可选模式为第二参数；未传仓库路径时采用启动工作目录。
 
 | 第二参数 | 范围 | 副作用 |
 | --- | --- | --- |
-| 不传 | 默认自动判断；`HEAD` 普通文件变真实目录时采用精确模式，否则完整流程 | 以日志显示的所选范围为准；完整流程会全量暂存 |
+| 不传 | 默认自动判断；`HEAD` 普通文件变真实目录，或缺失旧文件已暂存删除／迁移时采用精确模式，否则完整流程 | 以日志显示的所选范围为准；完整流程会全量暂存 |
 | `--repair-paths` | 仅旧普通文件路径修复，C08 跳过 | 精确暂存删除，保存索引备份；不修改工作区、配置或 `HEAD` |
 | `--repair-filters` | C01、C02、C08；不修绑定、不归档锁 | 备份后仅修本仓过滤器与安装记录；保留正文和索引 |
 | `--stage-all` | C01–C08 完整流程 | 可能恢复元数据、归档残留锁、初始化子模块，并全量暂存 |
@@ -284,7 +300,7 @@ flowchart TD
 
 未知第二参数或多余参数会报错停止，不执行后续业务。不要省略第一参数而把模式选项写在仓库路径的位置。
 
-## <span id="jobs-toc-heading-19" data-jobs-toc="v2">五、执行后核对与手工回退边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+## <span id="jobs-toc-heading-20" data-jobs-toc="v2">五、执行后核对与手工回退边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 脚本成功后，先刷新 Sourcetree，再核对：
 
@@ -313,7 +329,7 @@ find "$git_dir" -maxdepth 1 -type f -name 'index.jobs-paths-before.*' -print
 
 如果暂存范围不正确，应在确认具体文件后使用 Sourcetree 或精确的 `git restore --staged -- <path>` 取消对应暂存，再重新核对。不要为了“回退脚本”执行 `git reset --hard` 或 `git clean`，它们会影响真实工作区内容。
 
-### <span id="jobs-toc-heading-20" data-jobs-toc="v2">5.1、精确路径修复的索引备份与恢复 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-21" data-jobs-toc="v2">5.1、精确路径修复的索引备份与恢复 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 日志中的 `index.jobs-paths-before.<随机后缀>` 是本轮修复前的完整索引备份，不是工作区文件备份。linked worktree 的真实 Git 元数据目录可能位于仓库目录外，以日志与 `git rev-parse --path-format=absolute --git-path index` 的结果为准。
 
@@ -331,7 +347,7 @@ git diff --cached --name-status
 - 需要恢复整份索引时，必须先停下该仓库的索引写操作，确认修复后没有新的暂存、提交或分支操作，并在独占锁保护下恢复；存在后续变化时应按具体条目合并，不能直接用旧备份覆盖当前索引。脚本不提供自动恢复入口，也不会自动覆盖后来新增的暂存选择。
 - 备份保留在 Git 元数据目录中，不进入本次提交；确认暂存结果前保留备份。
 
-## <span id="jobs-toc-heading-21" data-jobs-toc="v2">六、安全边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+## <span id="jobs-toc-heading-22" data-jobs-toc="v2">六、安全边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 - 精确路径模式仅暂存符合条件的旧普通文件删除，不加入新目录子项、不修改工作区内容、Git 配置或 `HEAD`，不初始化子模块；保留其它暂存选择。
 - 完整流程会修改当前仓库的 Git 索引，把所有未忽略的工作区变化放入暂存区；原来未暂存的修改也会进入索引。
@@ -342,7 +358,7 @@ git diff --cached --name-status
 - 脚本不清理、不暂存、不提交已有子模块内部的真实文件修改。
 - 执行后必须在 Sourcetree 检查暂存区；“流程解锁”不等于“所有暂存内容都应该提交”。
 
-## <span id="jobs-toc-heading-22" data-jobs-toc="v2">七、日志文件 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+## <span id="jobs-toc-heading-23" data-jobs-toc="v2">七、日志文件 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 确认前只展示内置自述，不清空或写入旧日志；确认后才初始化本次日志。业务正文和路径按原文记录，反斜杠不会被解释为转义。
 
@@ -354,41 +370,41 @@ git diff --cached --name-status
 
 日志包含所选修复范围、C01–C07 的执行或跳过顺序、命中原因、备份位置、子模块状态、暂存摘要和最终复验结果。精确路径模式会逐项输出“仅暂存旧文件删除”；无候选时明确提示刷新 Sourcetree。日志可能包含本机路径和远端信息，分享前应脱敏。
 
-## <span id="jobs-toc-heading-23" data-jobs-toc="v2">八、常见问题 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+## <span id="jobs-toc-heading-24" data-jobs-toc="v2">八、常见问题 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-### <span id="jobs-toc-heading-24" data-jobs-toc="v2">8.1、脚本会直接 Commit 吗？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-25" data-jobs-toc="v2">8.1、脚本会直接 Commit 吗？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 不会。脚本只处理 Commit 之前的工作树、Git 元数据和暂存区；提交仍由用户在 Sourcetree 中确认后执行。
 
-### <span id="jobs-toc-heading-25" data-jobs-toc="v2">8.2、为什么不是发现一个错误就直接执行所有修复？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-26" data-jobs-toc="v2">8.2、为什么不是发现一个错误就直接执行所有修复？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 不同场景影响的对象不同：`index.lock` 属于并发保护，`.gitmodules` 属于配置与索引顺序，`core.worktree` 属于工作树绑定，gitlink 属于父仓对子模块提交的记录。逐项处理可以在第一个不安全点停止，并明确知道改了什么。
 
-### <span id="jobs-toc-heading-26" data-jobs-toc="v2">8.3、文件与同名目录互换会怎样处理？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-27" data-jobs-toc="v2">8.3、文件与同名目录互换会怎样处理？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 Sourcetree 可能针对旧文件、新目录和目录内容分别执行 `add` / `rm`，中间状态会触发递归删除或路径类型冲突。默认会识别 `HEAD` 普通文件变真实目录，只从索引中移除可安全处理的旧文件条目；新目录内容与无关修改保持原暂存状态。显式 `--stage-all` 则使用完整索引刷新，让 Git 统一记录最终工作树的新增、修改和删除；它会改变当前仓库全部未忽略文件的暂存范围。
 
-### <span id="jobs-toc-heading-27" data-jobs-toc="v2">8.4、为什么 C07 通过后 Sourcetree 仍可能 Commit 失败？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-28" data-jobs-toc="v2">8.4、为什么 C07 通过后 Sourcetree 仍可能 Commit 失败？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 C07 只验证所选模式下的索引入口：精确模式检查索引可读且无遗留锁，完整流程另有全量暂存 dry-run。Commit 后半段还可能被 Hook、作者身份、签名、磁盘或权限问题阻断；这些错误不由本脚本自动绕过。两种模式都会在发现未解决冲突时停止。
 
-### <span id="jobs-toc-heading-28" data-jobs-toc="v2">8.5、为什么还要刷新 Sourcetree？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-29" data-jobs-toc="v2">8.5、为什么还要刷新 Sourcetree？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 Git 索引由外部脚本修改后，Sourcetree 界面可能仍缓存旧文件列表。刷新后才能看到真实暂存状态。
 
-`pathspec ... did not match any files` 尤其可能说明旧路径已经暂存删除，而 Sourcetree 仍重复调用旧的 `git rm` 列表。运行精确模式无候选时，刷新“文件状态”，取消旧选择并按当前列表重新选择；仍显示旧列表时重新打开仓库。不要为消除这条 GUI 旧路径错误执行 `git rm -r -f`，它可能删除现在已经存在的新目录内容。
+`pathspec ... did not match any files` 尤其可能说明旧路径已经暂存删除，而 Sourcetree 仍重复调用旧的 `git rm` 列表。例如根目录报告已经迁到 `项目相关报告/` 并显示为暂存重命名，Git 已经记录了旧路径删除；无需重新创建旧文件，也无需再次暂存旧删除路径。默认入口现在会识别这种情况并保留索引；刷新“文件状态”、取消旧选择后，直接核对并提交已暂存内容；仍显示旧列表时关闭并重新打开该仓库。脚本不改写 Sourcetree 的待执行队列，不能承诺旧窗口自动刷新。不要执行 `git rm -r -f`，它可能删除现在已经存在的新目录内容。
 
-### <span id="jobs-toc-heading-29" data-jobs-toc="v2">8.6、为什么运行后新目录中的文件仍未暂存？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-30" data-jobs-toc="v2">8.6、为什么运行后新目录中的文件仍未暂存？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 这是精确路径模式的范围：只解除旧普通文件条目的暂存阻塞，不替用户决定新目录或无关文件的提交内容。刷新 Sourcetree 后选择需要的脚本与 README；已有部分暂存内容保留。只有确认需要全量暂存时才使用 `--stage-all`。
 
-### <span id="jobs-toc-heading-30" data-jobs-toc="v2">8.7、显示“保留已有暂存内容的旧路径”怎么办？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-31" data-jobs-toc="v2">8.7、显示“保留已有暂存内容的旧路径”怎么办？ <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
 该路径已经有相对 `HEAD` 的暂存变化，自动删除会覆盖用户的暂存意图，因此脚本保留它。先在 Sourcetree 比较该路径的已暂存与未暂存内容，再决定是否调整；不要把再次运行修复当成强制覆盖入口。
 
-### <span id="jobs-toc-heading-31" data-jobs-toc="v2">8.8、验证范围 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
+### <span id="jobs-toc-heading-32" data-jobs-toc="v2">8.8、验证范围 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-脚本使用 `zsh -n` 检查语法；完整流程的既有隔离验证覆盖 C01–C07、父仓暂存而脏子模块内容保留、绝对 gitdir 解析、linked worktree 共用 `modules/` 路径、已存在 alias gitdir 的保护、活锁保留、残留锁归档，以及非交互确认门禁。[路径修复回归](../Tests/CommitPathRepair.Tests.zsh/README.md)的 18 项完整入口测试通过，覆盖文件变目录、普通删除、旧路径与重复执行、部分暂存与 flags、特殊路径、符号链接、索引备份、冲突和锁停止、linked worktree 及 `--stage-all` 兼容。隔离索引验证不代替真实 Sourcetree 提交；Hook、签名与生产远端初始化仍按实际错误另行处理。
+脚本使用 `zsh -n` 检查语法；完整流程的既有隔离验证覆盖 C01–C07、父仓暂存而脏子模块内容保留、绝对 gitdir 解析、linked worktree 共用 `modules/` 路径、已存在 alias gitdir 的保护、活锁保留、残留锁归档，以及非交互确认门禁。[路径修复回归](../Tests/【MacOS】CommitPathRepair.Tests.zsh/README.md)覆盖文件变目录、普通删除、旧路径与重复执行、部分暂存与 flags、特殊路径、符号链接、索引备份、冲突和锁停止、linked worktree、默认已暂存文档迁移／删除及 `--stage-all` 兼容；另以真实中文脚本名复现先 `add -f` 两子项再 `rm` 失败，验证默认／显式精确入口的索引字节、部分暂存和工作区保全，并拒绝把相似前缀目录误认作已暂存替换。隔离索引验证不代替真实 Sourcetree 提交；Hook、签名与生产远端初始化仍按实际错误另行处理。
 
 **终端配色保护：** 独立运行时，在支持完整保存与恢复配色的交互终端中临时使用黑底白字及统一强调色；正常结束、失败或可捕获中断后恢复进入前的配色，不修改终端全局偏好或 Shell 启动配置。不支持完整保护、无交互终端、`NO_COLOR`、既有纯文本模式和 Sourcetree 场景不切换配色，并沿用纯文本输出约定。强制终止（如 `kill -9`）无法由脚本自身保证恢复，请使用运行时显示的独立恢复入口。
 

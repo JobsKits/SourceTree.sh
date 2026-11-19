@@ -34,7 +34,7 @@
 | 选择 tag | 当前仓库标签 | 按 `refs/tags/<名称>` 解析后执行 hard 回退 |
 | 选择 reflog | 最近 200 条本地 reflog 记录 | 按所选记录的完整提交号执行 hard 回退 |
 
-- 终端选择依赖健康的 [**fzf**](https://github.com/junegunn/fzf)，缺失时停止并提示；不安装或升级软件，不写 Shell 配置。
+- 终端选择依赖健康的 [**fzf**](https://github.com/junegunn/fzf)，健康版本直接复用；缺失或损坏时，在已确认的终端流程内准备必要依赖并复检，不写 Shell 配置。
 - 普通仓库、嵌套独立仓库、使用 `.git` 指针文件的子模块和链接工作树均按传入路径定位最近的 Git 工作树。回退只作用于选定工作树，不向上回退父仓，不递归扫描或重置子模块内部文件。子仓 HEAD 改变可能使父仓显示 gitlink 漂移，父仓索引不会被自动暂存或提交。
 - 确认后仅在脚本及子进程中隔离继承的 `GIT_DIR`、`GIT_WORK_TREE`、`GIT_COMMON_DIR`、`GIT_INDEX_FILE`、对象目录、前缀和 namespace 变量，避免它们覆盖传入仓库；不会修改启动它的终端或 Sourcetree 配置。
 - 冲突、未完成的 merge / rebase / cherry-pick / revert / bisect、sequencer 或 `index.lock` 会阻止回退。
@@ -85,7 +85,7 @@ Sourcetree 动作传入 `$REPO`，打印内置自述后检查当前分支的真�
 
 9、hard 在展示目标前记录索引与已跟踪改动摘要，输入 `YES` 后重新比较；确认期间出现变化就停止，避免覆盖后来编辑的内容。摘要禁用索引自动刷新，不暂存内容或写入对象库；这不是内容备份，不能替代用户自行留存重要文件。
 
-10、选择器仅对本次 fzf 调用清空 `FZF_DEFAULT_OPTS` 与 `FZF_DEFAULT_OPTS_FILE`，固定回车、返回与取消的输出契约，并确认返回项来自本次列表；用户全局 fzf 配置保持原样。
+10、选择器仅对本次 fzf 调用清空 `FZF_DEFAULT_OPTS` 与 `FZF_DEFAULT_OPTS_FILE` 与 `FZF_DEFAULT_COMMAND`，固定回车、返回与取消的输出契约，并确认返回项来自本次列表；用户全局 fzf 配置保持原样。
 
 ## <span id="jobs-toc-heading-5" data-jobs-toc="v2">四、执行流程 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
@@ -123,7 +123,7 @@ flowchart TD
 - `hard` 会覆盖工作区的已跟踪内容，也可能清除挡住目标已跟踪路径的未跟踪文件或目录。请先留存需要的内容；`YES` 只是执行门禁，不提供内容备份。
 - 每次日志独立保存为系统临时目录中的 `【MacOS@SourceTree】♻️双击Git（识别子Git） 提交回退.年月日-时分秒.进程号.log`，含仓库、目标提交、执行结果和失败信息。首屏会显示本次完整日志位置；Sourcetree 启动器与承接终端各有自己的日志，不互相覆盖。
 - Git 执行、输出过滤或日志写入失败时返回非零状态；Git 自身失败优先保留它的原始退出码，失败后不打印回退成功。
-- 本次远端别名回归入口见 [CommitReset.Tests.zsh](../Tests/CommitReset.Tests.zsh/README.md)，只在临时仓库执行真实 soft 回退；生产仓库只做引用与祖先关系的只读预检。
+- 本次远端别名回归入口见 [CommitReset.Tests.zsh](../Tests/【MacOS】CommitReset.Tests.zsh/README.md)，只在临时仓库执行真实 soft 回退；生产仓库只做引用与祖先关系的只读预检。
 - 自动化验证使用隔离临时仓库，覆盖自定义 upstream、双远端与显式引用、嵌套独立仓库、子模块、链接工作树、索引 / 工作区及父仓保护、环境隔离、交互期间变化、无净变化、历史分叉与确认取消；脚本另做 `zsh -n`。菜单承接已在现有 Sourcetree 中核验，实际目标仍由运行者在终端明确选择。
 
 **终端配色保护：** 独立运行时，在支持完整保存与恢复配色的交互终端中临时使用黑底白字及统一强调色；正常结束、失败或可捕获中断后恢复进入前的配色，不修改终端全局偏好或 Shell 启动配置。不支持完整保护、无交互终端、`NO_COLOR`、既有纯文本模式和 Sourcetree 场景不切换配色，并沿用纯文本输出约定。强制终止（如 `kill -9`）无法由脚本自身保证恢复，请使用运行时显示的独立恢复入口。

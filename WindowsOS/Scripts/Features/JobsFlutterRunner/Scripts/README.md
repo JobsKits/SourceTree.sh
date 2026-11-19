@@ -17,7 +17,7 @@
 
 ## 🔥 <span id="前言">前言</span>
 
-本目录随包复用 [**Flutter**](https://flutter.dev/) 运行器的设备选择和 Android 初始化，无需安装系统右键扩展。用户从[运行动作](../../../../【WindowsOS@SourceTree】🐦打开：运行Flutter项目/README.md)进入，内部调用由[公共调度](../../../README.md)负责。
+本目录随包复用 [**Flutter**](https://flutter.dev/) 运行器的设备选择和 Android 初始化，无需安装系统右键扩展。用户从[运行动作](../../../../【WindowsOS@SourceTree】🐦打开：运行Flutter项目.ps1/README.md)进入，内部调用由[公共调度](../../../README.md)负责。
 
 ## 一、<span id="runtime">文件与边界</span> <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 

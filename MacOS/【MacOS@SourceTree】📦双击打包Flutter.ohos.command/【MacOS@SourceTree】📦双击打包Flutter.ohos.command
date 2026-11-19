@@ -5,6 +5,999 @@
 # - 影响范围：解析工程依赖、执行 Hvigor 构建并写入构建目录；签名沿用工程配置。
 # - 运行提示：先打印内置自述；终端回车确认，Sourcetree 无交互执行；缺少工具链时停止。
 
+# JOBS_ST_OHOS_REQUIRED_BEGIN
+# 仅激活当前进程并复检Homebrew，新安装才维护原shellenv块。
+jobs_brew_activate() {
+  local brew_env
+  brew_env="$("$JOBS_HOMEBREW_BIN" shellenv)" || return 1
+  eval "$brew_env" || return 1
+  typeset -g JOBS_HOMEBREW_PREFIX="$("$JOBS_HOMEBREW_BIN" --prefix)"
+  export PATH="$JOBS_HOMEBREW_PREFIX/bin:$JOBS_HOMEBREW_PREFIX/sbin:$PATH"
+  rehash
+  HOMEBREW_NO_AUTO_UPDATE=1 "$JOBS_HOMEBREW_BIN" config >/dev/null || { jobs_brew_note "Homebrew 命令层复检失败，停止后续业务。"; return 1; }
+  if [[ "${1:-}" == installed ]]; then
+    if [[ "${JOBS_HOMEBREW_INSTALL_MODE:-}" == user && -z "${HOMEBREW_CASK_OPTS:-}" ]]; then
+      export HOMEBREW_CASK_OPTS="--appdir=$HOME/Applications"
+    fi
+    # 只刷新本次进程，不向用户 Shell 启动文件写入持久配置。
+    :
+  fi
+}
+# 验证既有Homebrew命令真实可执行，不按目录可写性猜安装状态。
+jobs_brew_candidate_ok() {
+  local candidate="$1" prefix
+  [[ -n "$candidate" && -x "$candidate" ]] || return 1
+  HOMEBREW_NO_AUTO_UPDATE=1 "$candidate" --version >/dev/null 2>&1 || return 1
+  prefix="$("$candidate" --prefix 2>/dev/null)" || return 1
+  [[ "$prefix" == /* && -d "$prefix" ]]
+}
+# 只在缺失时选择系统或用户路径，保留本人原生权限与许可处理。
+jobs_brew_choose_installation() {
+  local answer="" system_prefix="$(jobs_brew_system_prefix)"
+  if [[ ! -t 0 || ! -t 2 || "${IS_SOURCETREE_RUNTIME:-0}" == 1 ]]; then
+    jobs_brew_note "缺少 Homebrew，需要人工选择安装路径；请在可交互终端重新运行，未执行安装。"
+    return 1
+  fi
+  print -u2 -r -- "⚠ Homebrew 尚未就绪，必须先选择安装路径："
+  print -u2 -r -- "1、输入精确大写 YES：选择系统标准目录 $system_prefix（Apple Silicon：/opt/homebrew；Intel：/usr/local）。"
+  print -u2 -r -- "   这表示你准备向系统目录安装；官方安装器可能随后要求管理员密码，并自行验证权限。"
+  jobs_prompt_output print -u2 -r -- "2、其它输入或直接回车：选择用户目录 ${JOBS_HOMEBREW_INSTALL_PREFIX:-$HOME/.local/homebrew}，不使用 sudo；有管理员权限也可选此路径。"
+  print -u2 -r -- "本步骤只选择路径，不收集或验证密码；选定路径失败就停止，不自动切换。按 Ctrl+C 取消整个任务。"
+  print -u2 -n -r -- "$(jobs_prompt_render "➤ 安装路径选择：")"
+  if ! IFS= read -r answer; then
+    jobs_brew_note "输入已取消或结束，停止安装。"
+    return 1
+  fi
+  if [[ "$answer" == YES ]]; then
+    typeset -g JOBS_HOMEBREW_INSTALL_MODE=system
+  else
+    typeset -g JOBS_HOMEBREW_INSTALL_MODE=user
+  fi
+}
+# 持续获取声明的官方文件，取消和确定阻塞立即停止。
+jobs_brew_download_file() {
+  local destination="$1" description="$2" download_url attempt download_result=1 http_code
+  local retry_round=0 retry_delay=1 round_has_retryable=0
+  local -a request_headers download_urls
+  local -A blocked_urls
+  shift 2
+  download_urls=("$@")
+  (( ${#download_urls} > 0 )) || { jobs_brew_note '没有已声明的官方获取地址。'; return 2; }
+  while true; do
+    (( retry_round += 1 ))
+    round_has_retryable=0
+    for download_url in "${download_urls[@]}"; do
+      [[ -z "${blocked_urls[$download_url]:-}" ]] || continue
+      request_headers=()
+      if [[ "$download_url" == https://api.github.com/repos/Homebrew/install/contents/install.sh\?ref=HEAD ]]; then
+        request_headers=(-H 'Accept: application/vnd.github.raw+json')
+      fi
+      for attempt in 1 2 3; do
+        jobs_brew_note "下载${description}（第 $retry_round 轮，第 $attempt 次）：$download_url"
+        download_result=0
+        http_code="$(curl -q -fsSL --proto '=https' --proto-redir '=https' \
+          --connect-timeout 10 --max-time 30 "${request_headers[@]}" \
+          --write-out '%{http_code}' "$download_url" -o "$destination" \
+          2> >(tee -a "${LOG_FILE:-/dev/null}" >&2))" || download_result=$?
+        if (( download_result == 0 )); then
+          return 0
+        fi
+        rm -f -- "$destination" || return 1
+        jobs_brew_note "${description}下载失败：curl 退出码 $download_result，HTTP ${http_code:-未知}。"
+        case "$download_result" in
+          129|130|143) return "$download_result" ;;
+          5|6|7|18|28|35|52|55|56) ;;
+          22)
+            if [[ "$http_code" != 408 && "$http_code" != 429 && "$http_code" != 5[0-9][0-9] ]]; then
+              blocked_urls[$download_url]=1
+              break
+            fi
+            ;;
+          *) blocked_urls[$download_url]=1; break ;;
+        esac
+        if (( attempt < 3 )); then
+          jobs_brew_note '临时连接失败，1 秒后重试同一官方地址；Ctrl+C 可取消。'
+          sleep 1 || return $?
+        fi
+      done
+      if [[ -z "${blocked_urls[$download_url]:-}" ]]; then
+        round_has_retryable=1
+      fi
+      jobs_brew_note '当前地址尚未取得可用响应；如有下一已声明官方地址，将按原顺序尝试，安装目录不变。'
+    done
+    if (( round_has_retryable == 0 )); then
+      jobs_brew_note "获取${description}遇到确定错误，停止；未执行安装。日志：${LOG_FILE:-终端输出}。"
+      return "$download_result"
+    fi
+    jobs_brew_note "官方来源暂时不可用，${retry_delay} 秒后继续下一轮；不设总次数或总时长上限，按 Ctrl+C 取消。"
+    sleep "$retry_delay" || return $?
+    if (( retry_delay < 30 )); then
+      retry_delay=$(( retry_delay * 2 ))
+      (( retry_delay <= 30 )) || retry_delay=30
+    fi
+  done
+}
+# 在私有暂存中获取固定官方版本，三路纯日志状态分别检查。
+jobs_brew_fetch_release() {
+  setopt LOCAL_OPTIONS LOCAL_TRAPS NO_ERREXIT
+  local git_bin="$1" release_tag="$2" stage="$3" target="${3}/brew"
+  local attempt_log="${3}/git-fetch-attempt.log" history="${3}/git-fetch-history.log"
+  local attempt=1 result=0 delay=1 task_pid="" interrupted=0 failure=""
+  [[ "$release_tag" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' && "$stage" == /* &&
+     "${stage:t}" == .jobs-homebrew.* && -d "$stage" && ! -L "$stage" && ! -e "$target" && ! -L "$target" ]] || {
+    jobs_brew_note 'Homebrew 获取版本或私有暂存路径无效，未执行 Git 获取。'
+    return 2
+  }
+  "$git_bin" init --quiet "$target" || { result=$?; jobs_brew_note "Homebrew 暂存仓初始化失败（$result）：$target"; return "$result"; }
+  "$git_bin" -C "$target" remote add origin https://github.com/Homebrew/brew.git || return $?
+  trap 'interrupted=130; [[ -z "$task_pid" ]] || jobs_brew_stop_acquisition_tree "$task_pid"' INT
+  trap 'interrupted=143; [[ -z "$task_pid" ]] || jobs_brew_stop_acquisition_tree "$task_pid"' TERM
+  trap 'interrupted=129; [[ -z "$task_pid" ]] || jobs_brew_stop_acquisition_tree "$task_pid"' HUP
+  while true; do
+    jobs_brew_note "获取 Homebrew 官方版本 $release_tag（第 $attempt 次）：https://github.com/Homebrew/brew.git → $target；失败自动重试，Ctrl+C 取消。"
+    : > "$attempt_log" || return 1
+    print -r -- "━━ Homebrew $release_tag：第 $attempt 次 ━━" >> "$history" || return 1
+    (
+      local -a acquisition_statuses
+      LC_ALL=C GIT_TERMINAL_PROMPT=0 "$git_bin" -C "$target" -c color.ui=false \
+        -c http.lowSpeedLimit=1 -c http.lowSpeedTime=60 fetch --progress --depth 1 origin "refs/tags/$release_tag" 2>&1 |
+        jobs_prompt_tee "$history" | jobs_prompt_tee "${LOG_FILE:-/dev/null}" | jobs_prompt_tee "$attempt_log" >&2
+      acquisition_statuses=("${pipestatus[@]}")
+      (( acquisition_statuses[2] == 0 && acquisition_statuses[3] == 0 && acquisition_statuses[4] == 0 )) || exit 74
+      exit "${acquisition_statuses[1]}"
+    ) <&0 &
+    task_pid=$!
+    result=0
+    wait "$task_pid" || result=$?
+    task_pid=""
+    (( interrupted == 0 )) || return "$interrupted"
+    jobs_brew_note "Homebrew $release_tag 获取第 $attempt 次退出码：$result。"
+    if (( result == 0 )); then
+      "$git_bin" -C "$target" checkout --quiet --detach FETCH_HEAD || return $?
+      return 0
+    fi
+    case "$result" in
+      74) jobs_brew_note "Homebrew 获取日志写入失败，停止；请检查磁盘空间、路径和权限。"; return 74 ;;
+      129|130|131|137|143|126|127) return "$result" ;;
+    esac
+    failure="$(/usr/bin/tail -c 65536 "$attempt_log")" || return 1
+    if print -r -- "$failure" | /usr/bin/grep -Eqi \
+      'Permission denied|Operation not permitted|No space left on device|Read-only file system|File exists|already exists and is not an empty directory|Bad CPU type|Exec format error|unknown option|unrecognized option|invalid argument|couldn.t find remote ref|Remote branch .* not found|repository .* not found|Authentication failed|could not read Username|terminal prompts disabled|HTTP[^[:cntrl:]]*(401|403|404)|returned error: (401|403|404)|SSL certificate problem|certificate verify failed|unable to get local issuer certificate'; then
+      jobs_brew_note "Homebrew 官方版本获取遇到本地、认证、证书或版本确定错误（$result），已停止；请核对日志：${LOG_FILE:-$history}。"
+      return "$result"
+    fi
+    jobs_brew_note "Homebrew 网络获取尚未完成，保留本轮已收对象，${delay} 秒后继续；不设总次数或总时长上限，Ctrl+C 取消。"
+    sleep "$delay" &
+    task_pid=$!
+    wait "$task_pid" || { result=$?; (( interrupted == 0 )) || return "$interrupted"; return "$result"; }
+    task_pid=""
+    (( interrupted == 0 )) || return "$interrupted"
+    (( attempt += 1 ))
+    (( delay >= 30 )) || delay=$(( delay * 2 ))
+    (( delay <= 30 )) || delay=30
+  done
+}
+# 只读发现可复用的健康Homebrew，不重装既有缓存。
+jobs_brew_find() {
+  local candidate
+  local -a candidates
+  candidates=("${JOBS_HOMEBREW_BIN:-}" "$(command -v brew 2>/dev/null)" /opt/homebrew/bin/brew /usr/local/bin/brew
+    "${JOBS_HOMEBREW_INSTALL_PREFIX:-$HOME/.local/homebrew}/bin/brew" "$HOME/.homebrew/bin/brew")
+  for candidate in "${candidates[@]}"; do
+    if jobs_brew_candidate_ok "$candidate"; then
+      print -r -- "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+# 复用健康Homebrew，必要安装失败立即停止业务。
+jobs_brew_install_or_exit() {
+  local installed=""
+  if [[ "${DRY_RUN:-0}" == 1 ]]; then
+    jobs_brew_note "演练：Homebrew 系统路径 $(jobs_brew_system_prefix)；用户路径 ${JOBS_HOMEBREW_INSTALL_PREFIX:-$HOME/.local/homebrew}；未询问或执行安装。"
+    return 0
+  fi
+  if ! JOBS_HOMEBREW_BIN="$(jobs_brew_find)"; then
+    jobs_required_clt_tool git >&2 || return $?
+    jobs_brew_choose_installation || exit 1
+    case "$JOBS_HOMEBREW_INSTALL_MODE" in
+      system) jobs_brew_install_system || jobs_brew_stop_failed_install $? ;;
+      user) jobs_brew_install_user || jobs_brew_stop_failed_install $? ;;
+      *) jobs_brew_note "安装路径选择无效，停止。"; exit 1 ;;
+    esac
+    installed=installed
+  fi
+  jobs_brew_activate "$installed" || exit 1
+}
+# 校验官方安装器后仅执行一次，下载失败不切换安装位置。
+jobs_brew_install_system() {
+  local installer system_prefix="$(jobs_brew_system_prefix)" installer_result=0
+  command -v curl >/dev/null 2>&1 || { jobs_brew_note "缺少 curl，无法获取官方安装器。"; return 1; }
+  installer="$(mktemp "${TMPDIR:-/tmp}/jobs-homebrew-install.XXXXXX")" || return 1
+  if jobs_brew_download_file "$installer" 'Homebrew 官方安装器' \
+      https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh \
+      'https://api.github.com/repos/Homebrew/install/contents/install.sh?ref=HEAD'; then
+    if [[ ! -s "$installer" || "$(head -n 1 "$installer")" != '#!/bin/bash' ]] || ! /bin/bash -n "$installer"; then
+      rm -f -- "$installer"
+      jobs_brew_note '官方安装器响应为空或内容校验失败（可能是 HTML / JSON 错误页）；未执行安装。'
+      return 1
+    fi
+  else
+    installer_result=$?
+    rm -f -- "$installer"
+    jobs_brew_note "系统目录安装器下载失败（curl 退出码 $installer_result）；尚未执行安装，不自动切换安装路径。"
+    return "$installer_result"
+  fi
+  /bin/bash "$installer" || installer_result=$?
+  rm -- "$installer"
+  if (( installer_result != 0 )); then
+    jobs_brew_note "系统目录安装失败（退出码 $installer_result）；停止，不自动切换安装路径。"
+    return "$installer_result"
+  fi
+  typeset -g JOBS_HOMEBREW_BIN="$system_prefix/bin/brew"
+  jobs_brew_candidate_ok "$JOBS_HOMEBREW_BIN" || { jobs_brew_note "官方安装器结束后未找到健康 Homebrew：$JOBS_HOMEBREW_BIN"; return 1; }
+}
+# 将校验过的固定官方版本发布到用户目录，不覆盖非空目标。
+jobs_brew_install_user() {
+  local prefix="${JOBS_HOMEBREW_INSTALL_PREFIX:-$HOME/.local/homebrew}" stage release_tag git_bin release_result=0
+  [[ "$prefix" == /* && "$prefix" != / && "$prefix" != *[[:space:]:]* ]] || {
+    jobs_brew_note "Homebrew 用户前缀须为不含空白或冒号的绝对目录：$prefix"
+    return 1
+  }
+  if [[ -L "$prefix" || ( -e "$prefix" && ! -d "$prefix" ) || ( -d "$prefix" && -n "$(ls -A "$prefix" 2>/dev/null)" ) ]]; then
+    jobs_brew_note "用户安装目标非空或不是普通目录，不覆盖：$prefix"
+    return 1
+  fi
+  local git_health=1 locate_result=0 git_candidate="" selected_developer="" clt_result=0 clt_diagnostic=""
+  git_bin="$(command -v git 2>/dev/null)"
+  # /usr/bin/git 可能只是CLT占位器；先查询真实工具，避免健康检查自行弹出安装窗口。
+  if [[ "$git_bin" == /usr/bin/git || -z "$git_bin" ]]; then
+    git_bin="$(/usr/bin/xcrun --find git 2>/dev/null)" || locate_result=$?
+    case "$locate_result" in 129|130|131|137|143) return "$locate_result" ;; esac
+  fi
+  if [[ -n "$git_bin" && -x "$git_bin" ]]; then
+    git_health=0;"$git_bin" --version >/dev/null 2>&1 || git_health=$?
+    case "$git_health" in 129|130|131|137|143) return "$git_health" ;; esac
+  fi
+  if (( git_health != 0 )); then
+    [[ -z "${DEVELOPER_DIR:-}" ]] || { jobs_brew_note '显式DEVELOPER_DIR没有健康Git，保留用户开发目录，未自动改全局选择。'; return 1; }
+    locate_result=0
+    selected_developer="$(/usr/bin/xcode-select -p 2>/dev/null)" || locate_result=$?
+    case "$locate_result" in 129|130|131|137|143) return "$locate_result" ;; esac
+    if [[ -n "$selected_developer" && -d "$selected_developer" ]]; then
+      jobs_brew_note "既有开发目录未提供健康Git：$selected_developer；可能是许可、版本或本地文件阻塞，未反复安装或改全局xcode-select。"
+      return 1
+    fi
+    if [[ "${DRY_RUN:-0}" == 1 || "${CHECK_ONLY:-0}" == 1 || ! -t 0 || ! -t 2 || "${IS_SOURCETREE_RUNTIME:-0}" == 1 ]] ||
+       env | LC_ALL=C /usr/bin/grep -qiE '^(SOURCETREE|SOURCE_TREE)'; then
+      jobs_brew_note '用户目录Homebrew需要健康Git；当前为只读或非交互入口，未打开CLT安装窗口或写安装目标。'
+      return 1
+    fi
+    jobs_brew_note '当前已选用户目录Homebrew安装需要Apple Command Line Tools的Git；只打开一次原生安装窗口，许可由本人处理，当前流程持续复检，Ctrl+C停止。' || return $?
+    clt_diagnostic="$(/usr/bin/xcode-select --install 2>&1)" || clt_result=$?
+    jobs_brew_note "$clt_diagnostic" || return $?
+    if (( clt_result != 0 )) && [[ "$clt_diagnostic" != *'already being installed'* && "$clt_diagnostic" != *'正在安装'* ]]; then return "$clt_result"; fi
+    while true; do
+      locate_result=0
+      git_candidate="$(/usr/bin/xcrun --find git 2>/dev/null)" || locate_result=$?
+      case "$locate_result" in 129|130|131|137|143) return "$locate_result" ;; esac
+      if [[ -n "$git_candidate" && -x "$git_candidate" ]]; then
+        git_health=0;"$git_candidate" --version >/dev/null 2>&1 || git_health=$?
+        case "$git_health" in 129|130|131|137|143) return "$git_health" ;; esac
+        if (( git_health == 0 )); then git_bin="$git_candidate";break;fi
+      fi
+      jobs_brew_note '等待Apple CLT提供健康Git；不会重复打开窗口，Ctrl+C停止。' || return $?
+      /bin/sleep 3 || return $?
+    done
+  fi
+  command -v curl >/dev/null 2>&1 || { jobs_brew_note "缺少 curl，无法获取官方稳定版本。"; return 1; }
+  export HOMEBREW_NO_SUDO=1
+  mkdir -p "${prefix:h}" || return 1
+  stage="$(mktemp -d "${prefix:h}/.jobs-homebrew.XXXXXX")" || return 1
+  if jobs_brew_download_file "$stage/release.json" 'Homebrew 官方稳定版本' \
+      https://api.github.com/repos/Homebrew/brew/releases/latest; then
+    release_result=0
+  else
+    release_result=$?
+    rm -r -- "$stage"
+    jobs_brew_note "获取官方稳定版本已停止（退出码 $release_result），未执行安装。"
+    return "$release_result"
+  fi
+  release_tag="$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([0-9][0-9.]*\)".*/\1/p' "$stage/release.json" | head -n 1)"
+  if [[ ! "$release_tag" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]]; then
+    rm -r -- "$stage"
+    jobs_brew_note '官方版本响应无有效 tag，停止；不重试版本解析或执行安装。'
+    return 1
+  fi
+  if jobs_brew_fetch_release "$git_bin" "$release_tag" "$stage"; then
+    release_result=0
+  else
+    release_result=$?
+    rm -r -- "$stage"
+    jobs_brew_note "Homebrew 官方版本获取已停止（退出码 $release_result），未执行安装。"
+    return "$release_result"
+  fi
+  if ! "$git_bin" -C "$stage/brew" checkout -b stable ||
+     ! "$git_bin" -C "$stage/brew" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*' ||
+     ! mkdir -p "$stage/brew/Cellar" "$stage/brew/Caskroom" "$stage/brew/etc" "$stage/brew/var"; then
+    rm -r -- "$stage"
+    jobs_brew_note "Homebrew 用户目录初始化失败，停止安装。"
+    return 1
+  fi
+  # 空目录也只在下载成功后移除，避免提前改动用户的目标目录。
+  if [[ -d "$prefix" ]] && ! rmdir -- "$prefix"; then
+    rm -r -- "$stage"
+    return 1
+  fi
+  if ! mv "$stage/brew" "$prefix"; then
+    rm -r -- "$stage"
+    return 1
+  fi
+  rm -r -- "$stage"
+  typeset -g JOBS_HOMEBREW_BIN="$prefix/bin/brew"
+  jobs_brew_candidate_ok "$JOBS_HOMEBREW_BIN" || { jobs_brew_note "用户目录安装后复检失败：$prefix"; return 1; }
+}
+# 将Homebrew准备诊断写入当前人类展示与纯文本日志。
+jobs_brew_note() {
+  jobs_prompt_output print -u2 -r -- "ℹ $*"
+  if [[ "${_JOBS_ENV_LOG_READY:-0}" == 1 && -n "${LOG_FILE:-}" ]]; then
+    print -r -- "ℹ $*" >> "$LOG_FILE"
+  fi
+  return 0
+}
+# 只清理本次获取创建的子进程树，不影响无关SDK写者。
+jobs_brew_stop_acquisition_tree() {
+  local root="$1" child=""
+  for child in $(/usr/bin/pgrep -P "$root" 2>/dev/null); do
+    jobs_brew_stop_acquisition_tree "$child"
+  done
+  /bin/kill -TERM "$root" 2>/dev/null || true
+  /bin/kill -KILL "$root" 2>/dev/null || true
+}
+# 用户取消保留信号码，其它失败停止外层业务。
+jobs_brew_stop_failed_install() {
+  case "$1" in
+    129|130|143) exit "$1" ;;
+    *) exit 1 ;;
+  esac
+}
+# 计算当前系统架构对应的原生Homebrew目录。
+jobs_brew_system_prefix() {
+  case "$(/usr/bin/uname -m)" in
+    arm64) print -r -- /opt/homebrew ;;
+    *) print -r -- /usr/local ;;
+  esac
+}
+# 将精确FVM安装与SDK探针接回既有持续获取和来源保护协议。
+jobs_flutter_sdk_command() {
+  local executable="$1" action="${2:-}" version="${3:-}"
+  if [[ "${executable:t}" == fvm && "$action" == install && -n "$version" ]]; then
+    shift 3
+    jobs_flutter_fvm_install '工程精确FVM SDK' "$LOG_FILE" "$executable" "$version" "$@"
+    return $?
+  fi
+  if [[ "${executable:t}" == fvm ]]; then
+    jobs_flutter_fvm_runtime 'FVM管理器必要Dart运行时' "$LOG_FILE" "$executable" || return $?
+    "$@"
+    return $?
+  fi
+  jobs_flutter_sdk_retry '工程SDK必要准备' "$LOG_FILE" '' '' "$@"
+}
+# 仅为工具健康探针设单次上限，下载获取使用持续重试。
+jobs_fzf_bounded_probe() {
+  local child=0 watchdog=0 result=0
+  "$@" <&0 &
+  child=$!
+  ( /bin/sleep 10; jobs_brew_stop_acquisition_tree "$child" ) >/dev/null 2>&1 &
+  watchdog=$!
+  wait "$child" || result=$?
+  jobs_brew_stop_acquisition_tree "$watchdog"
+  wait "$watchdog" 2>/dev/null || :
+  return "$result"
+}
+# 把依赖诊断送往当前业务日志，避免混入机器结果。
+jobs_fzf_note() {
+  if (( ${+functions[jobs_prompt_output]} )); then
+    jobs_prompt_output print -u2 -r -- "$*"
+  else
+    print -u2 -r -- "$*"
+  fi
+  if [[ -n "${LOG_FILE:-}" ]]; then print -r -- "$*" >> "$LOG_FILE"; fi
+}
+# 只重试必需获取的临时故障，取消及权限、版本、镜像确定错误停止。
+jobs_required_acquire() {
+  local label="$1" result=0 log_result=0 attempt=0 delay=1 offset=0 output_log="${LOG_FILE:-${TMPDIR:-/tmp}/JobsRequired.$$.log}"
+  shift
+  local -a results
+  while true; do
+    (( attempt += 1 ))
+    jobs_fzf_note "➤ $label｜第 $attempt 次；网络失败持续重试，Ctrl+C 停止。日志：$output_log" || return $?
+    : >> "$output_log" || return $?
+    offset="$(/usr/bin/wc -c < "$output_log")" || return $?
+    "$@" 2>&1 | jobs_required_sanitize | jobs_prompt_tee "$output_log" >&2
+    results=("${pipestatus[@]}")
+    result=${results[1]}
+    for log_result in "${results[@]:1}"; do (( log_result == 0 )) || { (( result == 0 )) && return "$log_result"; return "$result"; }; done
+    (( result != 0 )) || return 0
+    case "$result" in 126|127|129|130|137|143) return "$result" ;; esac
+    if /usr/bin/tail -c +$((offset + 1)) "$output_log" | /usr/bin/tail -c 65536 | /usr/bin/grep -Eqi 'Permission denied|Operation not permitted|No space left|No available formula|No formulae found|File exists|unsupported|not supported|requires Ruby version|Failed to build gem native extension|Gem::Ext::BuildError|cannot create executables|missing.*(header|compiler)|Xcode license|incompatible|Invalid option|Unknown command|No matching|Could not find.*gem|license.*(not accepted|rejected)|authentication failed|certificate.*(invalid|verify failed)|HTTP[^[:cntrl:]]*(401|403|404)|returned error: (401|403|404)|SSL certificate problem|certificate verify failed'; then
+      jobs_fzf_note "✖ $label 遇到确定的权限、版本、许可或本地阻塞，退出码 $result；未继续业务。" || return $?
+      return "$result"
+    fi
+    jobs_fzf_note "⚠ $label 未完成，$delay 秒后重试；Ctrl+C 结束。" || return $?
+    /bin/sleep "$delay" || return $?
+    (( delay >= 30 )) || delay=$(( delay * 2 > 30 ? 30 : delay * 2 ))
+  done
+}
+# 只获取当前职责需要的精确包，结束后由调用方复检。
+jobs_required_brew_package() {
+  local package="$1" kind="${2:-formula}" action=install
+  jobs_brew_install_or_exit >&2 || return $?
+  local brew="${JOBS_HOMEBREW_BIN:-}" prefix=""
+  [[ -n "$brew" ]] || return 1
+  prefix="$("$brew" --prefix)" || return $?
+  export PATH="$prefix/bin:$prefix/sbin:$PATH"; rehash
+  local list_result=0
+  HOMEBREW_NO_AUTO_UPDATE=1 "$brew" list "--$kind" --versions "$package" >/dev/null 2>&1 || list_result=$?
+  case "$list_result" in 129|130|131|137|143) return "$list_result" ;; esac
+  (( list_result != 0 )) || action=reinstall
+  jobs_fzf_note "来源：Homebrew 官方目录｜包：$package｜目标：$prefix；仅本次进程刷新 PATH，不执行全局升级。" || return $?
+  jobs_required_acquire "必需工具 $package" /usr/bin/env HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 "$brew" "$action" "--$kind" "$package"
+}
+# 复用所选Apple开发工具；缺失才单次原生准备，取消不触发安装。
+jobs_required_clt_tool() {
+  local tool="$1" candidate="" selected="" install_result=0 diagnostic="" probe_result=0 locate_result=0
+  locate_result=0
+  candidate="$(/usr/bin/xcrun --find "$tool" 2>/dev/null)" || locate_result=$?
+  case "$locate_result" in 129|130|131|137|143) return "$locate_result" ;; esac
+  if [[ -n "$candidate" && -x "$candidate" ]]; then
+    probe_result=0;jobs_fzf_bounded_probe "$candidate" --version </dev/null >/dev/null 2>&1 || probe_result=$?
+    case "$probe_result" in 129|130|131|137|143) return "$probe_result" ;; esac
+    (( probe_result != 0 )) || { JOBS_REQUIRED_COMMAND="$candidate"; return 0; }
+  fi
+  if [[ -n "${DEVELOPER_DIR:-}" ]]; then jobs_fzf_note "✖ 显式 DEVELOPER_DIR 的 $tool 不可用；保留用户选择，未自动改变开发目录。"; return 1; fi
+  locate_result=0;selected="$(/usr/bin/xcode-select -p 2>/dev/null)" || locate_result=$?
+  case "$locate_result" in 129|130|131|137|143) return "$locate_result" ;; esac
+  if [[ -n "$selected" && -d "$selected" ]]; then
+    jobs_fzf_note "✖ 已选择的开发目录 $selected 未提供健康 $tool；可能是版本、许可或本地文件阻塞。保留原选择，未反复安装或改全局 xcode-select。"
+    return 1
+  fi
+  if [[ "${DRY_RUN:-0}" == 1 || "${CHECK_ONLY:-0}" == 1 ]]; then print -u2 -r -- "✖ $tool 尚未就绪；只读模式未打开安装界面。"; return 1; fi
+  if [[ ! -t 0 || ! -t 2 || "${IS_SOURCETREE_RUNTIME:-0}" == 1 ]]; then print -u2 -r -- "✖ 缺少 $tool，当前不是可交互终端，未打开或等待原生安装界面。"; return 1; fi
+  jobs_fzf_note "➤ $tool 需要 Apple Command Line Tools；将打开一次原生安装窗口，许可由本人确认，安装后当前流程自动复检，Ctrl+C 停止。" || return $?
+  diagnostic="$(/usr/bin/xcode-select --install 2>&1)" || install_result=$?
+  jobs_fzf_note "$diagnostic" || return $?
+  if (( install_result != 0 )) && [[ "$diagnostic" != *'already being installed'* && "$diagnostic" != *'正在安装'* ]]; then return "$install_result"; fi
+  while true; do
+    locate_result=0
+    candidate="$(/usr/bin/xcrun --find "$tool" 2>/dev/null)" || locate_result=$?
+    case "$locate_result" in 129|130|131|137|143) return "$locate_result" ;; esac
+    if [[ -n "$candidate" && -x "$candidate" ]]; then
+      probe_result=0;jobs_fzf_bounded_probe "$candidate" --version </dev/null >/dev/null 2>&1 || probe_result=$?
+      case "$probe_result" in 129|130|131|137|143) return "$probe_result" ;; esac
+      (( probe_result != 0 )) || { JOBS_REQUIRED_COMMAND="$candidate"; rehash; return 0; }
+    fi
+    jobs_fzf_note "等待 Apple 原生安装完成并提供 $tool；不会重复打开窗口，Ctrl+C 取消。" || return $?
+    /bin/sleep 3 || return $?
+  done
+}
+# 复用真实健康命令，必要获取后复检并保留原生取消码。
+jobs_required_command() {
+  local tool="$1" package="$2" kind="$3" candidate="" probe_result=0; shift 3
+  candidate="$(command -v -- "$tool" 2>/dev/null)"
+  if [[ -n "$candidate" && -x "$candidate" ]]; then
+    if [[ "$tool" == fvm ]]; then jobs_flutter_fvm_runtime "FVM所需Dart运行时" "$LOG_FILE" "$candidate" || return $?; fi
+    jobs_fzf_bounded_probe "$candidate" "$@" </dev/null >/dev/null 2>&1 || probe_result=$?
+    (( probe_result != 0 )) || { JOBS_REQUIRED_COMMAND="${candidate:A}"; return 0; }
+    case "$probe_result" in 129|130|131|137|143) return "$probe_result" ;; esac
+  fi
+  jobs_required_brew_package "$package" "$kind" || return $?
+  if [[ "$kind" == formula ]]; then
+    local package_prefix="$("$JOBS_HOMEBREW_BIN" --prefix "$package")" || return $?
+    [[ "$package_prefix" != /* || ! -d "$package_prefix/bin" ]] || export PATH="$package_prefix/bin:$PATH"
+  fi
+  rehash; candidate="$(command -v -- "$tool" 2>/dev/null)"; probe_result=0
+  if [[ -n "$candidate" && -x "$candidate" ]]; then
+    jobs_fzf_bounded_probe "$candidate" "$@" </dev/null >/dev/null 2>&1 || probe_result=$?
+    (( probe_result != 0 )) || { JOBS_REQUIRED_COMMAND="${candidate:A}"; return 0; }
+    case "$probe_result" in 129|130|131|137|143) return "$probe_result" ;; esac
+  fi
+  jobs_fzf_note "✖ $package 获取后 $tool 仍未通过当前进程健康检查，未继续业务。" || return $?
+  return 1
+}
+# 记录真实项目FVM声明指纹，发现并发变化就停止。
+jobs_required_fvm_fingerprint() {
+  local project="$1" file=""
+  for file in "$project/.fvmrc" "$project/.fvm/fvm_config.json"; do
+    if [[ -f "$file" ]]; then /usr/bin/shasum -a 256 "$file" || return $?;
+    elif [[ -e "$file" || -L "$file" ]]; then return 1;
+    else print -r -- 'ABSENT'; fi
+  done
+}
+# 读取项目FVM版本、来源与缓存；影子配置不写真实项目。
+jobs_required_fvm_json() {
+  /usr/bin/osascript -l JavaScript - "$@" <<'JOBS_FVM_REQUIRED_JSON'
+  ObjC.import('Foundation');
+  function read(file) {
+    var error=Ref();
+    var text=$.NSString.stringWithContentsOfFileEncodingError($(file), $.NSUTF8StringEncoding, error);
+    if(!text) throw Error('JSON 文件不可读：'+file);
+    return JSON.parse(ObjC.unwrap(text).replace(/^\uFEFF/,''));
+  }
+  function run(args) {
+    var mode=args.shift(), values=[], key, result='';
+    if(mode==='shadow') {
+      var target=args[0], legacy=args[1], config={};
+      if($.NSFileManager.defaultManager.fileExistsAtPath($(target))) config=read(target);
+      else if($.NSFileManager.defaultManager.fileExistsAtPath($(legacy))) config=read(legacy);
+      config.flutter=args[4]; config.cachePath=args[2]; config.flutterUrl=args[3];
+      if(!$(JSON.stringify(config,null,2)).writeToFileAtomicallyEncodingError($(target),true,$.NSUTF8StringEncoding,null)) throw Error('影子配置写入失败');
+      return 'shadow-ready';
+    }
+    if(mode==='binding' || mode==='bindingSource') {
+      args.forEach(function(file) {
+        if(!file || !$.NSFileManager.defaultManager.fileExistsAtPath($(file))) return;
+        var object=read(file), value=mode==='binding' ? (object.flutter || object.flutterSdkVersion) : (object.flutterUrl || object.flutter_url || object.flutterGitUrl);
+        if(value!==undefined && value!==null && String(value).length) values.push(String(value));
+      });
+      if(values.some(function(value){return value!==values[0];})) throw Error('两份 FVM 声明不一致，未猜测版本或来源');
+      return values.length ? values[0] : '';
+    }
+    if(mode==='machine') {
+      var text=ObjC.unwrap($.NSString.stringWithContentsOfFileEncodingError($(args[0]),$.NSUTF8StringEncoding,null)).replace(/^\uFEFF/,'');
+      for(var i=0;i<text.length;i++) { if(text[i]!=='{') continue;try{var data=JSON.parse(text.substring(i));if(data.frameworkVersion)return String(data.frameworkVersion);}catch(error){} }
+      throw Error('Flutter 实际版本响应无法验证');
+    }
+    var root=read(args[0]), context=root.context;
+    if(!context || typeof context!=='object') throw Error('FVM context API 不可验证');
+    if(mode==='cacheRoot') {
+      if(typeof context.cachePath==='string' && context.cachePath.length) return context.cachePath;
+      if(typeof context.versionsCachePath==='string' && /\/versions\/?$/.test(context.versionsCachePath)) return context.versionsCachePath.replace(/\/versions\/?$/,'');
+      throw Error('FVM API 没有可验证的缓存根目录，未猜测环境变量路径');
+    }
+    key=mode==='cache' ? 'versionsCachePath' : 'flutterUrl';
+    result=context[key];
+    if(typeof result!=='string' || !result.length || /[\r\n]/.test(result)) throw Error('FVM context 缺少有效 '+key);
+    return result;
+  }
+JOBS_FVM_REQUIRED_JSON
+}
+# 在影子工程准备明确版本和同源缓存，不修改真实绑定或回退PATH。
+jobs_required_fvm_project() {
+  local project="${1:A}" version="" declared_source="" source="" cache="" cache_root="" before="" after="" stage="" sdk="" actual="" git_bin="" fvm_bin="" config=""
+  JOBS_REQUIRED_FLUTTER=""
+  before="$(jobs_required_fvm_fingerprint "$project")" || return $?
+  version="$(jobs_required_fvm_json binding "$project/.fvmrc" "$project/.fvm/fvm_config.json")" || return $?
+  declared_source="$(jobs_required_fvm_json bindingSource "$project/.fvmrc" "$project/.fvm/fvm_config.json")" || return $?
+  (( ${+functions[jobs_flutter_sdk_command]} )) || { jobs_fzf_note '✖ 缺少随包 SDK 获取适配器定义，未开始准备。'; return 127; }
+  local bound_sdk="$project/.fvm/flutter_sdk"
+  if [[ -x "$bound_sdk/bin/flutter" && -e "$bound_sdk/bin/dart" ]]; then
+    jobs_required_clt_tool git || return $?
+    git_bin="$JOBS_REQUIRED_COMMAND"
+    stage="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/JobsFvmRequired.XXXXXXXX")" || return $?
+    {
+      jobs_flutter_sdk_command "$bound_sdk/bin/flutter" --version --machine > "$stage/sdk-machine.json" || return $?
+      actual="$(jobs_required_fvm_json machine "$stage/sdk-machine.json")" || return $?
+      if [[ "$version" =~ '^v?[0-9]+\.[0-9]+\.[0-9]+([+.-][A-Za-z0-9.-]+)?$' && "${actual#v}" != "${version#v}" ]]; then jobs_fzf_note '✖ 已绑定 SDK 的实际版本与工程明确版本不符，未安装替代 SDK 或改绑定。'; return 1; fi
+      if [[ -n "$declared_source" ]]; then
+        local bound_source="$("$git_bin" -C "$bound_sdk" config --get remote.origin.url)" || return $?
+        [[ "${${bound_source%/}%.git}" == "${${declared_source%/}%.git}" ]] || { jobs_fzf_note '✖ 已绑定 SDK 的实际来源与工程声明不符，未替换用户 SDK。'; return 1; }
+      fi
+      [[ "$(jobs_required_fvm_fingerprint "$project")" == "$before" ]] || { jobs_fzf_note '✖ SDK 体检期间真实声明发生变化，未继续业务。'; return 1; }
+      JOBS_REQUIRED_FLUTTER="${bound_sdk:A}/bin/flutter"
+      return 0
+    } always {
+      if [[ -n "$stage" && "${stage:t}" == JobsFvmRequired.* && -d "$stage" ]]; then /bin/rm -r -- "$stage"; fi
+    }
+  fi
+  if [[ ! "$version" =~ '^v?[0-9]+\.[0-9]+\.[0-9]+([+.-][A-Za-z0-9.-]+)?$' && "$version" != (stable|beta|main|master) ]]; then
+    jobs_fzf_note '✖ 缺失的 FVM SDK 没有可验证的明确版本/channel 声明；未猜版本、未获取其它 SDK 或改写绑定。'
+    return 1
+  fi
+  jobs_required_clt_tool git || return $?
+  git_bin="$JOBS_REQUIRED_COMMAND"
+  local existing_fvm="$(command -v fvm 2>/dev/null)"
+  if [[ -n "$existing_fvm" && -x "$existing_fvm" ]]; then
+    # Dart shim 的外部运行时也交给既有 SDK 选路，不让首次 --version 绕过持续获取。
+    jobs_flutter_sdk_command "$existing_fvm" --version >/dev/null || return $?
+  fi
+  jobs_required_command fvm fvm formula --version || return $?
+  fvm_bin="$JOBS_REQUIRED_COMMAND"
+  stage="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/JobsFvmRequired.XXXXXXXX")" || return $?
+  {
+    ( builtin cd "$project" && "$fvm_bin" api context --compress ) > "$stage/context-before.json" || return $?
+    cache="$(jobs_required_fvm_json cache "$stage/context-before.json")" || return $?
+    cache_root="$(jobs_required_fvm_json cacheRoot "$stage/context-before.json")" || return $?
+    source="$(jobs_required_fvm_json source "$stage/context-before.json")" || return $?
+    if [[ -n "${JOBS_OHOS_FVM_EXPECTED_SOURCE:-}" && "${${source%/}%.git}" != "${${JOBS_OHOS_FVM_EXPECTED_SOURCE%/}%.git}" ]]; then
+      jobs_fzf_note "✖ FVM实际来源与已明确鸿蒙fork不一致，未获取其它SDK或改绑定。"
+      return 2
+    fi
+    [[ "$cache" == /* && "$cache" != / && "$cache_root" == /* && "$cache_root" != / ]] || { jobs_fzf_note '✖ FVM 未提供绝对缓存目录，未执行安装。'; return 1; }
+    if [[ -n "$declared_source" && "${declared_source%/}" != "${source%/}" ]]; then jobs_fzf_note '✖ FVM 实际来源与工程声明不一致，未切换下载源或继续安装。'; return 1; fi
+    /bin/mkdir -p "$stage/project/.fvm" || return $?
+    print -r -- $'name: jobs_required_sdk\ndependencies:\n  flutter:\n    sdk: flutter' > "$stage/project/pubspec.yaml" || return $?
+    for config in .fvmrc .fvm/fvm_config.json; do
+      [[ ! -f "$project/$config" ]] || /bin/cp "$project/$config" "$stage/project/$config" || return $?
+    done
+    jobs_required_fvm_json shadow "$stage/project/.fvmrc" "$stage/project/.fvm/fvm_config.json" "$cache_root" "$source" "$version" > /dev/null || return $?
+    ( builtin cd "$stage/project" && FVM_CACHE_PATH="$cache_root" FVM_FLUTTER_URL="$source" "$fvm_bin" api context --compress ) > "$stage/context-shadow.json" || return $?
+    [[ "$(jobs_required_fvm_json cache "$stage/context-shadow.json")" == "$cache" && "$(jobs_required_fvm_json source "$stage/context-shadow.json")" == "$source" ]] || {
+      jobs_fzf_note '✖ 影子项目没有保留实际缓存目录或来源，未开始 SDK 下载。'; return 1
+    }
+    sdk="$cache/$version"
+    local needs_install=1 remote=""
+    if [[ -x "$sdk/bin/flutter" && -e "$sdk/bin/dart" ]]; then
+      remote="$("$git_bin" -C "$sdk" config --get remote.origin.url)" || return $?
+      [[ "${${remote%/}%.git}" == "${${source%/}%.git}" ]] || { jobs_fzf_note '✖ 现有同版本缓存来自其它 Git 来源；保留缓存，未覆盖或换源。'; return 1; }
+      needs_install=0
+    fi
+    jobs_fzf_note "➤ 准备工程声明 FVM SDK：$version；来源：$(print -r -- "$source" | jobs_required_sanitize)；缓存：$cache；真实项目配置不写入。" || return $?
+    if (( needs_install )); then
+      ( builtin cd "$stage/project" && FVM_CACHE_PATH="$cache_root" FVM_FLUTTER_URL="$source" jobs_flutter_sdk_command "$fvm_bin" install "$version" ) || return $?
+    else
+      jobs_fzf_note '✔ 复用已存在的精确 FVM SDK；不重复执行安装。' || return $?
+    fi
+    after="$(jobs_required_fvm_fingerprint "$project")" || return $?
+    [[ "$after" == "$before" ]] || { jobs_fzf_note '✖ FVM 准备期间真实声明发生变化，未覆盖并发修改或继续业务。'; return 1; }
+    ( builtin cd "$project" && "$fvm_bin" api context --compress ) > "$stage/context-after.json" || return $?
+    [[ "$(jobs_required_fvm_json cache "$stage/context-after.json")" == "$cache" && "$(jobs_required_fvm_json source "$stage/context-after.json")" == "$source" ]] || {
+      jobs_fzf_note '✖ FVM 准备前后缓存或来源不一致，未使用不明确 SDK。'; return 1
+    }
+    sdk="$cache/$version"
+    [[ -x "$sdk/bin/flutter" && -e "$sdk/bin/dart" ]] || { jobs_fzf_note '✖ FVM 返回成功但精确缓存未包含完整 Flutter/Dart 入口；未删除已有缓存或换其它版本。'; return 1; }
+    remote="$("$git_bin" -C "$sdk" config --get remote.origin.url)" || return $?
+    [[ "${${remote%/}%.git}" == "${${source%/}%.git}" ]] || { jobs_fzf_note '✖ 已获取 SDK 的实际 Git 来源与声明不符，未执行该 SDK。'; return 1; }
+    ( builtin cd "$stage/project" && jobs_flutter_sdk_command "$sdk/bin/flutter" --version --machine ) > "$stage/sdk-machine.json" || return $?
+    actual="$(jobs_required_fvm_json machine "$stage/sdk-machine.json")" || return $?
+    if [[ "$version" != (stable|beta|main|master) && "${actual#v}" != "${version#v}" ]]; then jobs_fzf_note '✖ 实际 Flutter 版本与明确声明不一致，未继续业务。'; return 1; fi
+    [[ "$(jobs_required_fvm_fingerprint "$project")" == "$before" ]] || { jobs_fzf_note '✖ SDK 复检期间真实工程声明发生变化，未继续业务。'; return 1; }
+    JOBS_REQUIRED_FLUTTER="${sdk:A}/bin/flutter"
+    return 0
+  } always {
+    if [[ -n "$stage" && "${stage:t}" == JobsFvmRequired.* && -d "$stage" ]]; then /bin/rm -r -- "$stage"; fi
+  }
+}
+# 清除控制码并隐藏依赖输出中的凭据和敏感地址。
+jobs_required_sanitize() {
+  /usr/bin/perl -pe 's{([a-zA-Z][a-zA-Z0-9+.-]*://)[^/\s]*@}{$1***@}g; s{((?:https?|ssh|git|file)://[^\s?#]+)[?#][^\s]*}{$1?[REDACTED]}g'
+}
+# 缺少必要工具时才交给真实终端，原参数、工作目录和已解析目标均按数据传递。
+jobs_required_terminal_handoff() {
+  local entry="$1" target="$2" origin="$3" directory='' worker='' result=0 argument='' environment_key=''
+  shift 3
+  if [[ "${JOBS_REQUIRED_TOOL_TERMINAL:-0}" == 1 ]]; then
+    print -u2 -r -- '✖ 工具准备终端不可交互，停止；未再次启动窗口。'
+    return 1
+  fi
+  [[ -f "$entry" && -e "$target" && -d "$origin" ]] || return 2
+  directory="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/JobsRequiredTerminal.XXXXXX")" || return $?
+  worker="$directory/准备必要工具.command"
+  {
+    print -rl -- '#!/bin/zsh' 'umask 077'
+    print -r -- 'worker_self="${0:A}"'
+    print -r -- 'cleanup_worker() { /bin/rm -f -- "$worker_self"; /bin/rmdir -- "${worker_self:h}" 2>/dev/null || :; }'
+    print -r -- 'trap cleanup_worker EXIT'
+    print -r -- 'export JOBS_REQUIRED_TOOL_TERMINAL=1 IS_SOURCETREE_RUNTIME=0'
+    for environment_key in JAVA_HOME JENV_ROOT JENV_VERSION DEVELOPER_DIR JOBS_HOMEBREW_INSTALL_PREFIX GEM_HOME GEM_PATH GEMRC BUNDLE_GEMFILE RBENV_ROOT RBENV_VERSION RUBYOPT FLUTTER_OHOS_SDK DEVECO_STUDIO_HOME TOOL_HOME DEVECO_SDK_HOME HOS_SDK_HOME OHOS_SDK_HOME NODE_HOME HARMONY_CLT_ARCHIVE JOBS_HARMONY_TOOLS_HOME FVM_FLUTTER_URL FVM_CACHE_PATH; do
+      if (( ${+parameters[$environment_key]} )); then
+        printf 'export %s=%q\n' "$environment_key" "${(P)environment_key}"
+      fi
+    done
+    printf 'export REPO=%q\n' "$target"
+    printf 'cd -- %q || exit $?\n' "$origin"
+    printf '/bin/zsh %q' "$entry"
+    for argument in "$@"; do printf ' %q' "$argument"; done
+    print -rl -- '' 'worker_result=$?' 'exit "$worker_result"'
+  } > "$worker" || result=74
+  if (( result == 0 )); then /bin/chmod 700 "$worker" || result=$?; fi
+  if (( result == 0 )); then
+    /usr/bin/osascript - "$worker" <<'JOBS_REQUIRED_TERMINAL_APPLESCRIPT' || result=$?
+on run argv
+    tell application "Terminal"
+        activate
+        do script (quoted form of (item 1 of argv))
+    end tell
+end run
+JOBS_REQUIRED_TERMINAL_APPLESCRIPT
+  fi
+  if (( result != 0 )); then
+    /bin/rm -f -- "$worker"
+    /bin/rmdir -- "$directory" 2>/dev/null || :
+    return "$result"
+  fi
+  print -u2 -r -- '已转交终端准备必要工具；原动作未安装或打开目标，最终结果请查看新终端。'
+  return 20
+}
+# 先验证固定镜像大小、快照摘要和归档路径，再允许解压。
+hs_validate_clt_archive() {
+  local archive="$1" actual="" listing=""
+  actual="$(/usr/bin/stat -f %z "$archive")" || return 1
+  [[ "$actual" == "$HS_CLT_SIZE" ]] || { hs_error 'SDL 工具包大小不符，未解压。'; return 1; }
+  actual="$(/usr/bin/shasum -a 256 "$archive")" || return 1
+  [[ "${actual%% *}" == "$HS_CLT_SHA256" ]] || { hs_error 'SDL 工具包 SHA-256 不符，未解压；请核对下载版本。'; return 1; }
+  listing="$(/usr/bin/unzip -Z1 "$archive")" || return 1
+  print -r -- "$listing" | /usr/bin/awk '
+    !/^(command-line-tools|__MACOSX)\// || /(^|\/)\.\.?(\/|$)/ || /\\/ || /\/\// || /[[:cntrl:]]/ { bad=1 }
+    END { exit bad }
+  ' || { hs_error 'SDL 工具包包含不安全路径，未解压。'; return 1; }
+}
+# 原子发布本次已验证目录，目标存在时拒绝覆盖或嵌入。
+hs_publish_clt() {
+  /usr/bin/osascript -l JavaScript - "$1" "$2" <<'JXA'
+ObjC.import('Foundation');
+function run(args) {
+  var error = Ref();
+  if (!$.NSFileManager.defaultManager.moveItemAtPathToPathError(args[0], args[1], error)) {
+    throw Error('CLT 目录发布失败；不会覆盖或嵌入已有目录。');
+  }
+}
+JXA
+}
+# 只清理本轮私有.install暂存，保留旧缓存与发布目标。
+hs_cleanup_install() {
+  if [[ -n "$HS_INSTALL_STAGE" && "$HS_INSTALL_STAGE" == "$HS_TOOLS_HOME"/.install.* && -d "$HS_INSTALL_STAGE" && ! -L "$HS_INSTALL_STAGE" ]]; then
+    /bin/rm -rf -- "$HS_INSTALL_STAGE"
+  fi
+  HS_INSTALL_STAGE=""
+}
+# 校验并发布固定镜像的构建工具与SDK，不下载系统镜像或创建设备。
+hs_perform_clt_install() {
+  local publish_result=0 stage="$HS_INSTALL_STAGE" archive="${HARMONY_CLT_ARCHIVE:-}" root="" entry="" destination=""
+  hs_log "📥 SDL 第三方免登录镜像：$HS_CLT_URL"
+  hs_log "ℹ CLT $HS_CLT_VERSION；$HS_CLT_SIZE 字节；快照 SHA-256：$HS_CLT_SHA256"
+  hs_log 'ℹ 该摘要固定 SDL 镜像内容，不代表已比对华为官方摘要；包内不含可启动的系统镜像。'
+  if [[ -n "$archive" ]]; then
+    [[ -f "$archive" ]] || { hs_error 'HARMONY_CLT_ARCHIVE 指定的文件不存在。'; return 1; }
+    hs_log "ℹ 使用本地归档：$archive"
+  else
+    archive="$stage/tools.zip"
+    hs_download_clt_archive "$archive" || return $?
+  fi
+  hs_validate_clt_archive "$archive" || return $?
+  hs_log '✔ 工具包校验通过，正在解压依赖；这一步可能需要几分钟。'
+  /bin/mkdir "$stage/extract" || return $?
+  # macOS bsdtar 默认拒绝目录穿越及经符号链接写出解压根目录。
+  /usr/bin/tar -xf "$archive" -C "$stage/extract" --no-same-owner --no-same-permissions || return $?
+  root="$stage/extract/command-line-tools"
+  [[ -d "$root" && ! -L "$root" && -x "$root/emulator/Emulator" && ! -L "$root/emulator/Emulator" && -f "$root/version.txt" ]] || {
+    hs_error 'SDL 包缺少完整 Emulator 或版本文件，未安装。'; return 1
+  }
+  for entry in "$root"/**/*(ND@); do
+    [[ "${entry:A}" == "${root:A}"/* ]] || { hs_error '工具包存在指向安装目录外的符号链接，未安装。'; return 1; }
+  done
+  HS_BIN="$root/emulator/Emulator"
+  [[ -d "$root/sdk/default/openharmony/ets" && -d "$root/sdk/default/openharmony/native" && -x "$root/sdk/default/openharmony/toolchains/hdc" ]] || {
+    hs_error 'CLT 包缺少真机所需 OpenHarmony SDK，未安装。'; HS_BIN=""; return 1
+  }
+  destination="$HS_TOOLS_HOME/clt-$HS_CLT_VERSION-${${stage:t}#.install.}"
+  hs_publish_clt "$root" "$destination" || { publish_result=$?; HS_BIN=""; return "$publish_result"; }
+  HS_BIN="$destination/emulator/Emulator"
+  HARMONY_EMULATOR_BIN="$HS_BIN"
+  hs_log "✔ SDL 工具依赖已安装并通过能力复检：$destination"
+}
+# 以私有暂存持有本轮安装，失败和取消均回收本轮现场。
+hs_install_clt() {
+  setopt LOCAL_TRAPS
+  local result=0
+  trap 'hs_cleanup_install; return 130' INT
+  trap 'hs_cleanup_install; return 143' TERM
+  trap 'hs_cleanup_install; return 129' HUP
+  [[ ! -L "$HS_TOOLS_HOME" && ( ! -e "$HS_TOOLS_HOME" || -d "$HS_TOOLS_HOME" ) ]] || { hs_error '工具安装根目录不是普通目录，停止。'; return 1; }
+  /bin/mkdir -p "$HS_TOOLS_HOME" || return 1
+  HS_INSTALL_STAGE="$(umask 077; /usr/bin/mktemp -d "$HS_TOOLS_HOME/.install.XXXXXX")" || return 1
+  hs_perform_clt_install || result=$?
+  hs_cleanup_install
+  return "$result"
+}
+# 先显示包内完整许可，由本人明确同意后才调用原生接受命令。
+hs_review_licenses() {
+  (( ! HS_LICENSES_CONFIRMED )) || return 0
+  local directory="${HS_BIN:h}/agreement" file="" answer=""
+  local -a files=("$directory/HarmonyOS_SDK_Agreement.txt" "$directory/HarmonyOS_Software_Service_Agreement.txt")
+  for file in "${files[@]}"; do
+    [[ -s "$file" && -r "$file" ]] || { hs_error "找不到可供阅读的官方许可：$file；未接受许可。"; return 1; }
+  done
+  for file in "${files[@]}"; do
+    hs_log "━━━━━━━━━━ 官方许可原文：$file ━━━━━━━━━━"
+    /bin/cat "$file" || return $?
+    print
+  done
+  IFS= read -r "answer?$(jobs_prompt_render '阅读以上全部协议后，回车表示本人同意并继续；任意非空输入取消：')" || return 130
+  [[ -z "$answer" ]] || return 130
+  hs_run_command -license accept || return $?
+  HS_LICENSES_CONFIRMED=1
+}
+# 固定镜像下载只负责文件与原生状态；重试、纯日志与取消由上层获取器持有。
+hs_download_clt_archive_once() {
+  local destination="$1"
+  /usr/bin/curl -q --fail --show-error --location --progress-bar --retry 3 --connect-timeout 20 \
+    --continue-at - --max-time 3600 --speed-limit 1024 --speed-time 90 --max-filesize "$HS_CLT_SIZE" \
+    --proto "=https" --proto-redir "=https" --output "$destination" "$HS_CLT_URL"
+}
+# 只复用或准备工程明确的鸿蒙SDK；缺失未知来源时停止，绝不获取普通Flutter代替。
+jobs_st_required_ohos_flutter() {
+  local candidate='' source='' probe_result=0 sdk_root='' JOBS_OHOS_FVM_EXPECTED_SOURCE=''
+  if [[ -n "$SDK_OVERRIDE" ]]; then
+    SDK_OVERRIDE="$(normalize_input_path "$SDK_OVERRIDE")"
+    [[ -x "$SDK_OVERRIDE/bin/flutter" ]] || { error_echo "指定SDK中没有可执行bin/flutter：$SDK_OVERRIDE；保留显式选择。"; return 1; }
+    candidate="${SDK_OVERRIDE:A}/bin/flutter"
+  elif [[ -f "$PROJECT_ROOT/.fvmrc" || -f "$PROJECT_ROOT/.fvm/fvm_config.json" || -e "$PROJECT_ROOT/.fvm/flutter_sdk" || -L "$PROJECT_ROOT/.fvm/flutter_sdk" ]]; then
+    candidate="$PROJECT_ROOT/.fvm/flutter_sdk/bin/flutter"
+    if [[ ! -x "$candidate" ]]; then
+      source="$(jobs_required_fvm_json bindingSource "$PROJECT_ROOT/.fvmrc" "$PROJECT_ROOT/.fvm/fvm_config.json")" || return $?
+      [[ -n "$source" ]] || source="${FVM_FLUTTER_URL:-}"
+      if [[ -z "$source" || "${${source%/}%.git}" == (https://github.com/flutter/flutter|git@github.com:flutter/flutter) ]]; then
+        error_echo '缺失的FVM SDK没有可验证的鸿蒙fork来源；请明确项目flutterUrl或--flutter-sdk，未猜普通Flutter版本或来源。'
+        return 2
+      fi
+      JOBS_OHOS_FVM_EXPECTED_SOURCE="$source"
+    fi
+    if [[ "${IS_SOURCETREE_RUNTIME:-0}" == 1 || ! -t 0 || ! -t 2 ]]; then
+      if ! jobs_st_sdk_runtime_ready "$candidate"; then
+        jobs_st_handoff_required "$PROJECT_ROOT" || return $?
+      fi
+      CHECK_ONLY=1 jobs_required_clt_tool git || probe_result=$?
+      case "$probe_result" in 129|130|131|137|143) return "$probe_result" ;; esac
+      if (( probe_result != 0 )); then jobs_st_handoff_required "$PROJECT_ROOT" || return $?; fi
+    fi
+    jobs_required_fvm_project "$PROJECT_ROOT" || return $?
+    candidate="$JOBS_REQUIRED_FLUTTER"
+  else
+    candidate="$(whence -p flutter 2>/dev/null)"
+    [[ -n "$candidate" && -x "$candidate" ]] || {
+      error_echo '没有已选择的鸿蒙Flutter SDK；请明确--flutter-sdk或FLUTTER_OHOS_SDK，未安装普通Flutter作为替代。'
+      return 2
+    }
+  fi
+  sdk_root="${candidate:A:h:h}"
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == 1 || ! -t 0 || ! -t 2 ]]; then
+    if [[ -d "$sdk_root/bin/internal" ]] && ! jobs_st_sdk_runtime_ready "$candidate"; then
+      jobs_st_handoff_required "$PROJECT_ROOT" || return $?
+    fi
+  fi
+  FLUTTER_CMD=("${candidate:A}")
+  info_echo "Flutter命令：${(j: :)FLUTTER_CMD}；HAP/APP能力在构建前复检，不切换来源。"
+}
+# 交接保留本轮已解析工程和原始参数；成功交接后原进程停止全部项目业务。
+jobs_st_handoff_required() {
+  local project="$1" result=0
+  jobs_required_terminal_handoff "$SCRIPT_PATH" "$project" "$JOBS_ST_ORIGINAL_CWD" "${JOBS_ST_ORIGINAL_ARGS[@]}" || result=$?
+  (( result != 20 )) || exit 0
+  return "$result"
+}
+# 只探测当前选择的SDK缓存，不执行下载、替代来源或项目配置写入。
+jobs_st_sdk_runtime_ready() {
+  local candidate="$1" sdk="${1:A:h:h}" engine=''
+  [[ -x "$candidate" && -x "$sdk/bin/cache/dart-sdk/bin/dart" ]] || return 1
+  engine="$sdk/bin/cache/engine.stamp"
+  [[ -f "$engine" ]] || engine="$sdk/bin/internal/engine.version"
+  [[ -s "$engine" && -f "$sdk/bin/cache/engine-dart-sdk.stamp" ]] || return 1
+  /usr/bin/cmp -s "$engine" "$sdk/bin/cache/engine-dart-sdk.stamp"
+}
+# 复检当前DevEco/PATH的真实命令；取消不变成缺工具，缺失与损坏分开报告。
+jobs_ohos_toolchain_health() {
+  local tool='' candidate='' result=0 java_home=''
+  [[ -n "${DEVECO_SDK_HOME:-}" && -d "$DEVECO_SDK_HOME" ]] || return 3
+  for tool in node npm ohpm java hvigorw; do
+    candidate="$(whence -p -- "$tool" 2>/dev/null)"
+    [[ -n "$candidate" && -x "$candidate" ]] || return 3
+    if [[ "$tool" == java && "$candidate" == /usr/bin/java ]]; then
+      result=0
+      java_home="$(/usr/libexec/java_home 2>/dev/null)" || result=$?
+      case "$result" in 129|130|131|137|143) return "$result" ;; esac
+      [[ -n "$java_home" && -x "$java_home/bin/java" ]] || return 3
+      candidate="$java_home/bin/java"
+    fi
+    result=0
+    if [[ "$tool" == java ]]; then
+      jobs_fzf_bounded_probe "$candidate" -version </dev/null >/dev/null 2>&1 || result=$?
+    else
+      jobs_fzf_bounded_probe "$candidate" --version </dev/null >/dev/null 2>&1 || result=$?
+    fi
+    (( result == 0 )) || return "$result"
+  done
+}
+# 只有隐式环境确实缺失时准备固定镜像工具包；不覆盖显式SDK/DevEco或猜其它架构制品。
+prepare_deveco_environment() {
+  local result=0 explicit="${DEVECO_STUDIO_HOME:-}${TOOL_HOME:-}${DEVECO_SDK_HOME:-}${HOS_SDK_HOME:-}${OHOS_SDK_HOME:-}${NODE_HOME:-}${JAVA_HOME:-}"
+  if jobs_ohos_locate_deveco_environment; then
+    jobs_ohos_toolchain_health || result=$?
+    (( result != 0 )) || return 0
+    case "$result" in 129|130|131|137|143) return "$result" ;; esac
+    (( result == 3 )) || { error_echo "现选工具链健康探针失败（$result），保留来源，不重装其它版本。"; return "$result"; }
+  else
+    result=$?
+    (( result == 3 )) || return "$result"
+  fi
+  [[ -z "$explicit" ]] || { error_echo '显式DevEco/SDK/Node/Java选择缺少完整工具；保留配置，未安装其它版本覆盖。'; return 1; }
+  if [[ "${IS_SOURCETREE_RUNTIME:-0}" == 1 || ! -t 0 || ! -t 2 ]]; then
+    jobs_st_handoff_required "$PROJECT_ROOT" || return $?
+  fi
+  jobs_ohos_install_clt_tools || return $?
+  export TOOL_HOME="${HS_BIN:h:h}"
+  DEVECO_CONTENTS=''
+  jobs_ohos_locate_deveco_environment || return $?
+  jobs_ohos_toolchain_health || { result=$?; error_echo "镜像工具准备后仍未通过完整命令复检（$result），未运行项目业务。"; return "$result"; }
+}
+# 固定SDL快照沿用既有大小/摘要/安全解压/发布/许可协议；不安装镜像或启动模拟器。
+jobs_ohos_install_clt_tools() {
+  [[ "$(/usr/bin/uname -m)" == arm64 ]] || {
+    error_echo '现有已验证镜像为Mac ARM64 CLT 6.1.1.280；当前架构不匹配，未猜下载地址或切换官网。'
+    return 2
+  }
+  HS_CLT_VERSION='6.1.1.280'
+  HS_CLT_URL='https://libsdl.org/harmonyos-devtools/commandline-tools-mac-arm64-6.1.1.280.zip'
+  HS_CLT_SIZE=2025336267
+  HS_CLT_SHA256='47d0e558b8285e1452f4d3611863027ec0d1135642761bef23402434e22382d4'
+  HS_TOOLS_HOME="${JOBS_HARMONY_TOOLS_HOME:-$HOME/Library/Application Support/JobsHarmonySimulator}"
+  HS_LOG="$LOG_FILE"; HS_TOOLS_ONLY=1; HS_BIN=''; HS_INSTALL_STAGE=''; HS_LICENSES_CONFIRMED=0
+  hs_install_clt || return $?
+  hs_review_licenses || return $?
+  jobs_ohos_prepare_required_java || return $?
+  [[ -x "$HS_BIN" ]] || { error_echo 'CLT发布后没有可复检入口，未运行项目业务。'; return 1; }
+}
+# Harmony工具诊断进入既有完整消息与纯文本日志通道，不混入机器回执。
+hs_log() {
+  info_echo "$*"
+}
+# Harmony工具失败记录原因并保留失败状态。
+hs_error() {
+  error_echo "$*"
+  return 1
+}
+# 明确许可确认后运行原工具的接受命令，保留原生状态及日志失败。
+hs_run_command() {
+  local -a results
+  "$HS_BIN" "$@" 2>&1 | jobs_prompt_tee "$HS_LOG"
+  results=("${pipestatus[@]}")
+  (( results[2] == 0 )) || return 74
+  return "${results[1]}"
+}
+# 只对已选SDL工具包的临时获取故障持续重试，沿用本流程可取消SDK获取器。
+hs_download_clt_archive() {
+  jobs_required_acquire 'Harmony CLT固定镜像' hs_download_clt_archive_once "$@"
+}
+# 固定CLT未附JDK时才准备既有17基线；健康用户Java不升级，显式选择不覆盖。
+jobs_ohos_prepare_required_java() {
+  local candidate='' home="${JAVA_HOME:-}" root="${HS_BIN:h:h}" result=0 prefix='' known_home=0
+  if [[ -n "$home" ]]; then
+    [[ -x "$home/bin/java" ]] || { error_echo "显式JAVA_HOME没有java：$home；未覆盖。"; return 1; }
+    candidate="$home/bin/java"; known_home=1
+  else
+    for home in "$root/jbr/Contents/Home" "$root/jbr" "$root/jre/Contents/Home"; do
+      [[ ! -x "$home/bin/java" ]] || { candidate="$home/bin/java"; known_home=1; break; }
+    done
+    if [[ -z "$candidate" ]]; then
+      candidate="$(whence -p java 2>/dev/null)"
+      if [[ "$candidate" == /usr/bin/java ]]; then
+        home="$(/usr/libexec/java_home 2>/dev/null)" || result=$?
+        case "$result" in 129|130|131|137|143) return "$result" ;; esac
+        if [[ -n "$home" && -x "$home/bin/java" ]]; then candidate="$home/bin/java"; known_home=1; else candidate=''; fi
+      fi
+    fi
+  fi
+  if [[ -n "$candidate" && -x "$candidate" ]]; then
+    result=0
+    jobs_fzf_bounded_probe "$candidate" -version </dev/null >/dev/null 2>&1 || result=$?
+    (( result == 0 )) || return "$result"
+    (( ! known_home )) || export JAVA_HOME="$home"
+    export PATH="${candidate:h}:$PATH"
+    rehash
+    return 0
+  fi
+  jobs_required_brew_package openjdk@17 formula || return $?
+  prefix="$("$JOBS_HOMEBREW_BIN" --prefix openjdk@17)" || return $?
+  home="$prefix/libexec/openjdk.jdk/Contents/Home"
+  [[ -x "$home/bin/java" && -x "$home/bin/javac" ]] || { error_echo 'JDK17准备后缺少同源java/javac，未运行构建。'; return 1; }
+  jobs_fzf_bounded_probe "$home/bin/java" -version </dev/null >/dev/null 2>&1 || return $?
+  jobs_fzf_bounded_probe "$home/bin/javac" -version </dev/null >/dev/null 2>&1 || return $?
+  export JAVA_HOME="$home" PATH="$home/bin:$PATH"
+  rehash
+}
+
+# JOBS_ST_OHOS_REQUIRED_END
 # >>> Jobs terminal style protection v1 >>>
 # 临时保护当前终端配色，业务进程自行管理原有退出清理。
 jobs_terminal_style_run() {
@@ -60,6 +1053,7 @@ jobs_terminal_style_run() {
     jobs_style_stty=$(stty -g 2>/dev/null < /dev/tty) || jobs_terminal_style_plain "$@"
     jobs_style_saved=''
     jobs_style_saved_rows=''
+    jobs_style_original_rows=''
     jobs_style_applied_rows=''
     jobs_style_changed=0
     jobs_style_applied_complete=0
@@ -68,7 +1062,7 @@ jobs_terminal_style_run() {
     jobs_style_exit_status=0
     jobs_style_esc=$(printf '\033')
     jobs_style_bel=$(printf '\007')
-    # 完整颜色帧有界重发；仅退出恢复容忍帧外回车和明确方向键。
+    # 完整颜色帧有界重发；设置核验与退出恢复容忍帧外回车和明确方向键。
     jobs_terminal_style_query() {
         jobs_style_query_key=$1
         jobs_style_reply=''
@@ -94,8 +1088,8 @@ jobs_terminal_style_run() {
                 jobs_style_piece=${jobs_style_piece%.}
                 jobs_style_query_buffer=$jobs_style_query_buffer$jobs_style_piece
                 while [ -n "$jobs_style_query_buffer" ]; do
-                    # 仅退出恢复阶段允许帧外的明确控制键，普通文字仍然失败。
-                    if [ "$jobs_style_query_phase" = cleanup ]; then
+                    # 设置核验与退出恢复阶段允许帧外的明确控制键，普通文字仍然失败。
+                    if [ "$jobs_style_query_phase" = cleanup ] || [ "$jobs_style_query_phase" = applied ]; then
                         jobs_style_query_control_sequence=''
                         jobs_style_query_control_partial=0
                         case $jobs_style_query_buffer in
@@ -127,9 +1121,9 @@ jobs_terminal_style_run() {
                             done
                         fi
                         if [ -n "$jobs_style_query_control_sequence" ]; then
-                            jobs_style_cleanup_control_keys=$(( ${jobs_style_cleanup_control_keys:-0} + 1 ))
-                            if [ "$jobs_style_cleanup_control_keys" -gt 64 ]; then
-                                jobs_style_query_failure='退出恢复期间已识别控制键超过 64 个，已停止自动恢复'
+                            jobs_style_phase_control_keys=$(( ${jobs_style_phase_control_keys:-0} + 1 ))
+                            if [ "$jobs_style_phase_control_keys" -gt 64 ]; then
+                                jobs_style_query_failure='本阶段已识别控制键超过 64 个，已停止自动恢复'
                                 return 1
                             fi
                             jobs_style_query_buffer=${jobs_style_query_buffer#"$jobs_style_query_control_sequence"}
@@ -263,6 +1257,48 @@ jobs_terminal_style_run() {
             }
         '
     }
+    # 核验中断时重新读取当前值，只撤回仍等于本轮目标值的颜色。
+    jobs_terminal_style_rollback() {
+        jobs_style_rollback_issue='无法读取或设置原终端输入模式'
+        jobs_style_rollback_safe=''
+        jobs_style_rollback_conflicts=''
+        jobs_style_phase_control_keys=0
+        jobs_style_stty=$(stty -g 2>/dev/null < /dev/tty) || jobs_style_stty=''
+        if [ -n "$jobs_style_stty" ] && stty -echo -icanon min 0 time 1 2>/dev/null < /dev/tty; then
+            jobs_style_query_active=1
+            jobs_style_rollback_ok=1
+            while IFS='|' read -r jobs_style_key jobs_style_original_normalized jobs_style_original; do
+                [ -n "$jobs_style_key" ] || continue
+                if ! jobs_terminal_style_query "$jobs_style_key" cleanup; then
+                    jobs_style_rollback_ok=0
+                    jobs_style_rollback_issue="回退颜色项 $jobs_style_key：$jobs_style_query_failure"
+                    break
+                fi
+                if [ "$jobs_style_normalized" = "$jobs_style_original_normalized" ]; then
+                    continue
+                elif jobs_terminal_style_accepts_target "$jobs_style_key"; then
+                    jobs_style_rollback_safe=$jobs_style_rollback_safe$jobs_style_original
+                else
+                    jobs_style_rollback_conflicts="$jobs_style_rollback_conflicts $jobs_style_key"
+                fi
+            done <<JOBS_STYLE_ROLLBACK
+$jobs_style_original_rows
+JOBS_STYLE_ROLLBACK
+            stty "$jobs_style_stty" 2>/dev/null < /dev/tty || { jobs_style_rollback_ok=0; jobs_style_rollback_issue='无法恢复原终端输入模式'; }
+            jobs_style_query_active=0
+            if [ "$jobs_style_rollback_ok" = 1 ] && printf '%s\033[0m' "$jobs_style_rollback_safe" > /dev/tty; then
+                if [ -z "$jobs_style_rollback_conflicts" ]; then
+                    rm -f "$jobs_style_recovery"
+                    rmdir "${jobs_style_recovery%/*}" 2>/dev/null || :
+                    return 0
+                fi
+                printf '检测到运行期间的配色变更，已保留这些项：%s\n' "$jobs_style_rollback_conflicts" >&2
+                jobs_style_rollback_issue="核验中断后检测到其它配色变更：$jobs_style_rollback_conflicts"
+            fi
+        fi
+        printf '终端配色未能安全自动恢复（%s）；确认覆盖当前配色后可运行：sh "%s"\n' "$jobs_style_rollback_issue" "$jobs_style_recovery" >&2
+        return 1
+    }
     # 检测到后续改色时只恢复仍由本次保护持有的项，保留独立恢复入口。
     jobs_terminal_style_cleanup() {
         jobs_style_result=$1
@@ -271,12 +1307,24 @@ jobs_terminal_style_run() {
             stty "$jobs_style_stty" 2>/dev/null < /dev/tty || :
             jobs_style_query_active=0
         fi
+        if [ "$jobs_style_changed" = 1 ] && [ "$jobs_style_applied_complete" != 1 ]; then
+            if jobs_terminal_style_rollback; then
+                jobs_style_changed=0
+            else
+                [ "$jobs_style_result" -ne 0 ] || jobs_style_result=1
+            fi
+            if [ "${2:-}" = continue ]; then
+                jobs_style_cleanup_status=$jobs_style_result
+                return 0
+            fi
+            exit "$jobs_style_result"
+        fi
         if [ "$jobs_style_changed" = 1 ]; then
             jobs_style_cleanup_ok=0
             jobs_style_cleanup_issue='无法读取或设置原终端输入模式，或临时配色未完成核验'
             jobs_style_conflicts=''
             jobs_style_restore_safe=''
-            jobs_style_cleanup_control_keys=0
+            jobs_style_phase_control_keys=0
             if [ "$jobs_style_applied_complete" = 1 ]; then
                 jobs_style_stty=$(stty -g 2>/dev/null < /dev/tty) || jobs_style_stty=''
                 if [ -n "$jobs_style_stty" ] && stty -echo -icanon min 0 time 1 2>/dev/null < /dev/tty; then
@@ -336,6 +1384,8 @@ JOBS_STYLE_APPLIED
             break
         fi
         jobs_style_saved=$jobs_style_saved$jobs_style_reply
+        jobs_style_original_rows="$jobs_style_original_rows$jobs_style_key|$jobs_style_normalized|$jobs_style_reply
+"
         jobs_style_saved_rows="$jobs_style_saved_rows$jobs_style_key|$jobs_style_reply
 "
     done
@@ -371,9 +1421,10 @@ JOBS_STYLE_APPLIED
     jobs_style_query_active=1
     jobs_style_probe_ok=1
     jobs_style_targets_ok=1
+    jobs_style_phase_control_keys=0
     while IFS='|' read -r jobs_style_key jobs_style_original; do
         [ -n "$jobs_style_key" ] || continue
-        if ! jobs_terminal_style_query "$jobs_style_key"; then
+        if ! jobs_terminal_style_query "$jobs_style_key" applied; then
             jobs_style_probe_ok=0
             break
         fi
@@ -388,11 +1439,19 @@ JOBS_STYLE_ORIGINAL
     stty "$jobs_style_stty" 2>/dev/null < /dev/tty || { jobs_style_exit_status=1; exit 1; }
     jobs_style_query_active=0
     if [ "$jobs_style_probe_ok" != 1 ]; then
-        printf '%s\n' '无法核实本次临时配色，已停止启动业务。' >&2
-        jobs_style_exit_status=1
-        exit 1
+        printf '临时配色核验失败（颜色项 %s：%s），正在核对原色恢复。\n' "$jobs_style_key" "$jobs_style_query_failure" >&2
+        jobs_terminal_style_cleanup 0 continue
+        jobs_style_changed=0
+        if [ "$jobs_style_cleanup_status" != 0 ]; then
+            jobs_style_exit_status=1
+            exit 1
+        fi
+        trap 'jobs_style_exit_status=129; jobs_terminal_style_cleanup 129 continue; jobs_style_changed=0; exit 129' HUP
+        trap 'jobs_style_exit_status=130; jobs_terminal_style_cleanup 130 continue; jobs_style_changed=0; exit 130' INT
+        trap 'jobs_style_exit_status=143; jobs_terminal_style_cleanup 143 continue; jobs_style_changed=0; exit 143' TERM
+        printf '%s\n' '已恢复原配色并使用纯文本。' >&2
+        jobs_terminal_style_plain "$@"
     fi
-    jobs_style_applied_complete=1
     if [ "$jobs_style_targets_ok" != 1 ]; then
         jobs_terminal_style_cleanup 0 continue
         jobs_style_changed=0
@@ -406,6 +1465,7 @@ JOBS_STYLE_ORIGINAL
         printf '%s\n' '终端未接受本次配色，已恢复原配色并使用纯文本。' >&2
         jobs_terminal_style_plain "$@"
     fi
+    jobs_style_applied_complete=1
     printf '%s\n' '本次终端已临时使用黑底白字。' >&2
     JOBS_TERMINAL_STYLE_TTY=$jobs_style_tty
     JOBS_TERMINAL_STYLE_OWNER=$$
@@ -461,13 +1521,254 @@ jobs_terminal_style_bootstrap "$0" "$@"
 # 每个宿主Shell保留一个私有任务缓存，网络变量仅在wrapper的子进程中修改。
 # JOBS_INPUT_CHOICE_STYLE_BEGIN
 # 只展示提示选项；不读取答案、不改变默认值、返回码或业务环境。
+# URL仅供显示；纯文本日志传color=0。
+jobs_url_format() {
+  LC_ALL=en_US.UTF-8 /usr/bin/awk -v color="${1:-0}" -v lines="${2:-1}" '
+    # URL 范围只在展示文本上识别；不会改写真实请求或输出数据。
+    function urlInit() {
+      urlPattern = "[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]<>\"" sprintf("%c", 39) esc "]+"
+      urlPunctuationCount = split("，|。|；|：|！|？|、|（|）|【|】|《|》|「|」|『|』|“|”|‘|’", urlPunctuation, "\\|")
+    }
+    function urlCount(value, token, total, idx) {
+      total = 0
+      for (idx = 1; idx <= length(value); idx++) if (substr(value, idx, 1) == token) total++
+      return total
+    }
+    function urlTrim(value, idx, at, last) {
+      for (idx = 1; idx <= urlPunctuationCount; idx++) {
+        at = index(value, urlPunctuation[idx])
+        if (at) value = substr(value, 1, at - 1)
+      }
+      while (length(value)) {
+        last = substr(value, length(value), 1)
+        if (index(".,;:!?", last) > 0 || (last == ")" && urlCount(value, ")") > urlCount(value, "(")) ||
+            (last == "]" && urlCount(value, "]") > urlCount(value, "[")) || (last == "}" && urlCount(value, "}") > urlCount(value, "{"))) {
+          value = substr(value, 1, length(value) - 1)
+        } else break
+      }
+      return value
+    }
+    function urlClean(value, preserve, output, token, start, size) {
+      gsub(esc "\\][^" esc sprintf("%c", 7) "]*(" sprintf("%c", 7) "|" esc "\\\\)", "", value)
+      output = ""
+      while (match(value, esc "\\[[0-?]*[ -/]*[@-~]")) {
+        start = RSTART; size = RLENGTH; token = substr(value, start, size)
+        output = output substr(value, 1, start - 1)
+        if (preserve && token ~ /m$/) output = output token
+        value = substr(value, start + size)
+      }
+      return output value
+    }
+    # 题干分段前临时遮蔽地址，地址里的 Enter、/、?、= 不参与选项识别。
+    function urlProtect(value, output, at, size, token, marker, number, original) {
+      urlProtectedCount = 0; output = ""; original = value; number = 0
+      while (match(value, urlPattern)) {
+        at = RSTART; size = RLENGTH; token = urlTrim(substr(value, at, size))
+        do { marker = sprintf("%c", 2) "U" ++number sprintf("%c", 3) } while (index(original, marker))
+        urlProtected[++urlProtectedCount] = token; urlMarkers[urlProtectedCount] = marker
+        output = output substr(value, 1, at - 1) marker
+        value = substr(value, at + length(token))
+      }
+      return output value
+    }
+    function urlRestore(value, idx, token, at) {
+      for (idx = urlProtectedCount; idx > 0; idx--) {
+        token = urlMarkers[idx]
+        while ((at = index(value, token))) value = substr(value, 1, at - 1) urlProtected[idx] substr(value, at + length(token))
+      }
+      return value
+    }
+    # 保存原 SGR 的有效序列；RGB 中的零值不能误认为整体复位。
+    function urlTrack(tokens, token, code, idx, total, reset, fields) {
+      while (match(tokens, esc "\\[[0-9;:]*m")) {
+        token = substr(tokens, RSTART, RLENGTH)
+        tokens = substr(tokens, RSTART + RLENGTH)
+        code = substr(token, 3, length(token) - 3); reset = (code == "")
+        total = split(code, fields, ";")
+        for (idx = 1; idx <= total; idx++) {
+          if (fields[idx] == "0") reset = 1
+          if ((fields[idx] == "38" || fields[idx] == "48" || fields[idx] == "58") && idx < total) {
+            if (fields[idx + 1] == "2") idx += 4
+            else if (fields[idx + 1] == "5") idx += 2
+          }
+        }
+        if (reset) urlActive = ""
+        urlActive = urlActive token
+      }
+    }
+    # 用可见字符位置映射原 SGR，URL 内已有样式也会重新覆为绿下划线。
+    function urlRender(value, output, visible, rest, key, at, size, token, idx, offset, url, inURL) {
+      value = urlClean(value, color)
+      if (!color) return value
+      for (key in urlStyles) delete urlStyles[key]
+      for (key in urlStarts) delete urlStarts[key]
+      for (key in urlEnds) delete urlEnds[key]
+      visible = ""; rest = value
+      while (match(rest, esc "\\[[0-9;:]*m")) {
+        at = RSTART; size = RLENGTH; token = substr(rest, at, size)
+        visible = visible substr(rest, 1, at - 1)
+        urlStyles[length(visible) + 1] = urlStyles[length(visible) + 1] token
+        rest = substr(rest, at + size)
+      }
+      visible = visible rest; rest = visible; offset = 0
+      while (match(rest, urlPattern)) {
+        at = RSTART; size = RLENGTH; url = urlTrim(substr(rest, at, size))
+        urlStarts[offset + at] = 1; urlEnds[offset + at + length(url) - 1] = 1
+        offset += at + length(url) - 1; rest = substr(visible, offset + 1)
+      }
+      output = ""; inURL = 0
+      for (idx = 1; idx <= length(visible) + 1; idx++) {
+        if (idx in urlStyles) {
+          token = urlStyles[idx]; output = output token; urlTrack(token)
+          if (inURL) output = output esc "[32;4m"
+        }
+        if (idx > length(visible)) break
+        if (idx in urlStarts) { output = output esc "[32;4m"; inURL = 1 }
+        output = output substr(visible, idx, 1)
+        if (idx in urlEnds) { output = output esc "[0m" urlActive; inURL = 0 }
+      }
+      return output
+    }
+    BEGIN { esc = sprintf("%c", 27); first = 1; urlInit() }
+    {
+      if (lines == 2) {
+        if (!first) printf "%s\n", urlRender(pending)
+        pending = $0; first = 0
+      } else {
+        if (!lines && !first) printf "\n"
+        printf "%s", urlRender($0)
+        if (lines) printf "\n"
+        first = 0
+      }
+    }
+    END {
+      if (lines == 2 && !first) {
+        sub(sprintf("%c", 1) "$", "", pending)
+        printf "%s", urlRender(pending)
+      }
+    }
+  '
+}
+# URL仅供显示；纯文本日志传color=0。
+jobs_url_stream() {
+  local url_color=0
+  if [ -t 1 ] && jobs_prompt_color_ready; then url_color=1; fi
+  jobs_url_format "$url_color" "${1:-1}"
+}
 jobs_prompt_color_ready() {
+  env | LC_ALL=C /usr/bin/grep -qiE '^(SOURCETREE|SOURCE_TREE)' && return 1
   [ -z "${NO_COLOR+x}" ] && [ -n "${TERM:-}" ] && [ "${TERM:-}" != dumb ] &&
     [ "${PLAIN_OUTPUT:-0}" != 1 ] && [ "${IS_SOURCETREE_RUNTIME:-0}" != 1 ]
 }
 # 原生 awk 分段着色；任意/非空输入优先，括号内外沿用同一个选项。
 jobs_prompt_format() {
-  /usr/bin/awk -v color="${1:-0}" -v lines="${2:-0}" -v keep="${3:-0}" '
+  # 中文字符类按UTF-8字符处理，仅约束此awk进程，保留调用者locale。
+  LC_ALL=en_US.UTF-8 /usr/bin/awk -v color="${1:-0}" -v lines="${2:-0}" -v keep="${3:-0}" -v question="${4:-0}" '
+    # URL 范围只在展示文本上识别；不会改写真实请求或输出数据。
+    function urlInit() {
+      urlPattern = "[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]<>\"" sprintf("%c", 39) esc "]+"
+      urlPunctuationCount = split("，|。|；|：|！|？|、|（|）|【|】|《|》|「|」|『|』|“|”|‘|’", urlPunctuation, "\\|")
+    }
+    function urlCount(value, token, total, idx) {
+      total = 0
+      for (idx = 1; idx <= length(value); idx++) if (substr(value, idx, 1) == token) total++
+      return total
+    }
+    function urlTrim(value, idx, at, last) {
+      for (idx = 1; idx <= urlPunctuationCount; idx++) {
+        at = index(value, urlPunctuation[idx])
+        if (at) value = substr(value, 1, at - 1)
+      }
+      while (length(value)) {
+        last = substr(value, length(value), 1)
+        if (index(".,;:!?", last) > 0 || (last == ")" && urlCount(value, ")") > urlCount(value, "(")) ||
+            (last == "]" && urlCount(value, "]") > urlCount(value, "[")) || (last == "}" && urlCount(value, "}") > urlCount(value, "{"))) {
+          value = substr(value, 1, length(value) - 1)
+        } else break
+      }
+      return value
+    }
+    function urlClean(value, preserve, output, token, start, size) {
+      gsub(esc "\\][^" esc sprintf("%c", 7) "]*(" sprintf("%c", 7) "|" esc "\\\\)", "", value)
+      output = ""
+      while (match(value, esc "\\[[0-?]*[ -/]*[@-~]")) {
+        start = RSTART; size = RLENGTH; token = substr(value, start, size)
+        output = output substr(value, 1, start - 1)
+        if (preserve && token ~ /m$/) output = output token
+        value = substr(value, start + size)
+      }
+      return output value
+    }
+    # 题干分段前临时遮蔽地址，地址里的 Enter、/、?、= 不参与选项识别。
+    function urlProtect(value, output, at, size, token, marker, number, original) {
+      urlProtectedCount = 0; output = ""; original = value; number = 0
+      while (match(value, urlPattern)) {
+        at = RSTART; size = RLENGTH; token = urlTrim(substr(value, at, size))
+        do { marker = sprintf("%c", 2) "U" ++number sprintf("%c", 3) } while (index(original, marker))
+        urlProtected[++urlProtectedCount] = token; urlMarkers[urlProtectedCount] = marker
+        output = output substr(value, 1, at - 1) marker
+        value = substr(value, at + length(token))
+      }
+      return output value
+    }
+    function urlRestore(value, idx, token, at) {
+      for (idx = urlProtectedCount; idx > 0; idx--) {
+        token = urlMarkers[idx]
+        while ((at = index(value, token))) value = substr(value, 1, at - 1) urlProtected[idx] substr(value, at + length(token))
+      }
+      return value
+    }
+    # 保存原 SGR 的有效序列；RGB 中的零值不能误认为整体复位。
+    function urlTrack(tokens, token, code, idx, total, reset, fields) {
+      while (match(tokens, esc "\\[[0-9;:]*m")) {
+        token = substr(tokens, RSTART, RLENGTH)
+        tokens = substr(tokens, RSTART + RLENGTH)
+        code = substr(token, 3, length(token) - 3); reset = (code == "")
+        total = split(code, fields, ";")
+        for (idx = 1; idx <= total; idx++) {
+          if (fields[idx] == "0") reset = 1
+          if ((fields[idx] == "38" || fields[idx] == "48" || fields[idx] == "58") && idx < total) {
+            if (fields[idx + 1] == "2") idx += 4
+            else if (fields[idx + 1] == "5") idx += 2
+          }
+        }
+        if (reset) urlActive = ""
+        urlActive = urlActive token
+      }
+    }
+    # 用可见字符位置映射原 SGR，URL 内已有样式也会重新覆为绿下划线。
+    function urlRender(value, output, visible, rest, key, at, size, token, idx, offset, url, inURL) {
+      value = urlClean(value, color)
+      if (!color) return value
+      for (key in urlStyles) delete urlStyles[key]
+      for (key in urlStarts) delete urlStarts[key]
+      for (key in urlEnds) delete urlEnds[key]
+      visible = ""; rest = value
+      while (match(rest, esc "\\[[0-9;:]*m")) {
+        at = RSTART; size = RLENGTH; token = substr(rest, at, size)
+        visible = visible substr(rest, 1, at - 1)
+        urlStyles[length(visible) + 1] = urlStyles[length(visible) + 1] token
+        rest = substr(rest, at + size)
+      }
+      visible = visible rest; rest = visible; offset = 0
+      while (match(rest, urlPattern)) {
+        at = RSTART; size = RLENGTH; url = urlTrim(substr(rest, at, size))
+        urlStarts[offset + at] = 1; urlEnds[offset + at + length(url) - 1] = 1
+        offset += at + length(url) - 1; rest = substr(visible, offset + 1)
+      }
+      output = ""; inURL = 0
+      for (idx = 1; idx <= length(visible) + 1; idx++) {
+        if (idx in urlStyles) {
+          token = urlStyles[idx]; output = output token; urlTrack(token)
+          if (inURL) output = output esc "[32;4m"
+        }
+        if (idx > length(visible)) break
+        if (idx in urlStarts) { output = output esc "[32;4m"; inURL = 1 }
+        output = output substr(visible, idx, 1)
+        if (idx in urlEnds) { output = output esc "[0m" urlActive; inURL = 0 }
+      }
+      return output
+    }
     function typedEnter(value, start, prefix) {
       prefix = substr(value, 1, start - 1)
       gsub(/[“”‘’「」『』"]/, "", prefix)
@@ -487,7 +1788,7 @@ jobs_prompt_format() {
       start += RSTART - 1
       return typedEnter(value, start) ? 0 : start
     }
-    function segment(value, inherited, start, kind, prefix, body, red, green, connector, left, right, splitAt) {
+    function segment(value, inherited, is_question, start, kind, prefix, body, red, green, connector, left, right, splitAt) {
       if (value == "") return value
       kind = inherited
       start = 1
@@ -504,11 +1805,11 @@ jobs_prompt_format() {
             connector = substr(left, RSTART)
             left = substr(left, 1, RSTART - 1)
           }
-          return segment(left, 0) connector segment(right, 31)
+          return segment(left, 0, is_question) connector segment(right, 31, 0)
         }
         if (red && green && red < green && match(value, /或[[:space:]]*(直接|仅|只需|只|按下|按)?(回车|回車)/)) {
           splitAt = RSTART
-          return segment(substr(value, 1, splitAt - 1), 31) "或" segment(substr(value, splitAt + length("或")), 0)
+          return segment(substr(value, 1, splitAt - 1), 31, is_question) "或" segment(substr(value, splitAt + length("或")), 0, 0)
         }
         if (red) {
           kind = 31
@@ -518,23 +1819,27 @@ jobs_prompt_format() {
           start = green
         }
       }
-      if (!kind || !color) return value
+      if (!color) return value
+      if (!kind) return is_question && value !~ /^[[:space:]]*$/ ? esc "[1;36m" value esc "[0m" : value
       prefix = substr(value, 1, start - 1)
       body = substr(value, start)
+      if (is_question && prefix !~ /^[[:space:]]*$/) prefix = esc "[1;36m" prefix esc "[0m"
       return prefix esc "[1;" kind "m" body esc "[0m"
     }
-    function render(value, output, part, boundary, inherited, kind, consumed, depth, original) {
+    function render(value, output, part, boundary, inherited, kind, consumed, depth, original, question_body) {
       original = value
-      gsub(esc "\\[[0-9;]*m", "", value)
-      if (color && keep && !greenPosition(value) && value !~ /(任意|任何|非空|其它输入|其他输入|[Tt]ype (anything|any[^ ]*)|[Pp]ress any key)/) return original
+      value = urlProtect(urlClean(value, 0))
+      if (color && keep && !greenPosition(value) && value !~ /(任意|任何|非空|其它输入|其他输入|[Tt]ype (anything|any[^ ]*)|[Pp]ress any key)/) return urlRender(original)
       output = ""
       inherited = 0
       depth = 0
+      question_body = question
       while (match(value, /[；;\/|，,、？?：:=＝（）()\[\]【】]/)) {
         part = substr(value, 1, RSTART - 1)
         boundary = substr(value, RSTART, RLENGTH)
         consumed = RSTART + RLENGTH
-        output = output segment(part, inherited) boundary
+        output = output segment(part, inherited, question_body) boundary
+        if (inherited || greenPosition(part) || part ~ /(任意|任何|非空|其它输入|其他输入|[Tt]ype (anything|any[^ ]*)|[Pp]ress any key)/) question_body = 0
         if (boundary ~ /[（(\[【]/) {
           depth++
           if (part ~ /(任意|任何|非空|其它输入|其他输入|[Tt]ype (anything|any[^ ]*)|[Pp]ress any key)/) inherited = 31
@@ -549,9 +1854,9 @@ jobs_prompt_format() {
         } else if (!depth) inherited = 0
         value = substr(value, consumed)
       }
-      return output segment(value, inherited)
+      return urlRender(urlRestore(output segment(value, inherited, question_body) (question && color ? esc "[0m" : "")))
     }
-    BEGIN { esc = sprintf("%c", 27); first = 1 }
+    BEGIN { esc = sprintf("%c", 27); first = 1; urlInit() }
     {
       if (lines == 2) {
         if (!first) printf "%s\n", render(pending)
@@ -576,7 +1881,7 @@ jobs_prompt_format() {
 jobs_prompt_render() {
   local jobs_prompt_color=0
   if [ -t 0 ] && [ -t 2 ] && jobs_prompt_color_ready; then jobs_prompt_color=1; fi
-  printf "%s" "$1" | jobs_prompt_format "$jobs_prompt_color" 0
+  printf "%s" "$1" | jobs_prompt_format "$jobs_prompt_color" 0 0 1
 }
 # 仅放在显示链末端；tee 在此函数之前接收纯文本，不把 ANSI 写入日志。
 jobs_prompt_stream() {
@@ -586,13 +1891,15 @@ jobs_prompt_stream() {
 }
 # 显示管道保留原末尾换行；只删除本轮追加的最后一个结束标记。
 jobs_prompt_filter() {
-  local jobs_prompt_color=0
+  local jobs_prompt_color=0 jobs_prompt_question=0
+  case "${1:-0}" in 1|--question) jobs_prompt_question=1 ;; esac
   if [ -t 1 ] && jobs_prompt_color_ready; then jobs_prompt_color=1; fi
-  { /bin/cat; printf '\001'; } | jobs_prompt_format "$jobs_prompt_color" 2 1
+  { /bin/cat; printf '\001'; } | jobs_prompt_format "$jobs_prompt_color" 2 "$((1 - jobs_prompt_question))" "$jobs_prompt_question"
 }
 # 仅包装原 printf/echo/print 展示，原参数、尾换行与显示命令退出码保持不变。
 jobs_prompt_output() {
-  local jobs_prompt_status=0 jobs_prompt_stderr=0 jobs_prompt_arg="" jobs_prompt_previous=""
+  local jobs_prompt_status=0 jobs_prompt_stderr=0 jobs_prompt_arg="" jobs_prompt_previous="" jobs_prompt_question=0
+  if [ "${1:-}" = --question ]; then jobs_prompt_question=1; shift; fi
   if [ "${1:-}" = print ]; then
     for jobs_prompt_arg in "$@"; do
       case "$jobs_prompt_arg" in -?*u2*|-u2) jobs_prompt_stderr=1 ;; esac
@@ -603,17 +1910,17 @@ jobs_prompt_output() {
   fi
   if [ -n "${ZSH_VERSION:-}" ]; then
     if [ "$jobs_prompt_stderr" = 1 ]; then
-      "$@" 2>&1 | jobs_prompt_filter >&2
+      "$@" 2>&1 | jobs_prompt_filter "$jobs_prompt_question" >&2
       jobs_prompt_status=$(( ${pipestatus[1]} != 0 ? ${pipestatus[1]} : ${pipestatus[2]} ))
     else
-      "$@" | jobs_prompt_filter
+      "$@" | jobs_prompt_filter "$jobs_prompt_question"
       jobs_prompt_status=$(( ${pipestatus[1]} != 0 ? ${pipestatus[1]} : ${pipestatus[2]} ))
     fi
   elif [ -n "${BASH_VERSION:-}" ]; then
-    "$@" | jobs_prompt_filter
+    "$@" | jobs_prompt_filter "$jobs_prompt_question"
     jobs_prompt_status=$(( ${PIPESTATUS[0]} != 0 ? ${PIPESTATUS[0]} : ${PIPESTATUS[1]} ))
   else
-    "$@" | jobs_prompt_filter
+    "$@" | jobs_prompt_filter "$jobs_prompt_question"
     jobs_prompt_status=$?
   fi
   return "$jobs_prompt_status"
@@ -817,7 +2124,6 @@ jfs_route_protect_private_namespace() {
         JFS_TRUST_NOTE+=' 对象未能证明属于公开标准命名空间，仅检查原SDK源与既有网络路线，不发送到新增镜像。'
     fi
 }
-
 # 无制品身份时只检测实际Git来源；没有可解析来源便保留原命令，不猜公共stable。
 jfs_route_unresolved_identity() {
     local origin="${JFS_SOURCE_URL:-}"
@@ -831,7 +2137,6 @@ jfs_route_unresolved_identity() {
     fi
     return 0
 }
-
 # 根据具体版本/架构或SDK engine确定对象，官方不可达时允许已获准可信来源继续验证。
 jfs_route_target() {
     local identity="" arm="" manifest="" details="" metadata_url="" base="" manifest_source=""
@@ -1297,7 +2602,6 @@ jobs_flutter_fvm_install() {
     JOBS_FLUTTER_ROUTE_MODE=dart \
         JOBS_FLUTTER_ROUTE_CAPTURE_OUTPUT=1 jobs_flutter_sdk_retry "${title}：Dart/引擎自举" "$log_file" "$sdk" "$version" "$sdk/bin/flutter" --version
 }
-
 # 升级使用同一选中网络环境检查原跟踪Git，再执行原命令；Git失败也使候选降权。
 jfs_flutter_upgrade_once() {
     local log_file="$1" sdk="$2" url="$3" ref="$4" code=0
@@ -1358,7 +2662,6 @@ jobs_flutter_upgrade() {
     JOBS_FLUTTER_ROUTE_MODE="$mode" jobs_flutter_sdk_retry "$title" "$log_file" "$sdk" "$target" \
         jfs_flutter_upgrade_once "$log_file" "$sdk" "$url" "$ref" "$@"
 }
-
 # 子进程CLI保留stdin，不需要eval环境，也不依赖固定仓库位置。
 jfs_route_main() {
     case "${1:-}" in
@@ -1395,6 +2698,7 @@ BUILD_REPORTED_ARTIFACTS=()
 
 # 通过明确的环境标志和父进程识别 Sourcetree，非 TTY 只影响输出能力。
 is_sourcetree_runtime() {
+  [[ "${JOBS_REQUIRED_TOOL_TERMINAL:-0}" == 1 ]] && return 1
   env | /usr/bin/grep -Eqi '^(SOURCETREE|SOURCE_TREE)' && return 0
   local parent_pid="$PPID" process_name="" depth=0
   while [[ -n "$parent_pid" && "$parent_pid" != 0 && "$depth" -lt 8 ]]; do
@@ -1461,10 +2765,15 @@ warn_echo() { color_log '1;33' "⚠ $1"; }
 # 输出失败原因。
 error_echo() { color_log '1;31' "✖ $1"; }
 # 自述标题红色加粗，正文蓝色常规字重。
-intro_line() {
+jobs_intro_line_base() {
   local style='0;34'
   [[ "$1" == title ]] && style='1;31'
   color_log "$style" "$2"
+}
+# 只处理已生成的人类展示文本，保留标题/正文原样式和管道失败状态。
+intro_line() {
+  setopt LOCAL_OPTIONS PIPE_FAIL
+  jobs_intro_line_base "$@" | jobs_url_stream
 }
 # 首先展示固定自述，确认之前不写日志或改动工程。
 show_script_intro_and_wait() {
@@ -1478,7 +2787,7 @@ show_script_intro_and_wait() {
   intro_line body '1、用途：构建已有 Flutter 鸿蒙工程，默认一次生成 release HAP 和 APP；CLI 兼容单包目标。'
   intro_line body '2、依赖：鸿蒙适配 Flutter → Dart / 鸿蒙 SDK → Node / ohpm / Hvigor / Java。'
   intro_line body '3、影响：联网解析依赖、执行工程构建与现有签名配置，写入缓存和构建目录。'
-  intro_line body '4、策略：不自动安装、升级工具链，不创建 ohos 平台，不修改证书或系统环境配置。'
+  intro_line body '4、策略：健康工具复用；只为已选工程准备明确fork SDK或固定SDL工具链，不猜普通Flutter、不创建ohos平台、不修改证书或系统环境配置。'
   jobs_prompt_output intro_line body '5、Sourcetree 传入仓库路径后连续执行；独立终端回车继续，Ctrl+C 取消。'
   intro_line body "日志：$LOG_FILE"
   intro_line title '===================================================='
@@ -1488,7 +2797,8 @@ show_script_intro_and_wait() {
     exit 1
   fi
   local answer=""
-  IFS= read -r "answer?$(jobs_prompt_render '👉 按回车继续；Ctrl+C 取消：')" || exit 1
+  IFS= read -r "answer?$(jobs_prompt_render '👉 按回车继续；非空输入取消；Ctrl+C 取消：')" || exit 1
+  [[ -z "$answer" ]] || exit 0
 }
 # 确认后配置当前进程和日志，保留调用者 PATH 优先级。
 initialize_script_runtime() {
@@ -1546,6 +2856,7 @@ normalize_input_path() {
 # 向上查找或在指定目录内查找唯一 Flutter 工程，跳过第三方和构建目录。
 resolve_flutter_project() {
   local base="$(normalize_input_path "${BUILD_BASE:-${PROJECT_DIR:-${REPO:-$PWD}}}")" current="" candidate=""
+  [[ "${JOBS_REQUIRED_TOOL_TERMINAL:-0}" != 1 || -z "${REPO:-}" || -n "$BUILD_BASE" ]] || base="$(normalize_input_path "$REPO")"
   local -a candidates=()
   [[ -f "$base" ]] && base="${base:h}"
   [[ -d "$base" ]] || { error_echo "工程路径不存在：$base"; return 1; }
@@ -1579,25 +2890,11 @@ resolve_flutter_project() {
 }
 # 显式指定 SDK 优先，其次项目固定 SDK，最后当前 PATH；不默默替换固定版本。
 choose_flutter_sdk() {
-  if [[ -n "$SDK_OVERRIDE" ]]; then
-    SDK_OVERRIDE="$(normalize_input_path "$SDK_OVERRIDE")"
-    [[ -x "$SDK_OVERRIDE/bin/flutter" ]] || { error_echo "指定 SDK 中没有可执行 bin/flutter：$SDK_OVERRIDE"; return 1; }
-    FLUTTER_CMD=("${SDK_OVERRIDE:A}/bin/flutter")
-  elif [[ -x "$PROJECT_ROOT/.fvm/flutter_sdk/bin/flutter" ]]; then
-    FLUTTER_CMD=("$PROJECT_ROOT/.fvm/flutter_sdk/bin/flutter")
-  elif [[ -f "$PROJECT_ROOT/.fvmrc" || -f "$PROJECT_ROOT/.fvm/fvm_config.json" ]]; then
-    error_echo '工程固定了 FVM，但 .fvm/flutter_sdk 尚不可用。请先恢复该 SDK，或显式指定 --flutter-sdk；入口不自动下载 SDK。'
-    return 1
-  elif command -v flutter >/dev/null 2>&1; then
-    FLUTTER_CMD=("${commands[flutter]:A}")
-  else
-    error_echo '没有 Flutter SDK。请用 --flutter-sdk 或 FLUTTER_OHOS_SDK 指定鸿蒙适配版 SDK 根目录。'
-    return 1
-  fi
-  info_echo "Flutter 命令：${(j: :)FLUTTER_CMD}"
+  jobs_st_required_ohos_flutter
 }
 # 仅配置本进程的 DevEco 路径，保留显式 SDK 和 Java 设置。
-prepare_deveco_environment() {
+# 保留现有DevEco、独立CLT和显式SDK的只读定位规则，不安装或切换来源。
+jobs_ohos_locate_deveco_environment() {
   local candidate="" requested="${DEVECO_STUDIO_HOME:-${TOOL_HOME:-}}"
   local -a candidates=()
   if [[ -z "${DEVECO_SDK_HOME:-}" && -n "${HOS_SDK_HOME:-}" ]]; then
@@ -1609,7 +2906,7 @@ prepare_deveco_environment() {
     [[ -d "$requested" ]] || { error_echo "DevEco 路径不存在：$requested"; return 1; }
     DEVECO_CONTENTS="$requested"
   elif [[ -z "${DEVECO_SDK_HOME:-}" ]]; then
-    for candidate in /Applications/DevEco*.app/Contents(N) "$HOME"/Applications/DevEco*.app/Contents(N); do
+    for candidate in /Applications/DevEco*.app/Contents(N) "$HOME"/Applications/DevEco*.app/Contents(N) "${JOBS_HARMONY_TOOLS_HOME:-$HOME/Library/Application Support/JobsHarmonySimulator}"/clt-*(N/); do
       [[ -d "$candidate/sdk" ]] && candidates+=("$candidate")
     done
     if (( ${#candidates[@]} == 1 )); then
@@ -1636,10 +2933,8 @@ prepare_deveco_environment() {
     export PATH="$NODE_HOME/bin:$PATH"
   fi
   rehash
-  [[ -n "${DEVECO_SDK_HOME:-}" && -d "$DEVECO_SDK_HOME" ]] || {
-    error_echo '没有有效 DEVECO_SDK_HOME。请先准备 DevEco Studio / HarmonyOS SDK；不将 OHOS_SDK_HOME 当作同义路径。'
-    return 1
-  }
+  if [[ -z "${DEVECO_SDK_HOME:-}" ]]; then return 3; fi
+  [[ -d "$DEVECO_SDK_HOME" ]] || { error_echo "显式或已选HarmonyOS SDK目录不存在：$DEVECO_SDK_HOME；未覆盖配置。"; return 1; }
   info_echo "HarmonyOS SDK：$DEVECO_SDK_HOME"
 }
 # 外部输出同步过滤和落盘，启用 PIPE_FAIL 后任何阶段失败均会停止。
@@ -1674,10 +2969,13 @@ check_build_toolchain() {
   jobs_flutter_sdk_retry 'Flutter / Dart首次补齐' "$LOG_FILE" "${FLUTTER_CMD[1]:A:h:h}" "" run_step 'Flutter 健康检查' "${FLUTTER_CMD[@]}" --version || return $?
   local target="" help_text=""
   for target in "${BUILD_TARGETS[@]}"; do
-    if ! help_text="$("${FLUTTER_CMD[@]}" build "$target" --help 2>&1)"; then
+    if help_text="$("${FLUTTER_CMD[@]}" build "$target" --help 2>&1)"; then
+      :
+    else
+      local capability_result=$?
       log "$help_text"
-      error_echo "此 SDK 不支持 flutter build $target，请切换匹配工程的鸿蒙适配版 SDK。"
-      return 1
+      error_echo "此SDK的flutter build $target能力探针失败（$capability_result），保留来源并停止。"
+      return "$capability_result"
     fi
     if ! print -r -- "$help_text" | /usr/bin/grep -Fq "flutter build $target"; then
       error_echo "未确认 flutter build $target 能力；当前 SDK 可能是普通 Android / iOS 版本。"
@@ -1716,6 +3014,8 @@ report_build_outputs() {
 }
 # 全部前置检查通过后，按顺序解析依赖和构建所选包型。
 run_build_flow() {
+  JOBS_ST_ORIGINAL_ARGS=("$@")
+  JOBS_ST_ORIGINAL_CWD="$PWD"
   BUILD_REPORTED_ARTIFACTS=()
   parse_build_options "$@" || return $?
   resolve_flutter_project || return $?

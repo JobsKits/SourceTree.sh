@@ -53,7 +53,7 @@ SourceTree 仓库动作目标是本目录内的同名可执行脚本，参数为
 
 不传目录时使用当前工作目录；目标内部目录会解析到所属工作树根目录。先显示内置自述并等待回车，任何非空输入取消。`--terminal-run` 供启动器传递，仍必须连接真实终端，不能用来绕过回车或 `YES`。双击脚本不会扫描其它仓库，目标不是 Git 工作树时停止。
 
-只依赖系统 `/bin/zsh`、Git、Perl 和系统命令；SourceTree 转交终端还需要 `osascript`。检查工具真实可用性，不自动安装或升级依赖。
+只依赖系统 `/bin/zsh`、Git、Perl 和系统命令；SourceTree 转交终端还需要 `osascript`。健康Git直接复用；原终端确认后若Git缺失，沿原生CLT安装窗口准备并复检，窗口只打开一次，许可／确定配置阻塞停止。取消130不重试安装，不改变任何同步、YES或宿主刷新协议。
 
 ## 二、<span id="flow">执行流程与来源</span> <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a>
 

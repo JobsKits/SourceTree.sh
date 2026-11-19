@@ -54,9 +54,9 @@
 
 ### <span id="jobs-toc-heading-5" data-jobs-toc="v2">2.2、环境和依赖 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-- 需要 macOS 自带的 `git`、`curl`、`lsof`、`nohup` 和 `open`；`git --version` 必须健康，损坏 shim 会提前停止。
-- 优先复用现有 [**Node.js**](https://nodejs.org) 与 [**pnpm**](https://pnpm.io/)；缺少 Node.js 时通过当前脚本内嵌的 [**Homebrew**](https://brew.sh/) 自检、必要安装和激活函数补齐，不依赖外置模块。终端中缺少管理器时，精确输入 `YES` 选择系统目录，其他输入选择用户目录；Sourcetree 非交互入口缺少管理器时停止并提示改用终端，不发起安装路径交互。
-- 缺少或损坏 pnpm 时，通过 `npm install --global` 安装项目 `package.json` 声明的 pnpm 版本，并重新验证可执行性。Node.js / npm 同样先健康检查，修复一次后仍失败则停止。
+- 需要 macOS 自带的 `git`、`curl`、`lsof`、`nohup` 和 `open`；Git会做实际健康检查；缺失时在已确认终端流程准备原生CLT并复检，取消或确定阻塞不继续服务。
+- 优先复用现有 [**Node.js**](https://nodejs.org) 与 [**pnpm**](https://pnpm.io/)；缺少 Node.js 时通过当前脚本内嵌的 [**Homebrew**](https://brew.sh/) 自检、必要安装和激活函数补齐，不依赖外置模块。终端中缺少管理器时，精确输入 `YES` 选择系统目录，其他输入选择用户目录；Sourcetree必要工具缺失时保留原路径和参数转交独立Terminal，原动作不继续安装项目依赖或启动服务；动作进程不读输入。
+- pnpm必须与 `package.json` 的精确packageManager版本相符；缺失／不符时经Corepack准备，原完整版本与integrity字符串作为参数保留。Corepack缺失时只安装到本工具的用户目录，不覆盖系统npm全局目录。缺失／latest／不明确声明停止，不猜版本或改工程文件。Node/npm健康优先复用，修复后复检，任一取消或失败不进入服务器生命周期。
 - 按 [官方快速开始](https://github.com/JOYCEQL/magic-resume#-quick-start) 安装依赖并启动 Vite；启动命令为 `pnpm dev --port 3000 --strictPort`，端口占用时失败，不自动漂移到其它端口。不自动执行 `git pull`、依赖升级、构建或部署。
 
 ### <span id="jobs-toc-heading-6" data-jobs-toc="v2">2.3、后台服务 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->

@@ -57,6 +57,8 @@
 
 ---
 
+[脚本规范与验证记录](./项目相关报告/脚本统一审查.md)。
+
 ## <span id="jobs-toc-heading-1" data-jobs-toc="v2">🔥 <font id=前言>前言</font></span><!-- jobs-toc:heading-end -->
 
 脚本库包含 36 个系统 `/bin/zsh` 入口，每个脚本包有同名 `.command` 和独立 `README.md`（位于 `MacOS/`；按各包独立主脚本计数，不含内部工具；依据当前磁盘目录，2026-11-05）。源码、静态说明和运行时内置自述分别维护；运行时不读取 README。
@@ -99,7 +101,7 @@ macOS 菜单按“打开 → Git 与地址 → 修复 → Flutter 维护 → Coc
 - 在独立终端确认当前仓库、remote 和远端分支；支持只读诊断及明确参数。
 - 工作区干净时精确获取推送端，快进或保留双方历史合并，再普通推送；并发更新有限重试。
 - 服务端 OID 与本地 HEAD 相等才成功；冲突、锁、鉴权、保护、LFS、配额等保留现场并分类给出处理方向。
-- [完整场景、参数与恢复说明](./MacOS/【MacOS@SourceTree】📥修复Git无法Push.command/README.md)；[Windows 对应入口](./WindowsOS/【WindowsOS@SourceTree】📥修复Git无法Push/README.md)。
+- [完整场景、参数与恢复说明](./MacOS/【MacOS@SourceTree】📥修复Git无法Push.command/README.md)；[Windows 对应入口](./WindowsOS/【WindowsOS@SourceTree】📥修复Git无法Push.ps1/README.md)。
 
 ## <span id="jobs-toc-heading-4" data-jobs-toc="v2">二、运行策略 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
@@ -450,6 +452,7 @@ macOS 侧共有 36 个用户入口（位于 `MacOS/`；按各包独立主脚本�
 
 - 定位仓库，按 8 个场景检查工作树绑定、索引锁、目录过滤器、`.gitmodules`、路径迁移与子模块等阻塞。
 - 状态读取与暂存前检查目录过滤器；核对自有记录后备份并修复失效 Node 路径，`--repair-filters` 仅修本仓过滤器并真实验证，保留正文和索引。
+- 原文件变同名目录，或缺失旧文件已暂存删除／迁移时自动采用精确模式，保留新文件和部分暂存；先 `add` 新子项后 `rm` 旧父路径时，明确对账并显示已暂存替换，提示刷新和取消旧选择；无安全删除候选就保留原索引，不补递归删除。`--repair-paths` 显式启用，`--stage-all` 使用原全量暂存流程。
 - 备份后修复允许处理的配置或阻塞项，刷新 / 暂存索引并复验。
   - 子模块缺失时可能联网初始化；已有子仓的真实修改保留，归属或安全前提不明时停止。
 - 输出修复和复验结果，不替用户创建提交或推送。

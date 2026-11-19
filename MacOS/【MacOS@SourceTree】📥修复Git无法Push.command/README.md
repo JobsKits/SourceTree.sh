@@ -2,7 +2,19 @@
 
 ![Jobs出品，必属精品](https://picsum.photos/1500/400)
 
-[toc]
+<!-- jobs-toc:start -->
+<!-- jobs-toc:source {"v":2,"token":"[toc]"} -->
+<details>
+<summary>📚 目录（点击展开 / 收起）</summary>
+
+- [🔥 前言](#%E5%89%8D%E8%A8%80)
+- [一、运行与确认](#jobs-toc-heading-2)
+- [二、场景与解锁判据](#jobs-toc-heading-3)
+- [三、日志、恢复与边界](#jobs-toc-heading-4)
+- [四、验证入口](#jobs-toc-heading-5)
+
+</details>
+<!-- jobs-toc:end -->
 
 ---
 
@@ -12,7 +24,7 @@
 
 “通用”表示统一识别、安全恢复和明确分流，不承诺绕过服务器权限或自动决定冲突内容。[**Git**](https://git-scm.com/docs/git-push) 的普通推送保护双方历史；[官方非快进处理](https://docs.github.com/en/get-started/using-git/dealing-with-non-fast-forward-errors)需要先获取并整合远端提交。
 
-## 一、运行与确认
+## <span id="jobs-toc-heading-2" data-jobs-toc="v2">一、运行与确认</span><!-- jobs-toc:heading-end -->
 
 从本包目录运行：
 
@@ -32,12 +44,12 @@
 | `--help` | 显示用法 |
 
 - Sourcetree 动作传入 `$REPO` 并打开独立 Terminal；动作输出窗口不等待输入。
-- 终端先显示内置自述，回车进入检查，再在计划菜单中选择“执行安全整合并推送”；默认取消，方向键／Tab 移动、回车选择，Ctrl+C 中断。缺少交互终端时必须显式指定 `--yes` 或 `--diagnose`。
-- 菜单依赖可用的 [**fzf**](https://github.com/junegunn/fzf)。已明确传目标并使用 `--yes` 或 `--diagnose` 时不依赖 fzf；缺失不会自动安装工具。
+- 终端先显示内置自述，回车进入检查，再在计划菜单中选择“执行安全整合并推送”；默认取消，方向键／Tab 移动、回车选择，Ctrl+C 中断。子层 `←` 返回真实上一层；查询保留在本轮内存，候选改变后清空。缺少交互终端时必须显式指定 `--yes` 或 `--diagnose`。
+- 菜单依赖可用的 [**fzf**](https://github.com/junegunn/fzf)。已明确传目标并使用 `--yes` 或 `--diagnose` 时不依赖 fzf；只读诊断不安装工具；实际交互选择缺失或损坏时在已确认流程内准备并复检，不回退编号。
 - 只处理选定仓库、已有本地分支与一条线路；不会扩到父仓、子仓、其它 remote 或标签。多 URL、mirror、无法明确的 refspec 停止；明确指定分支可避开隐式映射歧义。
 - `pushurl` 与 fetch URL 不同时，以真正的 push URL 查询和获取，不把 fetch 端的另一条历史误合入；URL 重写必须稳定，不能对已展开地址二次改写。
 
-## 二、场景与解锁判据
+## <span id="jobs-toc-heading-3" data-jobs-toc="v2">二、场景与解锁判据</span><!-- jobs-toc:heading-end -->
 
 | 场景 | 原因／故障现象 | 独立处理与解锁判据 |
 | --- | --- | --- |
@@ -66,7 +78,7 @@
 | P25 结果核验 | push 返回 0 或传输断线后结果不明 | 仅服务端目标 OID 与冻结的本地 HEAD 完全相同才成功；本地并发变化也报未达到一致 |
 | P99 未知 | 未识别的平台／Git 错误 | 脱敏保留原始诊断与失败码，明确未完成，供后续按证据扩展 |
 
-## 三、日志、恢复与边界
+## <span id="jobs-toc-heading-4" data-jobs-toc="v2">三、日志、恢复与边界</span><!-- jobs-toc:heading-end -->
 
 - 每轮使用临时目录 `jobs-push-repair.XXXXXX/run.log`，文件权限由 `umask 077` 限制。终端与日志统一脱敏 URL 认证信息、查询参数与常见敏感字段，不转储环境或完整 Git 配置。
 - 写操作前在实际工作树 gitdir 取得 `jobs-push-repair.lock`，正常退出和可捕获中断释放本进程锁。强制结束可能留锁，核对目录内 PID 与进程归属后人工处理；不自动移除未知锁。
@@ -74,7 +86,7 @@
 - 冲突保留 `MERGE_HEAD` 与索引；正常审查并完成提交后再运行。中断后先检查 `git status`，新运行不会跳过未完成操作。
 - 不更改鉴权、主机信任、Git 全局配置、代理、hook 或平台规则；不会自动迁移大文件历史、生成快照、创建 PR。服务端限制与冲突语义需要相应权限或人工决定。
 
-## 四、验证入口
+## <span id="jobs-toc-heading-5" data-jobs-toc="v2">四、验证入口</span><!-- jobs-toc:heading-end -->
 
 从仓库根运行：
 

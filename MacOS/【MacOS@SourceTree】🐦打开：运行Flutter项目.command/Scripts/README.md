@@ -28,7 +28,7 @@
 从本目录独立运行：
 
 ```shell
-/bin/zsh ./RunFlutterProject.zsh --project "<Flutter 工程目录>"
+/bin/zsh 【MacOS】RunFlutterProject.zsh/【MacOS】RunFlutterProject.zsh --project "<Flutter 工程目录>"
 ```
 
 ## <span id="jobs-toc-heading-2" data-jobs-toc="v2">二、操作与边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->

@@ -22,11 +22,11 @@
 
 ## <span id="jobs-toc-heading-1" data-jobs-toc="v2">🔥 <font id=前言>前言</font></span><!-- jobs-toc:heading-end -->
 
-在明确项目目录执行 [**CocoaPods**](https://cocoapods.org/) `pod install`，兼容 [**Sourcetree**](https://www.sourcetreeapp.com/) 精简环境。默认单目录、纯净模式、`--no-repo-update`，不安装或升级全局工具链。
+在明确项目目录执行 [**CocoaPods**](https://cocoapods.org/) `pod install`，兼容 [**Sourcetree**](https://www.sourcetreeapp.com/) 精简环境。默认单目录、纯净模式、`--no-repo-update`。健康 `pod` 及其 Ruby / Gem 来源直接复用；只有实际项目安装需要而工具缺失或损坏时，才沿本流程准备必要的用户工具。
 
 ## <span id="jobs-toc-heading-2" data-jobs-toc="v2">一、执行前检查 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-需要健康 `pod --version`，其 [**Ruby**](https://www.ruby-lang.org/) / gem / shim 必须可用；仅找到命令名不足以继续。目标必须有 `Podfile`；不要求预先存在 `.xcodeproj`，允许由 Podfile 描述项目或生成流程。使用 UTF-8，保留已有 `RUBYOPT` 并追加编码设置。
+需要健康 `pod --version`，其 [**Ruby**](https://www.ruby-lang.org/) / gem / shim 必须可用；仅找到命令名不足以继续。目标必须有 `Podfile`；不要求预先存在 `.xcodeproj`，允许由 Podfile 描述项目或生成流程。使用 UTF-8，保留已有 `RUBYOPT` 并追加编码设置。先验证完整 Podfile 范围；空范围、未选或枚举失败不会获取工具。必要修复使用健康用户 Ruby 和用户 Gem；所需 Homebrew 缺失才选择官方安装路径，下载临时故障在当前流程持续重试，取消或权限、许可、版本等确定阻塞停止。准备后复检同一运行时，不以命令名存在代替健康检查。
 
 ## <span id="jobs-toc-heading-3" data-jobs-toc="v2">二、运行方式 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
@@ -36,7 +36,7 @@
 /bin/zsh './【MacOS@SourceTree】🫘在Sourcetree中运行Pod Install.command' --recursive --deployment --repo-update '/项目父目录'
 ```
 
-终端显示固定内置自述并等待回车；`Ctrl+C` 取消。Sourcetree 仓库动作传 `$REPO`，无交互连续执行。非 Sourcetree 且没有可交互输入时退出。
+终端显示固定内置自述，只接受回车继续；非空输入取消，EOF 以失败状态退出，`Ctrl+C` 取消。Sourcetree 仓库动作传 `$REPO`，健康环境按原协议连续执行。只有必要工具缺失时才交给真实 Terminal，按原文保留目标、工作目录、参数及明确设置的 Ruby / Gem 配置；原动作停止，结果在 Terminal 查看，不重复启动窗口。非 Sourcetree 且没有可交互输入时退出。
 
 ## <span id="jobs-toc-heading-4" data-jobs-toc="v2">三、参数和默认值 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
@@ -62,7 +62,9 @@
 
 ## <span id="jobs-toc-heading-7" data-jobs-toc="v2">六、验证边界 <a href="#前言" style="font-size:17px; color:green;"><b>🔼</b></a> <a href="#🔚" style="font-size:17px; color:green;"><b>🔽</b></a></span><!-- jobs-toc:heading-end -->
 
-已通过 `zsh -n`；假 pod 验证参数顺序、中文空格和 CRLF 拖入路径、健康检查失败、安装失败、纯文本输出、递归排除与失败汇总，并用假 `find` 验证部分枚举失败提前停止和临时列表清理。未对真实项目执行 `pod install`。
+已通过 `zsh -n`；假 pod 验证参数顺序、中文空格和 CRLF 拖入路径、健康检查失败、安装失败、纯文本输出、递归排除与失败汇总，并用假 `find` 验证部分枚举失败提前停止和临时列表清理。新增必要链验证覆盖真实 Brew 包装器的健康复用、取消及安装失败停止，私有 Ruby / Gem 替身链、21 个隔离依赖/范围用例，以及三个入口共 13 个真实 PTY 的首屏拒绝和原生界面等待状态；138 个既有函数体与闭包断言通过。未执行真实 Homebrew、Ruby / Gem 安装、原生界面或项目 `pod install`。
+
+健康探针的子进程取消码 129／130／143 已单独验证：立即原码返回，不降级为缺工具，不获取依赖、不选择其它版本、不交接或打开原生界面。三入口共 18 个实际私有子命令取消／健康复用场景通过。
 
 **终端配色保护：** 独立运行时，在支持完整保存与恢复配色的交互终端中临时使用黑底白字及统一强调色；正常结束、失败或可捕获中断后恢复进入前的配色，不修改终端全局偏好或 Shell 启动配置。不支持完整保护、无交互终端、`NO_COLOR`、既有纯文本模式和 Sourcetree 场景不切换配色，并沿用纯文本输出约定。强制终止（如 `kill -9`）无法由脚本自身保证恢复，请使用运行时显示的独立恢复入口。
 
